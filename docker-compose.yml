@@ -1,0 +1,26 @@
+services:
+  db:
+    platform: linux/amd64
+    image: postgis/postgis:16-3.4
+    container_name: trotter-db
+    environment:
+      POSTGRES_DB: trotter
+      POSTGRES_USER: trotter
+      POSTGRES_PASSWORD: trotter
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trotter -d trotter"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgdata:
+    driver: local
+
+
