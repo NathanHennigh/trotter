@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Trotter V2",
+    "slug": "trotter-v2",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "trotterv2",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-font"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.trotter.mobilev2"
+    },
+    "android": {
+      "package": "com.trotter.mobilev2",
+      "adaptiveIcon": {
+        "backgroundColor": "#090B0D"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "local-v2-placeholder"
+      }
+    }
+  }
+}

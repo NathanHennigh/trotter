@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments / secrets
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Databases / caches
+*.db
+*.sqlite
+*.sqlite3
+.cache/
+
+# Node / Expo
+node_modules/
+.expo/
+.expo-shared/
+dist/
+build/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Claude
+.claude/

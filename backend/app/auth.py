@@ -13,9 +13,9 @@ from jwt.exceptions import InvalidTokenError
 
 def get_jwt_secret() -> str:
     """Get JWT secret from environment variable."""
-    secret = os.getenv("SECRET_KEY")
+    secret = os.getenv("JWT_SECRET")
     if not secret:
-        raise ValueError("SECRET_KEY environment variable is required")
+        raise ValueError("JWT_SECRET environment variable is required")
     return secret
 
 

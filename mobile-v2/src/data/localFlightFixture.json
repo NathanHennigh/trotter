@@ -1,0 +1,2278 @@
+{
+  "source": "C:\\Users\\natha\\projects\\trotter\\backend\\trotter.db",
+  "generatedAt": "2026-04-30T21:27:00Z",
+  "routeCount": 67,
+  "airportCount": 36,
+  "skipped": [],
+  "airports": [
+    {
+      "code": "ADD",
+      "city": "Addis Ababa",
+      "name": "Addis Ababa Bole International Airport",
+      "countryCode": "ET",
+      "countryName": "Ethiopia",
+      "lat": 8.97789,
+      "lon": 38.799301
+    },
+    {
+      "code": "ATL",
+      "city": "Atlanta",
+      "name": "Hartsfield Jackson Atlanta International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 33.6367,
+      "lon": -84.428101
+    },
+    {
+      "code": "BNA",
+      "city": "Nashville",
+      "name": "Nashville International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 36.1245,
+      "lon": -86.6782
+    },
+    {
+      "code": "BWI",
+      "city": "Baltimore",
+      "name": "Baltimore/Washington International Thurgood Marshall Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 39.1754,
+      "lon": -76.668297
+    },
+    {
+      "code": "CLT",
+      "city": "Charlotte",
+      "name": "Charlotte Douglas International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 35.2140007019043,
+      "lon": -80.94309997558594
+    },
+    {
+      "code": "DCA",
+      "city": "Washington",
+      "name": "Ronald Reagan Washington National Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 38.8521,
+      "lon": -77.037697
+    },
+    {
+      "code": "DEN",
+      "city": "Denver",
+      "name": "Denver International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 39.860027,
+      "lon": -104.673792
+    },
+    {
+      "code": "DFW",
+      "city": "Dallas-Fort Worth",
+      "name": "Dallas Fort Worth International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 32.896801,
+      "lon": -97.038002
+    },
+    {
+      "code": "EWR",
+      "city": "Newark",
+      "name": "Newark Liberty International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 40.6894,
+      "lon": -74.170545
+    },
+    {
+      "code": "FLL",
+      "city": "Fort Lauderdale",
+      "name": "Fort Lauderdale Hollywood International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 26.072599,
+      "lon": -80.152702
+    },
+    {
+      "code": "FRA",
+      "city": "Frankfurt am Main",
+      "name": "Frankfurt Main Airport",
+      "countryCode": "DE",
+      "countryName": "Germany",
+      "lat": 50.026706,
+      "lon": 8.55835
+    },
+    {
+      "code": "HGA",
+      "city": "Hargeisa",
+      "name": "Egal International Airport",
+      "countryCode": "SO",
+      "countryName": "Somalia",
+      "lat": 9.514082,
+      "lon": 44.083469
+    },
+    {
+      "code": "HOU",
+      "city": "Houston",
+      "name": "William P. Hobby Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 29.645336,
+      "lon": -95.276812
+    },
+    {
+      "code": "IAD",
+      "city": "Dulles",
+      "name": "Washington Dulles International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 38.9445,
+      "lon": -77.455803
+    },
+    {
+      "code": "IAH",
+      "city": "Houston",
+      "name": "George Bush Intercontinental Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 29.9844,
+      "lon": -95.3414
+    },
+    {
+      "code": "JFK",
+      "city": "New York",
+      "name": "John F. Kennedy International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 40.639447,
+      "lon": -73.779317
+    },
+    {
+      "code": "KLO",
+      "city": "Kalibo",
+      "name": "Kalibo International Airport",
+      "countryCode": "PH",
+      "countryName": "Philippines",
+      "lat": 11.6794,
+      "lon": 122.375999
+    },
+    {
+      "code": "LAX",
+      "city": "Los Angeles",
+      "name": "Los Angeles International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 33.942501,
+      "lon": -118.407997
+    },
+    {
+      "code": "MAD",
+      "city": "Madrid",
+      "name": "Adolfo Su\u00e1rez Madrid\u2013Barajas Airport",
+      "countryCode": "ES",
+      "countryName": "Spain",
+      "lat": 40.493407,
+      "lon": -3.572249
+    },
+    {
+      "code": "MCO",
+      "city": "Orlando",
+      "name": "Orlando International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 28.429399490356445,
+      "lon": -81.30899810791016
+    },
+    {
+      "code": "MEX",
+      "city": "Mexico City",
+      "name": "Mexico City Benito Ju\u00e1rez International Airport",
+      "countryCode": "MX",
+      "countryName": "Mexico",
+      "lat": 19.435822,
+      "lon": -99.07033
+    },
+    {
+      "code": "MGA",
+      "city": "Managua",
+      "name": "Augusto C. Sandino (Managua) International Airport",
+      "countryCode": "NI",
+      "countryName": "Nicaragua",
+      "lat": 12.1415,
+      "lon": -86.168198
+    },
+    {
+      "code": "MIA",
+      "city": "Miami",
+      "name": "Miami International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 25.796011,
+      "lon": -80.289751
+    },
+    {
+      "code": "MNL",
+      "city": "Manila (Pasay)",
+      "name": "Ninoy Aquino International Airport",
+      "countryCode": "PH",
+      "countryName": "Philippines",
+      "lat": 14.5086,
+      "lon": 121.019997
+    },
+    {
+      "code": "MPH",
+      "city": "Caticlan",
+      "name": "Godofredo P. Ramos Airport",
+      "countryCode": "PH",
+      "countryName": "Philippines",
+      "lat": 11.9245,
+      "lon": 121.954002
+    },
+    {
+      "code": "NBO",
+      "city": "Nairobi",
+      "name": "Jomo Kenyatta International Airport",
+      "countryCode": "KE",
+      "countryName": "Kenya",
+      "lat": -1.318886,
+      "lon": 36.928233
+    },
+    {
+      "code": "NRT",
+      "city": "Narita",
+      "name": "Narita International Airport",
+      "countryCode": "JP",
+      "countryName": "Japan",
+      "lat": 35.76858,
+      "lon": 140.388714
+    },
+    {
+      "code": "ORD",
+      "city": "Chicago",
+      "name": "Chicago O'Hare International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 41.9786,
+      "lon": -87.9048
+    },
+    {
+      "code": "PHX",
+      "city": "Phoenix",
+      "name": "Phoenix Sky Harbor International Airport",
+      "countryCode": "US",
+      "countryName": "United States",
+      "lat": 33.435302,
+      "lon": -112.005905
+    },
+    {
+      "code": "PMI",
+      "city": "Palma de Mallorca",
+      "name": "Palma de Mallorca Airport",
+      "countryCode": "ES",
+      "countryName": "Spain",
+      "lat": 39.551701,
+      "lon": 2.73881
+    },
+    {
+      "code": "PUJ",
+      "city": "Punta Cana",
+      "name": "Punta Cana International Airport",
+      "countryCode": "DO",
+      "countryName": "Dominican Republic",
+      "lat": 18.567093,
+      "lon": -68.364558
+    },
+    {
+      "code": "RAK",
+      "city": "Marrakesh",
+      "name": "Marrakesh Menara Airport",
+      "countryCode": "MA",
+      "countryName": "Morocco",
+      "lat": 31.604807,
+      "lon": -8.035788
+    },
+    {
+      "code": "SIN",
+      "city": "Singapore",
+      "name": "Singapore Changi Airport",
+      "countryCode": "SG",
+      "countryName": "Singapore",
+      "lat": 1.35019,
+      "lon": 103.994003
+    },
+    {
+      "code": "TNG",
+      "city": "Tangier",
+      "name": "Tangier Ibn Battuta Airport",
+      "countryCode": "MA",
+      "countryName": "Morocco",
+      "lat": 35.731741,
+      "lon": -5.921459
+    },
+    {
+      "code": "TPE",
+      "city": "Taoyuan",
+      "name": "Taiwan Taoyuan International Airport",
+      "countryCode": "TW",
+      "countryName": "Taiwan",
+      "lat": 25.0777,
+      "lon": 121.233002
+    },
+    {
+      "code": "TQO",
+      "city": "Tulum",
+      "name": "Felipe Carrillo Puerto International Airport Tulum",
+      "countryCode": "MX",
+      "countryName": "Mexico",
+      "lat": 20.172098,
+      "lon": -87.660272
+    }
+  ],
+  "routes": [
+    {
+      "id": "segment-32",
+      "segmentId": 32,
+      "tripId": 19,
+      "tripTitle": "Chicago",
+      "from": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "to": {
+        "code": "ORD",
+        "city": "Chicago",
+        "name": "Chicago O'Hare International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 41.9786,
+        "lon": -87.9048
+      },
+      "depTime": "2020-12-11 14:20:00.000000",
+      "arrTime": "2020-12-11 16:45:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA3462",
+      "distanceKm": 1290.267876114984
+    },
+    {
+      "id": "segment-33",
+      "segmentId": 33,
+      "tripId": 19,
+      "tripTitle": "Chicago",
+      "from": {
+        "code": "ORD",
+        "city": "Chicago",
+        "name": "Chicago O'Hare International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 41.9786,
+        "lon": -87.9048
+      },
+      "to": {
+        "code": "FRA",
+        "city": "Frankfurt am Main",
+        "name": "Frankfurt Main Airport",
+        "countryCode": "DE",
+        "countryName": "Germany",
+        "lat": 50.026706,
+        "lon": 8.55835
+      },
+      "depTime": "2020-12-11 18:35:00.000000",
+      "arrTime": "2020-12-12 09:45:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA907",
+      "distanceKm": 6970.191441648974
+    },
+    {
+      "id": "segment-34",
+      "segmentId": 34,
+      "tripId": 19,
+      "tripTitle": "Chicago",
+      "from": {
+        "code": "FRA",
+        "city": "Frankfurt am Main",
+        "name": "Frankfurt Main Airport",
+        "countryCode": "DE",
+        "countryName": "Germany",
+        "lat": 50.026706,
+        "lon": 8.55835
+      },
+      "to": {
+        "code": "NBO",
+        "city": "Nairobi",
+        "name": "Jomo Kenyatta International Airport",
+        "countryCode": "KE",
+        "countryName": "Kenya",
+        "lat": -1.318886,
+        "lon": 36.928233
+      },
+      "depTime": "2020-12-12 11:15:00.000000",
+      "arrTime": "2020-12-12 21:15:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA8729",
+      "distanceKm": 6317.075830860941
+    },
+    {
+      "id": "segment-35",
+      "segmentId": 35,
+      "tripId": 42,
+      "tripTitle": "Germany",
+      "from": {
+        "code": "NBO",
+        "city": "Nairobi",
+        "name": "Jomo Kenyatta International Airport",
+        "countryCode": "KE",
+        "countryName": "Kenya",
+        "lat": -1.318886,
+        "lon": 36.928233
+      },
+      "to": {
+        "code": "FRA",
+        "city": "Frankfurt am Main",
+        "name": "Frankfurt Main Airport",
+        "countryCode": "DE",
+        "countryName": "Germany",
+        "lat": 50.026706,
+        "lon": 8.55835
+      },
+      "depTime": "2021-01-09 23:00:00.000000",
+      "arrTime": "2021-01-10 05:30:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA8730",
+      "distanceKm": 6317.075830860941
+    },
+    {
+      "id": "segment-36",
+      "segmentId": 36,
+      "tripId": 42,
+      "tripTitle": "Germany",
+      "from": {
+        "code": "FRA",
+        "city": "Frankfurt am Main",
+        "name": "Frankfurt Main Airport",
+        "countryCode": "DE",
+        "countryName": "Germany",
+        "lat": 50.026706,
+        "lon": 8.55835
+      },
+      "to": {
+        "code": "EWR",
+        "city": "Newark",
+        "name": "Newark Liberty International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 40.6894,
+        "lon": -74.170545
+      },
+      "depTime": "2021-01-10 10:20:00.000000",
+      "arrTime": "2021-01-10 13:05:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA961",
+      "distanceKm": 6209.573381721734
+    },
+    {
+      "id": "segment-37",
+      "segmentId": 37,
+      "tripId": 42,
+      "tripTitle": "Germany",
+      "from": {
+        "code": "EWR",
+        "city": "Newark",
+        "name": "Newark Liberty International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 40.6894,
+        "lon": -74.170545
+      },
+      "to": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "depTime": "2021-01-10 15:29:00.000000",
+      "arrTime": "2021-01-10 18:43:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA3412",
+      "distanceKm": 2204.741906977673
+    },
+    {
+      "id": "segment-26",
+      "segmentId": 26,
+      "tripId": 17,
+      "tripTitle": "Morocco and Spain",
+      "from": {
+        "code": "LAX",
+        "city": "Los Angeles",
+        "name": "Los Angeles International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 33.942501,
+        "lon": -118.407997
+      },
+      "to": {
+        "code": "MIA",
+        "city": "Miami",
+        "name": "Miami International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 25.796011,
+        "lon": -80.289751
+      },
+      "depTime": "2022-05-29 06:00:00.000000",
+      "arrTime": "2022-05-29 13:59:00.000000",
+      "airline": "IB",
+      "flightNumber": "IB4358",
+      "distanceKm": 3762.5831240294187
+    },
+    {
+      "id": "segment-98",
+      "segmentId": 98,
+      "tripId": 17,
+      "tripTitle": "Morocco and Spain",
+      "from": {
+        "code": "LAX",
+        "city": "Los Angeles",
+        "name": "Los Angeles International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 33.942501,
+        "lon": -118.407997
+      },
+      "to": {
+        "code": "MIA",
+        "city": "Miami",
+        "name": "Miami International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 25.796011,
+        "lon": -80.289751
+      },
+      "depTime": "2022-05-29 06:00:00.000000",
+      "arrTime": "2022-05-29 06:00:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA529",
+      "distanceKm": 3762.5831240294187
+    },
+    {
+      "id": "segment-27",
+      "segmentId": 27,
+      "tripId": 17,
+      "tripTitle": "Morocco and Spain",
+      "from": {
+        "code": "MIA",
+        "city": "Miami",
+        "name": "Miami International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 25.796011,
+        "lon": -80.289751
+      },
+      "to": {
+        "code": "MAD",
+        "city": "Madrid",
+        "name": "Adolfo Su\u00e1rez Madrid\u2013Barajas Airport",
+        "countryCode": "ES",
+        "countryName": "Spain",
+        "lat": 40.493407,
+        "lon": -3.572249
+      },
+      "depTime": "2022-05-29 17:55:00.000000",
+      "arrTime": "2022-05-30 08:25:00.000000",
+      "airline": "IB",
+      "flightNumber": "IB4610",
+      "distanceKm": 7106.207826819089
+    },
+    {
+      "id": "segment-28",
+      "segmentId": 28,
+      "tripId": 17,
+      "tripTitle": "Morocco and Spain",
+      "from": {
+        "code": "MAD",
+        "city": "Madrid",
+        "name": "Adolfo Su\u00e1rez Madrid\u2013Barajas Airport",
+        "countryCode": "ES",
+        "countryName": "Spain",
+        "lat": 40.493407,
+        "lon": -3.572249
+      },
+      "to": {
+        "code": "RAK",
+        "city": "Marrakesh",
+        "name": "Marrakesh Menara Airport",
+        "countryCode": "MA",
+        "countryName": "Morocco",
+        "lat": 31.604807,
+        "lon": -8.035788
+      },
+      "depTime": "2022-05-30 11:00:00.000000",
+      "arrTime": "2022-05-30 12:00:00.000000",
+      "airline": "IB",
+      "flightNumber": "IB3340",
+      "distanceKm": 1066.3214758514846
+    },
+    {
+      "id": "segment-30",
+      "segmentId": 30,
+      "tripId": 17,
+      "tripTitle": "Morocco and Spain",
+      "from": {
+        "code": "TNG",
+        "city": "Tangier",
+        "name": "Tangier Ibn Battuta Airport",
+        "countryCode": "MA",
+        "countryName": "Morocco",
+        "lat": 35.731741,
+        "lon": -5.921459
+      },
+      "to": {
+        "code": "MAD",
+        "city": "Madrid",
+        "name": "Adolfo Su\u00e1rez Madrid\u2013Barajas Airport",
+        "countryCode": "ES",
+        "countryName": "Spain",
+        "lat": 40.493407,
+        "lon": -3.572249
+      },
+      "depTime": "2022-06-07 12:25:00.000000",
+      "arrTime": "2022-06-07 14:50:00.000000",
+      "airline": "IB",
+      "flightNumber": "IB8797",
+      "distanceKm": 568.454639814032
+    },
+    {
+      "id": "segment-31",
+      "segmentId": 31,
+      "tripId": 17,
+      "tripTitle": "Morocco and Spain",
+      "from": {
+        "code": "MAD",
+        "city": "Madrid",
+        "name": "Adolfo Su\u00e1rez Madrid\u2013Barajas Airport",
+        "countryCode": "ES",
+        "countryName": "Spain",
+        "lat": 40.493407,
+        "lon": -3.572249
+      },
+      "to": {
+        "code": "PMI",
+        "city": "Palma de Mallorca",
+        "name": "Palma de Mallorca Airport",
+        "countryCode": "ES",
+        "countryName": "Spain",
+        "lat": 39.551701,
+        "lon": 2.73881
+      },
+      "depTime": "2022-06-07 15:45:00.000000",
+      "arrTime": "2022-06-07 17:10:00.000000",
+      "airline": "IB",
+      "flightNumber": "IB3912",
+      "distanceKm": 546.9227569549482
+    },
+    {
+      "id": "segment-29",
+      "segmentId": 29,
+      "tripId": 17,
+      "tripTitle": "Morocco and Spain",
+      "from": {
+        "code": "MAD",
+        "city": "Madrid",
+        "name": "Adolfo Su\u00e1rez Madrid\u2013Barajas Airport",
+        "countryCode": "ES",
+        "countryName": "Spain",
+        "lat": 40.493407,
+        "lon": -3.572249
+      },
+      "to": {
+        "code": "JFK",
+        "city": "New York",
+        "name": "John F. Kennedy International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 40.639447,
+        "lon": -73.779317
+      },
+      "depTime": "2022-06-11 12:40:00.000000",
+      "arrTime": "2022-06-11 14:55:00.000000",
+      "airline": "IB",
+      "flightNumber": "IB6251",
+      "distanceKm": 5760.8342665281825
+    },
+    {
+      "id": "segment-17",
+      "segmentId": 17,
+      "tripId": 13,
+      "tripTitle": "Ethiopia and Somalia",
+      "from": {
+        "code": "EWR",
+        "city": "Newark",
+        "name": "Newark Liberty International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 40.6894,
+        "lon": -74.170545
+      },
+      "to": {
+        "code": "ADD",
+        "city": "Addis Ababa",
+        "name": "Addis Ababa Bole International Airport",
+        "countryCode": "ET",
+        "countryName": "Ethiopia",
+        "lat": 8.97789,
+        "lon": 38.799301
+      },
+      "depTime": "2022-12-16 21:15:00.000000",
+      "arrTime": "2022-12-16 21:15:00.000000",
+      "airline": "ET",
+      "flightNumber": "ET509",
+      "distanceKm": 11228.673881467228
+    },
+    {
+      "id": "segment-18",
+      "segmentId": 18,
+      "tripId": 13,
+      "tripTitle": "Ethiopia and Somalia",
+      "from": {
+        "code": "ADD",
+        "city": "Addis Ababa",
+        "name": "Addis Ababa Bole International Airport",
+        "countryCode": "ET",
+        "countryName": "Ethiopia",
+        "lat": 8.97789,
+        "lon": 38.799301
+      },
+      "to": {
+        "code": "HGA",
+        "city": "Hargeisa",
+        "name": "Egal International Airport",
+        "countryCode": "SO",
+        "countryName": "Somalia",
+        "lat": 9.514082,
+        "lon": 44.083469
+      },
+      "depTime": "2022-12-18 09:20:00.000000",
+      "arrTime": "2022-12-18 09:20:00.000000",
+      "airline": "ET",
+      "flightNumber": "ET372",
+      "distanceKm": 583.6132028511628
+    },
+    {
+      "id": "segment-15",
+      "segmentId": 15,
+      "tripId": 13,
+      "tripTitle": "Ethiopia and Somalia",
+      "from": {
+        "code": "HGA",
+        "city": "Hargeisa",
+        "name": "Egal International Airport",
+        "countryCode": "SO",
+        "countryName": "Somalia",
+        "lat": 9.514082,
+        "lon": 44.083469
+      },
+      "to": {
+        "code": "ADD",
+        "city": "Addis Ababa",
+        "name": "Addis Ababa Bole International Airport",
+        "countryCode": "ET",
+        "countryName": "Ethiopia",
+        "lat": 8.97789,
+        "lon": 38.799301
+      },
+      "depTime": "2022-12-27 17:40:00.000000",
+      "arrTime": "2022-12-27 17:40:00.000000",
+      "airline": "ET",
+      "flightNumber": "ET375",
+      "distanceKm": 583.6132028511628
+    },
+    {
+      "id": "segment-16",
+      "segmentId": 16,
+      "tripId": 13,
+      "tripTitle": "Ethiopia and Somalia",
+      "from": {
+        "code": "ADD",
+        "city": "Addis Ababa",
+        "name": "Addis Ababa Bole International Airport",
+        "countryCode": "ET",
+        "countryName": "Ethiopia",
+        "lat": 8.97789,
+        "lon": 38.799301
+      },
+      "to": {
+        "code": "IAD",
+        "city": "Dulles",
+        "name": "Washington Dulles International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 38.9445,
+        "lon": -77.455803
+      },
+      "depTime": "2022-12-27 22:50:00.000000",
+      "arrTime": "2022-12-27 22:50:00.000000",
+      "airline": "ET",
+      "flightNumber": "ET500",
+      "distanceKm": 11563.330735285777
+    },
+    {
+      "id": "segment-13",
+      "segmentId": 13,
+      "tripId": 11,
+      "tripTitle": "Nicaragua",
+      "from": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "to": {
+        "code": "FLL",
+        "city": "Fort Lauderdale",
+        "name": "Fort Lauderdale Hollywood International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 26.072599,
+        "lon": -80.152702
+      },
+      "depTime": "2023-03-03 14:01:00.000000",
+      "arrTime": "2023-03-03 14:01:00.000000",
+      "airline": "NK",
+      "flightNumber": "NK360",
+      "distanceKm": 1799.227064918371
+    },
+    {
+      "id": "segment-14",
+      "segmentId": 14,
+      "tripId": 11,
+      "tripTitle": "Nicaragua",
+      "from": {
+        "code": "FLL",
+        "city": "Fort Lauderdale",
+        "name": "Fort Lauderdale Hollywood International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 26.072599,
+        "lon": -80.152702
+      },
+      "to": {
+        "code": "MGA",
+        "city": "Managua",
+        "name": "Augusto C. Sandino (Managua) International Airport",
+        "countryCode": "NI",
+        "countryName": "Nicaragua",
+        "lat": 12.1415,
+        "lon": -86.168198
+      },
+      "depTime": "2023-03-03 23:40:00.000000",
+      "arrTime": "2023-03-03 23:40:00.000000",
+      "airline": "NK",
+      "flightNumber": "NK435",
+      "distanceKm": 1672.2573095811833
+    },
+    {
+      "id": "segment-46",
+      "segmentId": 46,
+      "tripId": 11,
+      "tripTitle": "Nicaragua",
+      "from": {
+        "code": "MGA",
+        "city": "Managua",
+        "name": "Augusto C. Sandino (Managua) International Airport",
+        "countryCode": "NI",
+        "countryName": "Nicaragua",
+        "lat": 12.1415,
+        "lon": -86.168198
+      },
+      "to": {
+        "code": "MEX",
+        "city": "Mexico City",
+        "name": "Mexico City Benito Ju\u00e1rez International Airport",
+        "countryCode": "MX",
+        "countryName": "Mexico",
+        "lat": 19.435822,
+        "lon": -99.07033
+      },
+      "depTime": "2023-03-12 07:00:00.000000",
+      "arrTime": "2023-03-12 09:42:00.000000",
+      "airline": "AM",
+      "flightNumber": "AM651",
+      "distanceKm": 1600.1642040577167
+    },
+    {
+      "id": "segment-47",
+      "segmentId": 47,
+      "tripId": 11,
+      "tripTitle": "Nicaragua",
+      "from": {
+        "code": "MEX",
+        "city": "Mexico City",
+        "name": "Mexico City Benito Ju\u00e1rez International Airport",
+        "countryCode": "MX",
+        "countryName": "Mexico",
+        "lat": 19.435822,
+        "lon": -99.07033
+      },
+      "to": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "depTime": "2023-03-13 10:00:00.000000",
+      "arrTime": "2023-03-13 13:46:00.000000",
+      "airline": "AM",
+      "flightNumber": "AM2682",
+      "distanceKm": 1510.386030467971
+    },
+    {
+      "id": "segment-50",
+      "segmentId": 50,
+      "tripId": 31,
+      "tripTitle": "Baltimore",
+      "from": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "to": {
+        "code": "BWI",
+        "city": "Baltimore",
+        "name": "Baltimore/Washington International Thurgood Marshall Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 39.1754,
+        "lon": -76.668297
+      },
+      "depTime": "2024-03-07 20:51:00.000000",
+      "arrTime": "2024-03-07 23:47:00.000000",
+      "airline": "NK",
+      "flightNumber": "NK202",
+      "distanceKm": 1954.672675512937
+    },
+    {
+      "id": "segment-51",
+      "segmentId": 51,
+      "tripId": 31,
+      "tripTitle": "Baltimore",
+      "from": {
+        "code": "BWI",
+        "city": "Baltimore",
+        "name": "Baltimore/Washington International Thurgood Marshall Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 39.1754,
+        "lon": -76.668297
+      },
+      "to": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "depTime": "2024-03-11 13:34:00.000000",
+      "arrTime": "2024-03-11 16:15:00.000000",
+      "airline": "F9",
+      "flightNumber": "F93283",
+      "distanceKm": 1954.672675512937
+    },
+    {
+      "id": "segment-39",
+      "segmentId": 39,
+      "tripId": 22,
+      "tripTitle": "Dominican Republic",
+      "from": {
+        "code": "HOU",
+        "city": "Houston",
+        "name": "William P. Hobby Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.645336,
+        "lon": -95.276812
+      },
+      "to": {
+        "code": "PUJ",
+        "city": "Punta Cana",
+        "name": "Punta Cana International Airport",
+        "countryCode": "DO",
+        "countryName": "Dominican Republic",
+        "lat": 18.567093,
+        "lon": -68.364558
+      },
+      "depTime": "2024-08-04 09:00:00.000000",
+      "arrTime": "2024-08-04 14:25:00.000000",
+      "airline": "WN",
+      "flightNumber": "WN1074",
+      "distanceKm": 2986.4420483206623
+    },
+    {
+      "id": "segment-40",
+      "segmentId": 40,
+      "tripId": 22,
+      "tripTitle": "Dominican Republic",
+      "from": {
+        "code": "PUJ",
+        "city": "Punta Cana",
+        "name": "Punta Cana International Airport",
+        "countryCode": "DO",
+        "countryName": "Dominican Republic",
+        "lat": 18.567093,
+        "lon": -68.364558
+      },
+      "to": {
+        "code": "BWI",
+        "city": "Baltimore",
+        "name": "Baltimore/Washington International Thurgood Marshall Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 39.1754,
+        "lon": -76.668297
+      },
+      "depTime": "2024-08-11 15:05:00.000000",
+      "arrTime": "2024-08-11 19:00:00.000000",
+      "airline": "WN",
+      "flightNumber": "WN0822",
+      "distanceKm": 2427.2194461812633
+    },
+    {
+      "id": "segment-41",
+      "segmentId": 41,
+      "tripId": 22,
+      "tripTitle": "Dominican Republic",
+      "from": {
+        "code": "BWI",
+        "city": "Baltimore",
+        "name": "Baltimore/Washington International Thurgood Marshall Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 39.1754,
+        "lon": -76.668297
+      },
+      "to": {
+        "code": "HOU",
+        "city": "Houston",
+        "name": "William P. Hobby Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.645336,
+        "lon": -95.276812
+      },
+      "depTime": "2024-08-11 21:20:00.000000",
+      "arrTime": "2024-08-11 23:35:00.000000",
+      "airline": "WN",
+      "flightNumber": "WN1304",
+      "distanceKm": 2003.1268437961342
+    },
+    {
+      "id": "segment-78",
+      "segmentId": 78,
+      "tripId": 39,
+      "tripTitle": "Dallas Fort Worth",
+      "from": {
+        "code": "PHX",
+        "city": "Phoenix",
+        "name": "Phoenix Sky Harbor International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 33.435302,
+        "lon": -112.005905
+      },
+      "to": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "depTime": "2024-10-31 13:35:00.000000",
+      "arrTime": "2024-10-31 18:01:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA2479",
+      "distanceKm": 1393.8499611197462
+    },
+    {
+      "id": "segment-10",
+      "segmentId": 10,
+      "tripId": 8,
+      "tripTitle": "Nashville",
+      "from": {
+        "code": "BNA",
+        "city": "Nashville",
+        "name": "Nashville International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 36.1245,
+        "lon": -86.6782
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2024-12-01 20:25:00.000000",
+      "arrTime": "2024-12-01 22:46:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA2311",
+      "distanceKm": 1056.5248500544883
+    },
+    {
+      "id": "segment-91",
+      "segmentId": 91,
+      "tripId": 40,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "to": {
+        "code": "DCA",
+        "city": "Washington",
+        "name": "Ronald Reagan Washington National Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 38.8521,
+        "lon": -77.037697
+      },
+      "depTime": "2024-12-15 07:30:00.000000",
+      "arrTime": "2024-12-15 11:25:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA677",
+      "distanceKm": 1941.5991252781466
+    },
+    {
+      "id": "segment-73",
+      "segmentId": 73,
+      "tripId": 40,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "IAD",
+        "city": "Dulles",
+        "name": "Washington Dulles International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 38.9445,
+        "lon": -77.455803
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2024-12-15 22:24:00.000000",
+      "arrTime": "2024-12-16 01:00:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA2275",
+      "distanceKm": 1913.2014017200502
+    },
+    {
+      "id": "segment-9",
+      "segmentId": 9,
+      "tripId": 24,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "IAD",
+        "city": "Dulles",
+        "name": "Washington Dulles International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 38.9445,
+        "lon": -77.455803
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2024-12-19 22:24:00.000000",
+      "arrTime": "2024-12-20 01:00:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA2275",
+      "distanceKm": 1913.2014017200502
+    },
+    {
+      "id": "segment-94",
+      "segmentId": 94,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "to": {
+        "code": "DCA",
+        "city": "Washington",
+        "name": "Ronald Reagan Washington National Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 38.8521,
+        "lon": -77.037697
+      },
+      "depTime": "2025-02-18 14:48:00.000000",
+      "arrTime": "2025-02-18 18:45:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA1540",
+      "distanceKm": 1941.5991252781466
+    },
+    {
+      "id": "segment-63",
+      "segmentId": 63,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "DCA",
+        "city": "Washington",
+        "name": "Ronald Reagan Washington National Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 38.8521,
+        "lon": -77.037697
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2025-02-21 14:39:00.000000",
+      "arrTime": "2025-02-21 17:18:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA1381",
+      "distanceKm": 1941.5991252781466
+    },
+    {
+      "id": "segment-77",
+      "segmentId": 77,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "DCA",
+        "city": "Washington",
+        "name": "Ronald Reagan Washington National Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 38.8521,
+        "lon": -77.037697
+      },
+      "to": {
+        "code": "MCO",
+        "city": "Orlando",
+        "name": "Orlando International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 28.429399490356445,
+        "lon": -81.30899810791016
+      },
+      "depTime": "2025-02-21 15:00:00.000000",
+      "arrTime": "2025-02-21 17:40:00.000000",
+      "airline": "B6",
+      "flightNumber": "B62023",
+      "distanceKm": 1224.0584120823353
+    },
+    {
+      "id": "segment-95",
+      "segmentId": 95,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "DCA",
+        "city": "Washington",
+        "name": "Ronald Reagan Washington National Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 38.8521,
+        "lon": -77.037697
+      },
+      "to": {
+        "code": "MCO",
+        "city": "Orlando",
+        "name": "Orlando International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 28.429399490356445,
+        "lon": -81.30899810791016
+      },
+      "depTime": "2025-02-21 15:00:00.000000",
+      "arrTime": "2025-02-21 17:40:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA2023",
+      "distanceKm": 1224.0584120823353
+    },
+    {
+      "id": "segment-66",
+      "segmentId": 66,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "to": {
+        "code": "MCO",
+        "city": "Orlando",
+        "name": "Orlando International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 28.429399490356445,
+        "lon": -81.30899810791016
+      },
+      "depTime": "2025-02-21 16:16:00.000000",
+      "arrTime": "2025-02-21 19:40:00.000000",
+      "airline": "F9",
+      "flightNumber": "F91418",
+      "distanceKm": 1372.0047182907222
+    },
+    {
+      "id": "segment-80",
+      "segmentId": 80,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "MCO",
+        "city": "Orlando",
+        "name": "Orlando International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 28.429399490356445,
+        "lon": -81.30899810791016
+      },
+      "to": {
+        "code": "ATL",
+        "city": "Atlanta",
+        "name": "Hartsfield Jackson Atlanta International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 33.6367,
+        "lon": -84.428101
+      },
+      "depTime": "2025-02-23 17:01:00.000000",
+      "arrTime": "2025-02-23 18:49:00.000000",
+      "airline": null,
+      "flightNumber": "1651",
+      "distanceKm": 650.7270112395546
+    },
+    {
+      "id": "segment-86",
+      "segmentId": 86,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "MCO",
+        "city": "Orlando",
+        "name": "Orlando International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 28.429399490356445,
+        "lon": -81.30899810791016
+      },
+      "to": {
+        "code": "ATL",
+        "city": "Atlanta",
+        "name": "Hartsfield Jackson Atlanta International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 33.6367,
+        "lon": -84.428101
+      },
+      "depTime": "2025-02-23 17:01:00.000000",
+      "arrTime": "2025-02-23 18:49:00.000000",
+      "airline": "NK",
+      "flightNumber": "NK1651",
+      "distanceKm": 650.7270112395546
+    },
+    {
+      "id": "segment-81",
+      "segmentId": 81,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "ATL",
+        "city": "Atlanta",
+        "name": "Hartsfield Jackson Atlanta International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 33.6367,
+        "lon": -84.428101
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2025-02-23 20:49:00.000000",
+      "arrTime": "2025-02-23 22:10:00.000000",
+      "airline": null,
+      "flightNumber": "512",
+      "distanceKm": 1107.585437259087
+    },
+    {
+      "id": "segment-87",
+      "segmentId": 87,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "ATL",
+        "city": "Atlanta",
+        "name": "Hartsfield Jackson Atlanta International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 33.6367,
+        "lon": -84.428101
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2025-02-23 20:49:00.000000",
+      "arrTime": "2025-02-23 22:10:00.000000",
+      "airline": "NK",
+      "flightNumber": "NK512",
+      "distanceKm": 1107.585437259087
+    },
+    {
+      "id": "segment-64",
+      "segmentId": 64,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "to": {
+        "code": "DEN",
+        "city": "Denver",
+        "name": "Denver International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 39.860027,
+        "lon": -104.673792
+      },
+      "depTime": "2025-02-24 12:35:00.000000",
+      "arrTime": "2025-02-24 14:19:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA2641",
+      "distanceKm": 1387.495534659652
+    },
+    {
+      "id": "segment-65",
+      "segmentId": 65,
+      "tripId": 35,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "DEN",
+        "city": "Denver",
+        "name": "Denver International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 39.860027,
+        "lon": -104.673792
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2025-02-28 17:20:00.000000",
+      "arrTime": "2025-02-28 20:50:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA726",
+      "distanceKm": 1387.495534659652
+    },
+    {
+      "id": "segment-69",
+      "segmentId": 69,
+      "tripId": 36,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "to": {
+        "code": "DCA",
+        "city": "Washington",
+        "name": "Ronald Reagan Washington National Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 38.8521,
+        "lon": -77.037697
+      },
+      "depTime": "2025-03-24 07:30:00.000000",
+      "arrTime": "2025-03-24 11:28:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA546",
+      "distanceKm": 1941.5991252781466
+    },
+    {
+      "id": "segment-70",
+      "segmentId": 70,
+      "tripId": 36,
+      "tripTitle": "Washington",
+      "from": {
+        "code": "DCA",
+        "city": "Washington",
+        "name": "Ronald Reagan Washington National Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 38.8521,
+        "lon": -77.037697
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2025-03-27 12:42:00.000000",
+      "arrTime": "2025-03-27 15:25:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA1808",
+      "distanceKm": 1941.5991252781466
+    },
+    {
+      "id": "segment-93",
+      "segmentId": 93,
+      "tripId": 25,
+      "tripTitle": "Philippines",
+      "from": {
+        "code": "TPE",
+        "city": "Taoyuan",
+        "name": "Taiwan Taoyuan International Airport",
+        "countryCode": "TW",
+        "countryName": "Taiwan",
+        "lat": 25.0777,
+        "lon": 121.233002
+      },
+      "to": {
+        "code": "MNL",
+        "city": "Manila (Pasay)",
+        "name": "Ninoy Aquino International Airport",
+        "countryCode": "PH",
+        "countryName": "Philippines",
+        "lat": 14.5086,
+        "lon": 121.019997
+      },
+      "depTime": "2025-04-26 15:05:00.000000",
+      "arrTime": "2025-04-26 17:25:00.000000",
+      "airline": "BR",
+      "flightNumber": "BR277",
+      "distanceKm": 1175.440739227505
+    },
+    {
+      "id": "segment-96",
+      "segmentId": 96,
+      "tripId": 25,
+      "tripTitle": "Philippines",
+      "from": {
+        "code": "MNL",
+        "city": "Manila (Pasay)",
+        "name": "Ninoy Aquino International Airport",
+        "countryCode": "PH",
+        "countryName": "Philippines",
+        "lat": 14.5086,
+        "lon": 121.019997
+      },
+      "to": {
+        "code": "MPH",
+        "city": "Caticlan",
+        "name": "Godofredo P. Ramos Airport",
+        "countryCode": "PH",
+        "countryName": "Philippines",
+        "lat": 11.9245,
+        "lon": 121.954002
+      },
+      "depTime": "2025-04-28 06:25:00.000000",
+      "arrTime": "2025-04-28 07:25:00.000000",
+      "airline": "Z2",
+      "flightNumber": "Z2211",
+      "distanceKm": 304.60437446932445
+    },
+    {
+      "id": "segment-4",
+      "segmentId": 4,
+      "tripId": 25,
+      "tripTitle": "Philippines",
+      "from": {
+        "code": "KLO",
+        "city": "Kalibo",
+        "name": "Kalibo International Airport",
+        "countryCode": "PH",
+        "countryName": "Philippines",
+        "lat": 11.6794,
+        "lon": 122.375999
+      },
+      "to": {
+        "code": "MNL",
+        "city": "Manila (Pasay)",
+        "name": "Ninoy Aquino International Airport",
+        "countryCode": "PH",
+        "countryName": "Philippines",
+        "lat": 14.5086,
+        "lon": 121.019997
+      },
+      "depTime": "2025-05-03 11:15:00.000000",
+      "arrTime": "2025-05-03 11:15:00.000000",
+      "airline": "Z2",
+      "flightNumber": "Z2712",
+      "distanceKm": 347.17613443644507
+    },
+    {
+      "id": "segment-89",
+      "segmentId": 89,
+      "tripId": 25,
+      "tripTitle": "Philippines",
+      "from": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "to": {
+        "code": "TPE",
+        "city": "Taoyuan",
+        "name": "Taiwan Taoyuan International Airport",
+        "countryCode": "TW",
+        "countryName": "Taiwan",
+        "lat": 25.0777,
+        "lon": 121.233002
+      },
+      "depTime": "2025-05-09 01:00:00.000000",
+      "arrTime": "2025-05-09 06:30:00.000000",
+      "airline": "BR",
+      "flightNumber": "BR51",
+      "distanceKm": 12756.423729759275
+    },
+    {
+      "id": "segment-21",
+      "segmentId": 21,
+      "tripId": 25,
+      "tripTitle": "Philippines",
+      "from": {
+        "code": "MNL",
+        "city": "Manila (Pasay)",
+        "name": "Ninoy Aquino International Airport",
+        "countryCode": "PH",
+        "countryName": "Philippines",
+        "lat": 14.5086,
+        "lon": 121.019997
+      },
+      "to": {
+        "code": "TPE",
+        "city": "Taoyuan",
+        "name": "Taiwan Taoyuan International Airport",
+        "countryCode": "TW",
+        "countryName": "Taiwan",
+        "lat": 25.0777,
+        "lon": 121.233002
+      },
+      "depTime": "2025-05-09 12:40:00.000000",
+      "arrTime": "2025-05-09 14:55:00.000000",
+      "airline": "BR",
+      "flightNumber": "BR272",
+      "distanceKm": 1175.440739227505
+    },
+    {
+      "id": "segment-6",
+      "segmentId": 6,
+      "tripId": 25,
+      "tripTitle": "Philippines",
+      "from": {
+        "code": "TPE",
+        "city": "Taoyuan",
+        "name": "Taiwan Taoyuan International Airport",
+        "countryCode": "TW",
+        "countryName": "Taiwan",
+        "lat": 25.0777,
+        "lon": 121.233002
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2025-05-09 21:20:00.000000",
+      "arrTime": "2025-05-09 22:20:00.000000",
+      "airline": "BR",
+      "flightNumber": "BR52",
+      "distanceKm": 12756.423729759275
+    },
+    {
+      "id": "segment-3",
+      "segmentId": 3,
+      "tripId": 26,
+      "tripTitle": "Chicago",
+      "from": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "to": {
+        "code": "ORD",
+        "city": "Chicago",
+        "name": "Chicago O'Hare International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 41.9786,
+        "lon": -87.9048
+      },
+      "depTime": "2025-06-18 18:28:00.000000",
+      "arrTime": "2025-06-18 21:23:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA2064",
+      "distanceKm": 1490.3545321876488
+    },
+    {
+      "id": "segment-2",
+      "segmentId": 2,
+      "tripId": 26,
+      "tripTitle": "Chicago",
+      "from": {
+        "code": "ORD",
+        "city": "Chicago",
+        "name": "Chicago O'Hare International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 41.9786,
+        "lon": -87.9048
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2025-06-22 20:30:00.000000",
+      "arrTime": "2025-06-22 23:19:00.000000",
+      "airline": "UA",
+      "flightNumber": "UA2426",
+      "distanceKm": 1490.3545321876488
+    },
+    {
+      "id": "segment-48",
+      "segmentId": 48,
+      "tripId": 30,
+      "tripTitle": "Charlotte",
+      "from": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "to": {
+        "code": "CLT",
+        "city": "Charlotte",
+        "name": "Charlotte Douglas International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 35.2140007019043,
+        "lon": -80.94309997558594
+      },
+      "depTime": "2025-08-09 06:11:00.000000",
+      "arrTime": "2025-08-09 09:50:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA3162",
+      "distanceKm": 1466.1587862419278
+    },
+    {
+      "id": "segment-49",
+      "segmentId": 49,
+      "tripId": 30,
+      "tripTitle": "Charlotte",
+      "from": {
+        "code": "CLT",
+        "city": "Charlotte",
+        "name": "Charlotte Douglas International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 35.2140007019043,
+        "lon": -80.94309997558594
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2025-08-11 19:41:00.000000",
+      "arrTime": "2025-08-11 21:13:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA2935",
+      "distanceKm": 1466.1587862419278
+    },
+    {
+      "id": "segment-42",
+      "segmentId": 42,
+      "tripId": 28,
+      "tripTitle": "Tulum",
+      "from": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "to": {
+        "code": "MIA",
+        "city": "Miami",
+        "name": "Miami International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 25.796011,
+        "lon": -80.289751
+      },
+      "depTime": "2025-08-16 05:30:00.000000",
+      "arrTime": "2025-08-16 09:04:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA1047",
+      "distanceKm": 1549.3701679082312
+    },
+    {
+      "id": "segment-43",
+      "segmentId": 43,
+      "tripId": 28,
+      "tripTitle": "Tulum",
+      "from": {
+        "code": "MIA",
+        "city": "Miami",
+        "name": "Miami International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 25.796011,
+        "lon": -80.289751
+      },
+      "to": {
+        "code": "TQO",
+        "city": "Tulum",
+        "name": "Felipe Carrillo Puerto International Airport Tulum",
+        "countryCode": "MX",
+        "countryName": "Mexico",
+        "lat": 20.172098,
+        "lon": -87.660272
+      },
+      "depTime": "2025-08-16 10:14:00.000000",
+      "arrTime": "2025-08-16 11:23:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA172",
+      "distanceKm": 980.37385653797
+    },
+    {
+      "id": "segment-84",
+      "segmentId": 84,
+      "tripId": 28,
+      "tripTitle": "Tulum",
+      "from": {
+        "code": "TQO",
+        "city": "Tulum",
+        "name": "Felipe Carrillo Puerto International Airport Tulum",
+        "countryCode": "MX",
+        "countryName": "Mexico",
+        "lat": 20.172098,
+        "lon": -87.660272
+      },
+      "to": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "depTime": "2025-08-23 16:04:00.000000",
+      "arrTime": "2025-08-23 19:09:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA163",
+      "distanceKm": 1693.0231147298869
+    },
+    {
+      "id": "segment-45",
+      "segmentId": 45,
+      "tripId": 28,
+      "tripTitle": "Tulum",
+      "from": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2025-08-23 21:05:00.000000",
+      "arrTime": "2025-08-23 22:15:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA2209",
+      "distanceKm": 361.64522403366715
+    },
+    {
+      "id": "segment-22",
+      "segmentId": 22,
+      "tripId": 29,
+      "tripTitle": "Singapore",
+      "from": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "to": {
+        "code": "NRT",
+        "city": "Narita",
+        "name": "Narita International Airport",
+        "countryCode": "JP",
+        "countryName": "Japan",
+        "lat": 35.76858,
+        "lon": 140.388714
+      },
+      "depTime": "2025-09-29 10:05:00.000000",
+      "arrTime": "2025-09-29 14:00:00.000000",
+      "airline": "NH",
+      "flightNumber": "NH6451",
+      "distanceKm": 10669.342602975152
+    },
+    {
+      "id": "segment-55",
+      "segmentId": 55,
+      "tripId": 29,
+      "tripTitle": "Singapore",
+      "from": {
+        "code": "NRT",
+        "city": "Narita",
+        "name": "Narita International Airport",
+        "countryCode": "JP",
+        "countryName": "Japan",
+        "lat": 35.76858,
+        "lon": 140.388714
+      },
+      "to": {
+        "code": "SIN",
+        "city": "Singapore",
+        "name": "Singapore Changi Airport",
+        "countryCode": "SG",
+        "countryName": "Singapore",
+        "lat": 1.35019,
+        "lon": 103.994003
+      },
+      "depTime": "2025-09-30 18:40:00.000000",
+      "arrTime": "2025-10-01 01:45:00.000000",
+      "airline": "NH",
+      "flightNumber": "NH801",
+      "distanceKm": 5357.584930225744
+    },
+    {
+      "id": "segment-24",
+      "segmentId": 24,
+      "tripId": 29,
+      "tripTitle": "Singapore",
+      "from": {
+        "code": "SIN",
+        "city": "Singapore",
+        "name": "Singapore Changi Airport",
+        "countryCode": "SG",
+        "countryName": "Singapore",
+        "lat": 1.35019,
+        "lon": 103.994003
+      },
+      "to": {
+        "code": "NRT",
+        "city": "Narita",
+        "name": "Narita International Airport",
+        "countryCode": "JP",
+        "countryName": "Japan",
+        "lat": 35.76858,
+        "lon": 140.388714
+      },
+      "depTime": "2025-10-03 06:15:00.000000",
+      "arrTime": "2025-10-03 14:30:00.000000",
+      "airline": "NH",
+      "flightNumber": "NH802",
+      "distanceKm": 5357.584930225744
+    },
+    {
+      "id": "segment-25",
+      "segmentId": 25,
+      "tripId": 29,
+      "tripTitle": "Singapore",
+      "from": {
+        "code": "NRT",
+        "city": "Narita",
+        "name": "Narita International Airport",
+        "countryCode": "JP",
+        "countryName": "Japan",
+        "lat": 35.76858,
+        "lon": 140.388714
+      },
+      "to": {
+        "code": "IAH",
+        "city": "Houston",
+        "name": "George Bush Intercontinental Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 29.9844,
+        "lon": -95.3414
+      },
+      "depTime": "2025-10-03 17:00:00.000000",
+      "arrTime": "2025-10-04 04:55:00.000000",
+      "airline": "NH",
+      "flightNumber": "NH6450",
+      "distanceKm": 10669.342602975152
+    },
+    {
+      "id": "segment-54",
+      "segmentId": 54,
+      "tripId": 33,
+      "tripTitle": "Nashville",
+      "from": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "to": {
+        "code": "BNA",
+        "city": "Nashville",
+        "name": "Nashville International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 36.1245,
+        "lon": -86.6782
+      },
+      "depTime": "2026-03-17 14:46:00.000000",
+      "arrTime": "2026-03-17 16:38:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA3243",
+      "distanceKm": 1014.1035676588654
+    },
+    {
+      "id": "segment-97",
+      "segmentId": 97,
+      "tripId": 33,
+      "tripTitle": "Nashville",
+      "from": {
+        "code": "BNA",
+        "city": "Nashville",
+        "name": "Nashville International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 36.1245,
+        "lon": -86.6782
+      },
+      "to": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "depTime": "2026-03-23 06:00:00.000000",
+      "arrTime": "2026-03-23 08:24:00.000000",
+      "airline": "AA",
+      "flightNumber": "AA2787",
+      "distanceKm": 1014.1035676588654
+    },
+    {
+      "id": "segment-52",
+      "segmentId": 52,
+      "tripId": 41,
+      "tripTitle": "Dominican Republic",
+      "from": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "to": {
+        "code": "PUJ",
+        "city": "Punta Cana",
+        "name": "Punta Cana International Airport",
+        "countryCode": "DO",
+        "countryName": "Dominican Republic",
+        "lat": 18.567093,
+        "lon": -68.364558
+      },
+      "depTime": "2026-06-19 08:15:00.000000",
+      "arrTime": "2026-06-19 14:05:00.000000",
+      "airline": "SY",
+      "flightNumber": "SY739",
+      "distanceKm": 3268.351704852143
+    },
+    {
+      "id": "segment-99",
+      "segmentId": 99,
+      "tripId": 41,
+      "tripTitle": "Dominican Republic",
+      "from": {
+        "code": "PUJ",
+        "city": "Punta Cana",
+        "name": "Punta Cana International Airport",
+        "countryCode": "DO",
+        "countryName": "Dominican Republic",
+        "lat": 18.567093,
+        "lon": -68.364558
+      },
+      "to": {
+        "code": "FLL",
+        "city": "Fort Lauderdale",
+        "name": "Fort Lauderdale Hollywood International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 26.072599,
+        "lon": -80.152702
+      },
+      "depTime": "2026-06-25 14:33:00.000000",
+      "arrTime": "2026-06-25 17:08:00.000000",
+      "airline": "B6",
+      "flightNumber": "B60174",
+      "distanceKm": 1470.4592370127366
+    },
+    {
+      "id": "segment-100",
+      "segmentId": 100,
+      "tripId": 41,
+      "tripTitle": "Dominican Republic",
+      "from": {
+        "code": "FLL",
+        "city": "Fort Lauderdale",
+        "name": "Fort Lauderdale Hollywood International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 26.072599,
+        "lon": -80.152702
+      },
+      "to": {
+        "code": "DFW",
+        "city": "Dallas-Fort Worth",
+        "name": "Dallas Fort Worth International Airport",
+        "countryCode": "US",
+        "countryName": "United States",
+        "lat": 32.896801,
+        "lon": -97.038002
+      },
+      "depTime": "2026-06-25 20:42:00.000000",
+      "arrTime": "2026-06-25 23:01:00.000000",
+      "airline": "B6",
+      "flightNumber": "B62279",
+      "distanceKm": 1799.227064918371
+    }
+  ]
+}

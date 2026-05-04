@@ -27,7 +27,13 @@ def get_encryption_key() -> bytes:
     
     # Try base64 decode
     try:
-        key = base64.b64decode(key_str)
+        # Try standard and urlsafe decoding
+        padded = key_str + "=" * (4 - len(key_str) % 4)
+        try:
+            key = base64.b64decode(padded)
+        except Exception:
+            key = base64.urlsafe_b64decode(padded)
+            
         if len(key) == 32:
             return key
     except Exception:

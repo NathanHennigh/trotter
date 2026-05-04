@@ -9,7 +9,7 @@ def create_celery_app() -> Celery:
 		"travelstrava",
 		broker=broker_url,
 		backend=backend_url,
-		include=["app.tasks.example"],
+		include=["app.tasks.example", "app.tasks.import_tasks"],
 	)
 
 	app.conf.update(
@@ -18,6 +18,8 @@ def create_celery_app() -> Celery:
 		accept_content=["json"],
 		timezone="UTC",
 		enable_utc=True,
+		task_always_eager=os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower() in ("1", "true", "yes"),
+		task_eager_propagates=True,
 	)
 	return app
 
