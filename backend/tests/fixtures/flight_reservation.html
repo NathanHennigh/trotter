@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Your American Airlines Confirmation</title>
+  <script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "FlightReservation",
+    "reservationNumber": "ABC123",
+    "reservationStatus": "http://schema.org/ReservationConfirmed",
+    "underName": {
+      "@type": "Person",
+      "name": "Nathan Hennigh"
+    },
+    "reservationFor": {
+      "@type": "Flight",
+      "flightNumber": "1234",
+      "airline": {
+        "@type": "Airline",
+        "name": "American Airlines",
+        "iataCode": "AA"
+      },
+      "departureAirport": {
+        "@type": "Airport",
+        "name": "Los Angeles International Airport",
+        "iataCode": "LAX"
+      },
+      "arrivalAirport": {
+        "@type": "Airport",
+        "name": "John F. Kennedy International Airport",
+        "iataCode": "JFK"
+      },
+      "departureTime": "2024-01-15T08:00:00-08:00",
+      "arrivalTime": "2024-01-15T16:30:00-05:00"
+    }
+  }
+  </script>
+</head>
+<body>
+  <h1>Flight Confirmation</h1>
+  <p>Booking Reference: <strong>ABC123</strong></p>
+  <p>Passenger: Nathan Hennigh</p>
+  <p>Flight: American Airlines AA1234</p>
+  <p>From: Los Angeles (LAX) &rarr; New York (JFK)</p>
+  <p>Departure: January 15, 2024 at 8:00 AM PST</p>
+  <p>Arrival: January 15, 2024 at 4:30 PM EST</p>
+</body>
+</html>

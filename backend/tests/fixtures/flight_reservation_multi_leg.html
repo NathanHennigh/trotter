@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Your United Airlines Confirmation</title>
+  <script type="application/ld+json">
+  [
+    {
+      "@context": "http://schema.org",
+      "@type": "FlightReservation",
+      "reservationNumber": "XYZ789",
+      "underName": {"@type": "Person", "name": "Nathan Hennigh"},
+      "reservationFor": {
+        "@type": "Flight",
+        "flightNumber": "101",
+        "airline": {"@type": "Airline", "iataCode": "UA"},
+        "departureAirport": {"@type": "Airport", "iataCode": "SFO"},
+        "arrivalAirport": {"@type": "Airport", "iataCode": "ORD"},
+        "departureTime": "2024-03-10T07:00:00-08:00",
+        "arrivalTime": "2024-03-10T13:00:00-06:00"
+      }
+    },
+    {
+      "@context": "http://schema.org",
+      "@type": "FlightReservation",
+      "reservationNumber": "XYZ789",
+      "underName": {"@type": "Person", "name": "Nathan Hennigh"},
+      "reservationFor": {
+        "@type": "Flight",
+        "flightNumber": "202",
+        "airline": {"@type": "Airline", "iataCode": "UA"},
+        "departureAirport": {"@type": "Airport", "iataCode": "ORD"},
+        "arrivalAirport": {"@type": "Airport", "iataCode": "LHR"},
+        "departureTime": "2024-03-10T15:30:00-06:00",
+        "arrivalTime": "2024-03-11T05:30:00+00:00"
+      }
+    }
+  ]
+  </script>
+</head>
+<body><p>Multi-leg itinerary SFO-ORD-LHR</p></body>
+</html>

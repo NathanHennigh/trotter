@@ -1,0 +1,1587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Trotter — The Travel Deck</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #2a2a2a; display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+
+@font-face {
+  font-family: 'DSEG7';
+  src: url('https://cdn.jsdelivr.net/npm/dseg@0.46.0/fonts/DSEG7-Classic/DSEG7Classic-Regular.woff2') format('woff2');
+}
+
+.trotter-shell {
+  width: 390px;
+  min-height: 844px;
+  background: #d4c8a8;
+  border-radius: 44px;
+  padding: 0;
+  position: relative;
+  box-shadow:
+    4px 4px 0 #8a7d5a,
+    8px 8px 0 #6b6040,
+    12px 12px 0 rgba(0,0,0,0.4),
+    inset 0 1px 0 rgba(255,255,255,0.6),
+    inset 0 -2px 0 rgba(0,0,0,0.2);
+  overflow: hidden;
+}
+
+/* Grain texture overlay */
+.trotter-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  pointer-events: none;
+  z-index: 100;
+  border-radius: 44px;
+}
+
+/* Status bar area */
+.status-bar {
+  height: 48px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0 24px 8px;
+  background: #c8bc98;
+  border-bottom: 2px solid #8a7d5a;
+}
+.status-label {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  color: #3a3020;
+  text-transform: uppercase;
+}
+.status-brand {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.25em;
+  color: #1a1a1a;
+}
+
+/* CRT Map Zone */
+.crt-zone {
+  position: relative;
+  height: 252px;
+  background: #1a1608;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 4px solid #8a7d5a;
+}
+.crt-bezel {
+  flex: 1;
+  margin: 8px 8px 0;
+  background: #0a0d06;
+  border-radius: 6px 6px 0 0;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 4px 4px 0 #000,
+    inset -4px -4px 0 #000,
+    inset 0 0 24px rgba(0,20,0,0.9);
+  border: 3px solid #050805;
+  border-bottom: none;
+}
+/* View toggle bar */
+.view-toggle-bar {
+  height: 34px;
+  margin: 0 8px;
+  background: #080c05;
+  border-radius: 0 0 6px 6px;
+  border: 3px solid #050805;
+  border-top: 1px solid #1a2a10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0 24px;
+}
+.view-toggle-btn {
+  flex: 1;
+  height: 22px;
+  background: #111;
+  border: 1px solid #222;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  color: #3a3a3a;
+  text-transform: uppercase;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  transition: all 0.08s;
+  box-shadow: 0 2px 0 #000, inset 0 1px 0 rgba(255,255,255,0.04);
+  user-select: none;
+}
+.view-toggle-btn:first-child { border-radius: 3px 0 0 3px; border-right: none; }
+.view-toggle-btn:last-child  { border-radius: 0 3px 3px 0; }
+.view-toggle-btn.active {
+  background: #0d1f08;
+  color: #6ab04c;
+  text-shadow: 0 0 8px rgba(106,176,76,0.7);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.8);
+  transform: translateY(1px);
+  border-color: #1a3010;
+}
+.view-toggle-btn.active-amber {
+  background: #1a0a00;
+  color: #ff9500;
+  text-shadow: 0 0 8px rgba(255,149,0,0.7);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.8);
+  transform: translateY(1px);
+  border-color: #3a1a00;
+}
+.crt-screen {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+  background: radial-gradient(ellipse at 50% 40%, #0d2209 0%, #050c03 100%);
+}
+/* Scanlines */
+.crt-screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 3px,
+    rgba(0,0,0,0.18) 3px, rgba(0,0,0,0.18) 4px
+  );
+  pointer-events: none;
+  z-index: 20;
+}
+/* CRT vignette */
+.crt-screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0,0,0,0.7) 100%);
+  pointer-events: none;
+  z-index: 21;
+  border-radius: 4px;
+}
+.crt-label {
+  position: absolute;
+  top: 5px; left: 10px;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  color: rgba(107,180,60,0.5);
+  z-index: 22;
+  font-family: 'Share Tech Mono', monospace;
+}
+.crt-coords {
+  position: absolute;
+  bottom: 5px; right: 10px;
+  font-size: 8px;
+  color: rgba(107,180,60,0.45);
+  font-family: 'Share Tech Mono', monospace;
+  z-index: 22;
+}
+
+/* Control Panel */
+.control-panel {
+  background: #cec29e;
+  flex: 1;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 3px solid #8a7d5a;
+}
+.panel-divider {
+  height: 2px;
+  background: linear-gradient(90deg, #8a7d5a 0%, #a09070 50%, #8a7d5a 100%);
+  margin: 2px 0;
+}
+
+/* Stats row */
+.stats-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.stat-module {
+  flex: 1;
+  background: #1a0800;
+  border-radius: 4px;
+  padding: 8px 10px 7px;
+  box-shadow: 3px 3px 0 #5a4020, inset 0 0 8px rgba(0,0,0,0.6);
+  border: 2px solid #0a0400;
+  position: relative;
+}
+.stat-module-label {
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  color: #804020;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+.seg-display {
+  font-family: 'DSEG7', 'Share Tech Mono', monospace;
+  font-size: 22px;
+  color: #ff9500;
+  text-shadow: 0 0 8px rgba(255,149,0,0.8), 0 0 20px rgba(255,100,0,0.3);
+  letter-spacing: 0.05em;
+  line-height: 1;
+}
+.seg-display.dim {
+  color: #3a1a00;
+  text-shadow: none;
+}
+.seg-display-small {
+  font-family: 'DSEG7', 'Share Tech Mono', monospace;
+  font-size: 13px;
+  color: #ff9500;
+  text-shadow: 0 0 6px rgba(255,149,0,0.7);
+  letter-spacing: 0.05em;
+}
+
+/* Miles counter module */
+.miles-module {
+  background: #0a1205;
+  border-radius: 4px;
+  padding: 8px 10px;
+  box-shadow: 3px 3px 0 #2a4010, inset 0 0 10px rgba(0,0,0,0.7);
+  border: 2px solid #050a02;
+  flex: 1.4;
+}
+.miles-label {
+  font-size: 7px; font-weight: 900; letter-spacing: 0.18em;
+  color: #2d5a1b; text-transform: uppercase; margin-bottom: 3px;
+}
+.miles-counter {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.flip-digit {
+  width: 22px; height: 30px;
+  background: #0f1f08;
+  border: 1px solid #1a3010;
+  border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 19px;
+  color: #8bc34a;
+  text-shadow: 0 0 6px rgba(139,195,74,0.7);
+  position: relative;
+  box-shadow: inset 0 1px 0 rgba(0,0,0,0.5), 0 1px 0 rgba(139,195,74,0.1);
+  overflow: hidden;
+}
+.flip-digit::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  top: 50%; height: 1px;
+  background: rgba(0,0,0,0.6);
+}
+
+/* Receipt / Flight Log */
+.receipt-module {
+  background: #f5f0e0;
+  border-radius: 2px;
+  padding: 0;
+  box-shadow: 3px 3px 0 #8a7d5a, inset 0 0 0 1px #ccc5a0;
+  overflow: hidden;
+  max-height: 120px;
+  flex: 1;
+}
+.receipt-header {
+  background: #1a1a1a;
+  padding: 4px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.receipt-header-text {
+  font-size: 8px; font-weight: 900; letter-spacing: 0.2em;
+  color: #ccc5a0; text-transform: uppercase;
+}
+.receipt-slot {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  color: #3a3020;
+  padding: 6px 10px;
+  line-height: 1.55;
+  overflow-y: auto;
+  max-height: 90px;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 14px,
+    rgba(180,160,100,0.08) 14px, rgba(180,160,100,0.08) 15px
+  );
+}
+.receipt-row { display: flex; justify-content: space-between; }
+.receipt-row.dim { color: #8a7a5a; }
+.receipt-sep { color: #c0b090; letter-spacing: -0.05em; }
+
+/* Buttons */
+.buttons-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.chunky-btn {
+  flex: 1;
+  padding: 10px 8px;
+  background: #1a1a1a;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  color: #ccc5a0;
+  text-transform: uppercase;
+  box-shadow:
+    0 4px 0 #000,
+    0 5px 0 rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.1);
+  transition: transform 0.06s, box-shadow 0.06s;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.chunky-btn:active, .chunky-btn.pressed {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #000, inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.chunky-btn.primary {
+  background: #e8006f;
+  color: #fff;
+  box-shadow:
+    0 4px 0 #8a0040,
+    0 5px 0 rgba(0,0,0,0.4),
+    inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.chunky-btn.primary:active {
+  box-shadow: 0 1px 0 #8a0040, inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.chunky-btn.accent {
+  background: #2d4a1a;
+  color: #8bc34a;
+  box-shadow:
+    0 4px 0 #0a1a04,
+    0 5px 0 rgba(0,0,0,0.4),
+    inset 0 1px 0 rgba(139,195,74,0.1);
+}
+
+/* Home indicator */
+.home-ind {
+  height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  background: #c8bc98;
+  border-top: 2px solid #8a7d5a;
+}
+.home-bar {
+  width: 120px; height: 5px;
+  background: #8a7d5a;
+  border-radius: 3px;
+}
+
+/* BOOT SCREEN */
+.boot-screen {
+  position: absolute; inset: 0;
+  background: #050c03;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 50;
+  border-radius: 44px;
+  overflow: hidden;
+}
+.boot-screen::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 3px,
+    rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px
+  );
+  pointer-events: none;
+}
+.boot-logo {
+  font-size: 36px;
+  font-weight: 900;
+  letter-spacing: 0.3em;
+  color: #8bc34a;
+  text-shadow: 0 0 20px rgba(139,195,74,0.6), 0 0 40px rgba(139,195,74,0.2);
+  margin-bottom: 6px;
+}
+.boot-sub {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.4em;
+  color: #4a7c2f;
+  margin-bottom: 32px;
+  text-transform: uppercase;
+}
+.boot-terminal {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  color: #5a9a30;
+  width: 280px;
+  line-height: 1.8;
+}
+.boot-line { opacity: 0; transition: opacity 0.1s; }
+.boot-line.visible { opacity: 1; }
+.boot-line.bright { color: #8bc34a; }
+.boot-progress {
+  margin-top: 8px;
+  width: 200px;
+  height: 8px;
+  background: #0f1f08;
+  border: 1px solid #2d5a1b;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.boot-progress-fill {
+  height: 100%;
+  background: #6ab04c;
+  box-shadow: 0 0 8px rgba(106,176,76,0.8);
+  transition: width 0.3s linear;
+}
+
+/* FLIGHT LOG SCREEN */
+.log-screen {
+  position: absolute; inset: 0;
+  background: #d4c8a8;
+  border-radius: 44px;
+  overflow: hidden;
+  z-index: 30;
+  display: flex; flex-direction: column;
+}
+.log-header {
+  background: #1a1a1a;
+  padding: 52px 20px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  box-shadow: 0 4px 0 #000;
+}
+.log-header-title {
+  font-size: 11px; font-weight: 900; letter-spacing: 0.25em;
+  color: #ccc5a0; text-transform: uppercase;
+}
+.log-back-btn {
+  font-size: 9px; font-weight: 900; letter-spacing: 0.15em;
+  color: #e8006f; background: none; border: none; cursor: pointer;
+  text-transform: uppercase;
+}
+.log-body {
+  flex: 1; overflow-y: auto; padding: 0 0 20px;
+  background: #f0ead8;
+}
+/* Receipt paper */
+.receipt-paper {
+  background: #f5f0e0;
+  margin: 0 16px;
+  padding: 12px 14px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  color: #2a2010;
+  line-height: 1.7;
+  box-shadow: 3px 3px 0 #8a7d5a;
+  border-radius: 0 0 4px 4px;
+}
+.receipt-top {
+  background: #f5f0e0;
+  margin: 0 16px;
+  text-align: center;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  color: #2a2010;
+  padding: 12px 14px 0;
+  box-shadow: 3px 0 0 #8a7d5a, -3px 0 0 #8a7d5a;
+  border-radius: 4px 4px 0 0;
+  background: repeating-linear-gradient(
+    0deg, #f5f0e0, #f5f0e0 14px,
+    #ede8d0 14px, #ede8d0 15px
+  );
+}
+.receipt-title-art {
+  font-size: 14px; font-weight: bold; letter-spacing: 0.3em;
+  color: #1a1408; margin-bottom: 4px;
+}
+.receipt-paper {
+  background: repeating-linear-gradient(
+    0deg, #f5f0e0, #f5f0e0 14px,
+    #ede8d0 14px, #ede8d0 15px
+  );
+}
+.receipt-flight-row {
+  display: flex; justify-content: space-between;
+  border-bottom: 1px dashed #c0b090;
+  padding: 5px 0;
+}
+.flight-route { font-weight: bold; color: #1a1408; }
+.flight-meta { color: #5a4a30; font-size: 10px; }
+.flight-miles { color: #e8006f; }
+
+/* STATS SCREEN */
+.stats-screen {
+  position: absolute; inset: 0;
+  background: #d4c8a8;
+  border-radius: 44px;
+  overflow: hidden;
+  z-index: 30;
+  display: flex; flex-direction: column;
+}
+.stats-header {
+  background: #1a1a1a;
+  padding: 52px 20px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  box-shadow: 0 4px 0 #000;
+}
+.stats-body {
+  flex: 1; overflow-y: auto;
+  padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.nixie-module {
+  background: #0a1205;
+  border-radius: 6px;
+  padding: 14px 16px 12px;
+  box-shadow: 4px 4px 0 #2a4010, inset 0 0 16px rgba(0,0,0,0.6);
+  border: 2px solid #050a02;
+}
+.nixie-label {
+  font-size: 8px; font-weight: 900; letter-spacing: 0.2em;
+  color: #2d5a1b; text-transform: uppercase; margin-bottom: 8px;
+}
+.nixie-value {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 38px;
+  color: #8bc34a;
+  text-shadow: 0 0 12px rgba(139,195,74,0.8), 0 0 30px rgba(139,195,74,0.3);
+  letter-spacing: 0.1em;
+  line-height: 1;
+}
+.nixie-unit {
+  font-size: 10px; font-weight: 900; letter-spacing: 0.2em;
+  color: #4a7c2f; text-transform: uppercase; margin-top: 4px;
+}
+.route-map-module {
+  background: #1a1608;
+  border-radius: 6px;
+  padding: 12px;
+  box-shadow: 4px 4px 0 #5a4020, inset 0 0 12px rgba(0,0,0,0.5);
+  border: 2px solid #0a0d06;
+}
+.route-map-label {
+  font-size: 8px; font-weight: 900; letter-spacing: 0.2em;
+  color: #804020; text-transform: uppercase; margin-bottom: 8px;
+  font-family: 'Share Tech Mono', monospace;
+}
+.top-route {
+  display: flex; align-items: center; gap: 8px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px; color: #ff9500;
+  text-shadow: 0 0 6px rgba(255,149,0,0.6);
+  padding: 4px 0;
+  border-bottom: 1px solid #2a1a08;
+}
+.route-arrow { color: #804020; }
+.route-count { margin-left: auto; color: #5a3010; font-size: 10px; }
+
+/* Tweaks panel */
+.tweaks-panel {
+  position: fixed; bottom: 80px; right: 20px;
+  background: #1a1a1a; border-radius: 8px; padding: 14px;
+  box-shadow: 4px 4px 0 #000;
+  z-index: 200; min-width: 200px;
+  display: none;
+}
+.tweaks-panel.visible { display: block; }
+.tweaks-title {
+  font-size: 9px; font-weight: 900; letter-spacing: 0.2em;
+  color: #ccc5a0; text-transform: uppercase; margin-bottom: 10px;
+}
+.tweak-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.tweak-label { font-size: 9px; color: #8a8070; letter-spacing: 0.1em; text-transform: uppercase; }
+.tweak-btn-group { display: flex; gap: 4px; }
+.tweak-opt {
+  padding: 4px 8px; font-size: 8px; font-weight: 900; letter-spacing: 0.1em;
+  border: 1px solid #3a3a3a; background: #2a2a2a; color: #8a8070;
+  cursor: pointer; border-radius: 3px; text-transform: uppercase;
+  transition: all 0.1s;
+}
+.tweak-opt.active { background: #e8006f; border-color: #e8006f; color: #fff; }
+
+/* ── HARDWARE DETAILS ── */
+.screw {
+  position: absolute; width: 11px; height: 11px; z-index: 50;
+  background: radial-gradient(circle at 35% 35%, #b0a080, #7a6d4a);
+  border-radius: 50%;
+  box-shadow: inset 0 1px 2px rgba(255,255,255,0.35), inset 0 -1px 1px rgba(0,0,0,0.5), 0 1px 3px rgba(0,0,0,0.4);
+}
+.screw::before, .screw::after {
+  content: ''; position: absolute; width: 7px; height: 1.5px;
+  background: rgba(0,0,0,0.5); top: 50%; left: 50%;
+  transform: translate(-50%,-50%) rotate(45deg); border-radius: 1px;
+}
+.screw::after { transform: translate(-50%,-50%) rotate(-45deg); }
+
+/* Speaker grille */
+.speaker-grille {
+  display: grid; grid-template-columns: repeat(14, 1fr);
+  gap: 3.5px; padding: 5px 14px 4px;
+  border-top: 1px solid rgba(90,80,50,0.3);
+}
+.speaker-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #2a2415;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.8), inset 0 0 0 0.5px rgba(0,0,0,0.4);
+}
+
+/* Toggle switches */
+.toggle-bank { display: flex; gap: 8px; align-items: flex-end; }
+.toggle-sw { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.toggle-body {
+  width: 14px; height: 26px; background: #1c1c1c;
+  border-radius: 3px; border: 1px solid #0a0a0a;
+  box-shadow: 2px 3px 0 #000, inset 0 0 4px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06);
+  position: relative; display: flex; align-items: center; justify-content: center;
+}
+.toggle-lever {
+  width: 10px; height: 10px;
+  background: linear-gradient(160deg, #666, #3a3a3a);
+  border-radius: 2px; border: 1px solid #222;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.08);
+  transition: transform 0.12s cubic-bezier(0.25,0.8,0.25,1);
+  position: absolute;
+}
+.toggle-lever.on  { transform: translateY(-5px); }
+.toggle-lever.off { transform: translateY(5px);  }
+.toggle-led {
+  width: 5px; height: 5px; border-radius: 50%;
+  transition: all 0.1s;
+}
+.toggle-sw-label {
+  font-size: 6px; font-weight: 900; letter-spacing: 0.1em;
+  color: rgba(55,45,25,0.65); text-transform: uppercase; text-align: center;
+}
+
+/* Cassette window */
+.cassette-win {
+  background: #08080a; border-radius: 5px;
+  border: 2px solid #050506;
+  box-shadow: inset 2px 2px 5px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(255,255,255,0.03);
+  position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.cassette-led-dot {
+  position: absolute; top: 5px; right: 6px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #1a0000; transition: background 0.08s, box-shadow 0.08s;
+}
+.cassette-led-dot.lit { background: #ff2020; box-shadow: 0 0 7px #ff2020, 0 0 14px rgba(255,32,32,0.4); }
+.cassette-label {
+  position: absolute; bottom: 4px; left: 0; right: 0; text-align: center;
+  font-size: 6px; font-weight: 900; letter-spacing: 0.15em;
+  color: rgba(80,70,40,0.5); text-transform: uppercase;
+}
+
+/* Rotary dial */
+.rotary-wrap { display: flex; flex-direction: column; align-items: center; gap: 1px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.rotary-label { font-size: 6px; font-weight: 900; letter-spacing: 0.12em; color: rgba(55,45,25,0.6); text-transform: uppercase; }
+
+/* Receipt slot slit */
+.receipt-slit {
+  height: 10px; margin: 2px -16px 0;
+  background: linear-gradient(to bottom, #0a0800, #161208 40%, #0a0800);
+  box-shadow: inset 0 3px 8px rgba(0,0,0,0.95), inset 0 -2px 3px rgba(0,0,0,0.6);
+  position: relative;
+}
+.receipt-slit::before {
+  content: ''; position: absolute;
+  inset: 2px 24px; background: #040302; border-radius: 1px;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,1);
+}
+
+/* Warning / serial stickers */
+.warning-sticker {
+  background: #f5c800; border: 1px solid #b09500;
+  padding: 2px 5px; font-size: 6px; font-weight: 900;
+  letter-spacing: 0.12em; color: #1a1000; text-transform: uppercase;
+  transform: rotate(-1.5deg); display: inline-block;
+  box-shadow: 1px 1px 0 rgba(0,0,0,0.25);
+}
+.serial-sticker {
+  background: linear-gradient(135deg, #d8d8d8, #b0b0b0);
+  border: 1px solid #909090; padding: 2px 6px;
+  font-size: 6px; font-family: 'Share Tech Mono', monospace;
+  color: #2a2a2a; display: inline-block;
+  box-shadow: 1px 1px 0 rgba(0,0,0,0.15);
+}
+.stickers-row { display: flex; gap:8px; align-items:center; padding: 3px 0 1px; }
+
+/* Scanlines toggle */
+.scanlines-off .crt-screen::after { display: none; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "casing": "beige",
+  "display": "amber"
+}/*EDITMODE-END*/;
+
+// ── FLIGHT DATA ────────────────────────────────────────────────────
+const FLIGHTS = [
+  { id:1, from:'JFK', to:'LHR', date:'14 MAR 2025', dur:'7H 05M', mi:3459, carrier:'BA 178' },
+  { id:2, from:'LHR', to:'DXB', date:'22 MAR 2025', dur:'6H 50M', mi:3406, carrier:'EK 004' },
+  { id:3, from:'DXB', to:'SIN', date:'01 APR 2025', dur:'7H 00M', mi:3646, carrier:'SQ 497' },
+  { id:4, from:'SIN', to:'NRT', date:'10 APR 2025', dur:'7H 20M', mi:3328, carrier:'NH 842' },
+  { id:5, from:'NRT', to:'LAX', date:'18 APR 2025', dur:'9H 30M', mi:5478, carrier:'UA 837' },
+  { id:6, from:'LAX', to:'JFK', date:'22 APR 2025', dur:'5H 15M', mi:2475, carrier:'AA 006' },
+];
+const TOTAL_MI = FLIGHTS.reduce((s,f)=>s+f.mi, 0);
+
+// City coordinates in SVG 280×130 viewBox
+const CITIES = {
+  JFK: [55, 34], LHR: [117, 24], DXB: [163, 44],
+  SIN: [218, 67], NRT: [233, 31], LAX: [28, 40],
+  CDG: [119, 26], SYD: [233, 103],
+};
+
+// ── SHARED GEO CONSTANTS ─────────────────────────────────────────
+const W = 362, H = 210;
+
+const CITY_GEO = {
+  JFK: [-73.8, 40.6], LHR: [-0.45, 51.5], DXB: [55.4, 25.2],
+  SIN: [103.8, 1.4],  NRT: [140.4, 35.8], LAX: [-118.4, 33.9],
+};
+
+// ── FLAT MAP (with zoom + pan) ────────────────────────────────────
+function WorldMap({ activePath, displayMode, worldTopo, showPaths, showGrid, zoom, onZoom }) {
+  const dragRef = useRef(null);
+  const phosphor    = displayMode === 'amber' ? '#ff9500' : '#6ab04c';
+  const phosphorDim = displayMode === 'amber' ? '#2a1000' : '#0f2808';
+
+  const proj    = d3.geoNaturalEarth1().scale(56 * zoom.k).translate([W/2 + zoom.x, H/2 + 6 + zoom.y]);
+  const pathGen = d3.geoPath().projection(proj);
+  const graticule   = pathGen(d3.geoGraticule().step([30, 20])());
+  const countryPaths = worldTopo
+    ? topojson.feature(worldTopo, worldTopo.objects.countries).features
+        .map(f => pathGen(f)).filter(Boolean)
+    : [];
+  const cityPoints = Object.entries(CITY_GEO).map(([code, coords]) => {
+    const pt = proj(coords); return pt ? {code, x:pt[0], y:pt[1]} : null;
+  }).filter(Boolean);
+
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.2 : 1/1.2;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (W / rect.width);
+    const my = (e.clientY - rect.top)  * (H / rect.height);
+    onZoom(z => {
+      const newK = Math.max(1, Math.min(10, z.k * factor));
+      if (newK === 1) return { k: 1, x: 0, y: 0 };
+      const scale = newK / z.k;
+      return { k: newK, x: mx + (z.x - mx) * scale, y: my + (z.y - my) * scale };
+    });
+  };
+  const handleMouseDown = (e) => {
+    if (zoom.k <= 1) return;
+    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: zoom.x, oy: zoom.y };
+  };
+  const handleMouseMove = (e) => {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.sx, dy = e.clientY - dragRef.current.sy;
+    const rect = e.currentTarget.getBoundingClientRect();
+    onZoom(z => ({ ...z, x: dragRef.current.ox + dx*(W/rect.width), y: dragRef.current.oy + dy*(H/rect.height) }));
+  };
+  const handleMouseUp = () => { dragRef.current = null; };
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`}
+      style={{width:'100%',height:'100%',position:'absolute',inset:0,cursor:zoom.k>1?'grab':'default'}}
+      onWheel={handleWheel} onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+      <defs>
+        <filter id="mg"><feGaussianBlur stdDeviation="1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="mg2"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <clipPath id="mc"><rect x="0" y="0" width={W} height={H}/></clipPath>
+      </defs>
+      {showGrid && <path d={graticule} fill="none" stroke={phosphorDim} strokeWidth="0.4" opacity="0.6" clipPath="url(#mc)"/>}
+      <g clipPath="url(#mc)" fill={displayMode==='amber'?'rgba(40,15,0,0.55)':'rgba(8,25,4,0.55)'} stroke="none">
+        {countryPaths.map((d,i)=><path key={i} d={d}/>)}
+      </g>
+      <g clipPath="url(#mc)" filter="url(#mg)" fill="none" stroke={phosphor} strokeWidth="0.5" opacity="0.9">
+        {countryPaths.map((d,i)=><path key={i} d={d}/>)}
+      </g>
+      {showPaths && FLIGHTS.map((f,i)=>{
+        const fp=proj(CITY_GEO[f.from]), tp=proj(CITY_GEO[f.to]);
+        if(!fp||!tp) return null;
+        const isActive=i<activePath, isAnim=i===activePath;
+        const mx=(fp[0]+tp[0])/2, my=(fp[1]+tp[1])/2-22;
+        return <path key={f.id}
+          d={`M${fp[0]},${fp[1]} Q${mx},${my} ${tp[0]},${tp[1]}`}
+          fill="none" stroke={isActive||isAnim?phosphor:'transparent'}
+          strokeWidth={isAnim?1.8:1.1} strokeDasharray={isAnim?'5 3':'none'}
+          opacity={isActive?0.6:isAnim?1:0} filter={isAnim?'url(#mg2)':undefined}
+          clipPath="url(#mc)"
+          style={isAnim?{animation:'dashMove 0.5s linear infinite'}:undefined}/>;
+      })}
+      {cityPoints.map(({code,x,y})=>(
+        <g key={code} filter="url(#mg)">
+          <circle cx={x} cy={y} r={2+zoom.k*0.2} fill={phosphor} opacity="0.95"/>
+          <text x={x+4} y={y-3} fontSize={5.5+zoom.k*0.3} fill={phosphor} opacity="0.85"
+            fontFamily="'Share Tech Mono',monospace">{code}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+// ── GLOBE (canvas RAF — no React wobble) ─────────────────────────
+function GlobeMap({ activePath, displayMode, worldTopo, showPaths, showGrid }) {
+  const canvasRef   = useRef(null);
+  const rotRef      = useRef([20, -20]);
+  const spinRef     = useRef(true);
+  const dragRef     = useRef(null);
+  const rafRef      = useRef(null);
+  const activeRef   = useRef(activePath);
+  const topoRef     = useRef(null);
+  const displayRef  = useRef(displayMode);
+  const showPathsRef = useRef(showPaths);
+  const showGridRef  = useRef(showGrid);
+
+  useEffect(() => { activeRef.current   = activePath;  }, [activePath]);
+  useEffect(() => { displayRef.current  = displayMode; }, [displayMode]);
+  useEffect(() => { showPathsRef.current = showPaths;  }, [showPaths]);
+  useEffect(() => { showGridRef.current  = showGrid;   }, [showGrid]);
+
+  // Boot the canvas loop once
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width  = rect.width  || 362;
+    canvas.height = rect.height || 210;
+
+    function draw() {
+      const topo = topoRef.current;
+      const dm   = displayRef.current;
+      const ap   = activeRef.current;
+      const [lambda, phi] = rotRef.current;
+      const W2 = canvas.width, H2 = canvas.height;
+      const R  = Math.min(W2, H2) / 2 - 6;
+      const cx = W2/2, cy = H2/2;
+
+      const phos    = dm==='amber' ? '#ff9500' : '#6ab04c';
+      const phosDim = dm==='amber' ? '#2a1000' : '#0f2808';
+      const landClr = dm==='amber' ? 'rgba(50,18,0,0.75)' : 'rgba(10,32,5,0.75)';
+      const oceanClr= dm==='amber' ? '#0e0500' : '#040c02';
+
+      const proj = d3.geoOrthographic()
+        .scale(R).translate([cx,cy])
+        .rotate([lambda, phi, 0]).clipAngle(90);
+      const ctx = canvas.getContext('2d');
+      const path = d3.geoPath().projection(proj).context(ctx);
+
+      ctx.clearRect(0, 0, W2, H2);
+
+      // Ocean
+      ctx.beginPath(); path({type:'Sphere'});
+      const grad = ctx.createRadialGradient(cx-R*0.3,cy-R*0.3,R*0.1,cx,cy,R);
+      grad.addColorStop(0, dm==='amber'?'#1a0800':oceanClr);
+      grad.addColorStop(1, oceanClr);
+      ctx.fillStyle = grad; ctx.fill();
+
+      if (topo) {
+        const land    = topojson.feature(topo, topo.objects.land);
+        const borders = topojson.mesh(topo, topo.objects.countries, (a,b)=>a!==b);
+        const grat    = d3.geoGraticule().step([30,30])();
+
+        // Graticule
+        if (showGridRef.current) {
+          ctx.beginPath(); path(grat);
+          ctx.strokeStyle = phosDim; ctx.lineWidth = 0.35;
+          ctx.globalAlpha = 0.55; ctx.stroke(); ctx.globalAlpha = 1;
+        }
+
+        // Land
+        ctx.beginPath(); path(land);
+        ctx.fillStyle = landClr; ctx.fill();
+
+        // Borders
+        ctx.beginPath(); path(borders);
+        ctx.strokeStyle = phos; ctx.lineWidth = 0.5;
+        ctx.globalAlpha = 0.88; ctx.stroke(); ctx.globalAlpha = 1;
+      }
+
+      // Flight arcs
+      if (showPathsRef.current) {
+        const center = [-lambda, -phi];
+        FLIGHTS.forEach((f, i) => {
+          const from = CITY_GEO[f.from], to = CITY_GEO[f.to];
+          if (!from || !to) return;
+          const isComplete = i < ap, isActive = i === ap;
+          if (!isComplete && !isActive) return;
+          const arc = {type:'Feature', geometry:{type:'LineString', coordinates:[from,to]}};
+          ctx.beginPath(); path(arc);
+          ctx.strokeStyle = phos;
+          ctx.lineWidth   = isActive ? 1.8 : 1.1;
+          ctx.globalAlpha = isActive ? 0.95 : 0.5;
+          ctx.stroke(); ctx.globalAlpha = 1;
+        });
+      }
+
+      // Cities (visible side only)
+      const center2 = [-lambda, -phi];
+      Object.entries(CITY_GEO).forEach(([code, coords]) => {
+        if (d3.geoDistance(coords, center2) >= Math.PI/2 - 0.05) return;
+        const pt = proj(coords); if (!pt) return;
+        ctx.beginPath();
+        ctx.arc(pt[0], pt[1], 2.5, 0, Math.PI*2);
+        ctx.fillStyle = phos; ctx.globalAlpha = 0.95; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.fillStyle = phos;
+        ctx.font = '7px "Share Tech Mono",monospace';
+        ctx.globalAlpha = 0.85;
+        ctx.fillText(code, pt[0]+4, pt[1]-3);
+        ctx.globalAlpha = 1;
+      });
+
+      // Globe rim
+      ctx.beginPath(); path({type:'Sphere'});
+      ctx.strokeStyle = phos; ctx.lineWidth = 0.7;
+      ctx.globalAlpha = 0.55; ctx.stroke(); ctx.globalAlpha = 1;
+    } // end draw()
+    let last = null;
+    function loop(ts) {
+      if (spinRef.current) {
+        const dt = last ? ts - last : 16;
+        rotRef.current = [rotRef.current[0] + dt * 0.005, rotRef.current[1]];
+      }
+      last = ts;
+      draw();
+      rafRef.current = requestAnimationFrame(loop);
+    }
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []); // empty deps — loop runs forever, reads from refs
+
+  // Update topo ref when data arrives (triggers next frame naturally)
+  useEffect(() => { topoRef.current = worldTopo; }, [worldTopo]);
+
+  // Drag handlers
+  const onDragStart = useCallback((e) => {
+    spinRef.current = false;
+    const src = e.touches ? e.touches[0] : e;
+    dragRef.current = { x: src.clientX, y: src.clientY, rot: [...rotRef.current] };
+    e.preventDefault();
+  }, []);
+
+  const onDragMove = useCallback((e) => {
+    if (!dragRef.current) return;
+    const src = e.touches ? e.touches[0] : e;
+    const dx  = src.clientX - dragRef.current.x;
+    const dy  = src.clientY - dragRef.current.y;
+    rotRef.current = [
+      dragRef.current.rot[0] + dx * 0.45,
+      Math.max(-85, Math.min(85, dragRef.current.rot[1] - dy * 0.45)),
+    ];
+    e.preventDefault();
+  }, []);
+
+  const onDragEnd = useCallback(() => {
+    dragRef.current  = null;
+    spinRef.current  = true;  // resume spinning from wherever user left off
+  }, []);
+
+  return (
+    <canvas ref={canvasRef}
+      style={{width:'100%',height:'100%',position:'absolute',inset:0,cursor:'grab',touchAction:'none'}}
+      onMouseDown={onDragStart} onMouseMove={onDragMove}
+      onMouseUp={onDragEnd}     onMouseLeave={onDragEnd}
+      onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}
+    />
+  );
+}
+
+// ── FLIP DIGIT ─────────────────────────────────────────────────────
+function FlipCounter({ target, duration = 1800 }) {
+  const [display, setDisplay] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const tick = () => {
+      const p = Math.min(1, (Date.now()-start)/duration);
+      const eased = p < 0.5 ? 4*p*p*p : 1-Math.pow(-2*p+2,3)/2;
+      setDisplay(Math.floor(eased * target));
+      if (p < 1) requestAnimationFrame(tick);
+      else setDisplay(target);
+    };
+    requestAnimationFrame(tick);
+  }, [target]);
+
+  return String(display).padStart(6,'0').split('').map((d,i)=>(
+    <div key={i} className="flip-digit">{d}</div>
+  ));
+}
+
+// ── SEG DISPLAY ────────────────────────────────────────────────────
+function SegDisplay({ value, size = 'normal' }) {
+  return (
+    <div style={{position:'relative', display:'inline-block'}}>
+      <div className={`seg-display${size==='small'?' seg-display-small':''} dim`} style={{position:'absolute',top:0,left:0,opacity:0.15}}>
+        {value.replace(/[0-9]/g,'8').replace(/[A-Z]/g,'8')}
+      </div>
+      <div className={`seg-display${size==='small'?' seg-display-small':''}`}>{value}</div>
+    </div>
+  );
+}
+
+// ── CASSETTE WINDOW ───────────────────────────────────────────────
+function CassetteWindow({ syncing }) {
+  const [angle, setAngle] = useState(0);
+  const [ledOn, setLedOn] = useState(false);
+  useEffect(() => {
+    if (!syncing) { setAngle(0); setLedOn(false); return; }
+    const t = setInterval(() => {
+      setAngle(a => a + 18);
+      setLedOn(l => !l);
+    }, 80);
+    return () => clearInterval(t);
+  }, [syncing]);
+  const spokeAngles = [0, 72, 144, 216, 288];
+  const Spool = ({ cx, dir=1 }) => (
+    <g transform={`translate(${cx},17) rotate(${angle*dir})`}>
+      <circle r="8" fill="#141410" stroke="#2a2a20" strokeWidth="0.8"/>
+      <circle r="3" fill="#0a0a08"/>
+      {spokeAngles.map(a => (
+        <line key={a} x1="0" y1="3.5" x2="0" y2="7.5"
+          stroke="#363626" strokeWidth="1" transform={`rotate(${a})`}/>
+      ))}
+    </g>
+  );
+  return (
+    <div className="cassette-win" style={{width:74,height:46}}>
+      <div className={`cassette-led-dot${syncing&&ledOn?' lit':''}`}/>
+      <svg width="64" height="36" viewBox="0 0 64 36">
+        <path d="M 10,18 Q 32,10 54,18" fill="none" stroke="#1e1e16" strokeWidth="2"/>
+        <Spool cx={10} dir={1}/>
+        <Spool cx={54} dir={-0.6}/>
+      </svg>
+      <div className="cassette-label">{syncing?'READ':'IDLE'}</div>
+    </div>
+  );
+}
+
+// ── TOGGLE SWITCH ─────────────────────────────────────────────────
+function ToggleSwitch({ label, on, onChange, ledColor='#4aff20' }) {
+  return (
+    <div className="toggle-sw" onClick={onChange}>
+      <div className="toggle-led" style={{
+        background: on ? ledColor : '#1a1a1a',
+        boxShadow: on ? `0 0 5px ${ledColor}` : 'none',
+      }}/>
+      <div className="toggle-body">
+        <div className={`toggle-lever ${on ? 'on' : 'off'}`}/>
+      </div>
+      <div className="toggle-sw-label">{label}</div>
+    </div>
+  );
+}
+
+// ── ROTARY DIAL ───────────────────────────────────────────────────
+function RotaryDial({ zoomK, onDial }) {
+  const dialRef = useRef(null);
+  const dragRef = useRef(null);
+  // Map zoom 1-10 → -135° to +135°
+  const angle = ((zoomK - 1) / 9) * 270 - 135;
+  const notches = Array.from({length:18}, (_,i) => {
+    const a = (-135 + i*(270/17)) * Math.PI/180;
+    return [Math.cos(a), Math.sin(a)];
+  });
+  const onDown = (e) => {
+    const rect = dialRef.current.getBoundingClientRect();
+    dragRef.current = { cx: rect.left+rect.width/2, cy: rect.top+rect.height/2 };
+    e.preventDefault();
+  };
+  const onMove = useCallback((e) => {
+    if (!dragRef.current) return;
+    const src = e.touches ? e.touches[0] : e;
+    const dx = src.clientX - dragRef.current.cx;
+    const dy = src.clientY - dragRef.current.cy;
+    let a = Math.atan2(dy, dx) * 180/Math.PI + 90; // 0° at top
+    if (a > 180) a -= 360;
+    const clamped = Math.max(-135, Math.min(135, a));
+    const newK = Math.max(1, Math.min(10, 1 + ((clamped+135)/270)*9));
+    onDial(Math.round(newK * 10) / 10);
+  }, [onDial]);
+  const onUp = useCallback(() => { dragRef.current = null; }, []);
+  useEffect(() => {
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup',   onUp);
+    window.addEventListener('touchmove', onMove, {passive:true});
+    window.addEventListener('touchend',  onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup',   onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend',  onUp);
+    };
+  }, [onMove, onUp]);
+  return (
+    <div className="rotary-wrap" ref={dialRef} onMouseDown={onDown} onTouchStart={onDown}>
+      <svg width="42" height="42" viewBox="-21 -21 42 42">
+        <circle r="20" fill="#181816" stroke="#080806" strokeWidth="1.5"/>
+        <circle r="17" fill="none" stroke="#2a2a24" strokeWidth="0.5"/>
+        {notches.map(([x,y],i) => (
+          <line key={i} x1={x*15} y1={y*15} x2={x*17.5} y2={y*17.5}
+            stroke={i===0||i===17?'#e8006f':'#333328'} strokeWidth={i===0||i===17?1.2:0.8}/>
+        ))}
+        <g transform={`rotate(${angle})`}>
+          <circle cx={0} cy={-12} r={2.5} fill="#e8006f"
+            style={{filter:'drop-shadow(0 0 3px #e8006f)'}}/>
+        </g>
+        <circle r={5} fill="#222220"/>
+        <circle r={2} fill="#161614"/>
+      </svg>
+      <div className="rotary-label">ZOOM {zoomK.toFixed(1)}×</div>
+    </div>
+  );
+}
+
+// ── BOOT SCREEN ────────────────────────────────────────────────────
+function BootScreen({ onDone }) {
+  const lines = [
+    { text: 'TROTTER HARDWARE v2.4.1', bright: true },
+    { text: 'INITIALIZING SENSORS...' },
+    { text: 'FLIGHT DATABASE: OK' },
+    { text: 'GPS MODULE: OK' },
+    { text: 'LOADING TRAVEL LOG...' },
+    { text: '> 22 FLIGHTS FOUND', bright: true },
+    { text: '> 21,792 MI LOGGED', bright: true },
+    { text: 'READY.', bright: true },
+  ];
+  const [visible, setVisible] = useState(0);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(()=>{
+    const t = setTimeout(()=>{ setVisible(v=>Math.min(v+1,lines.length)); }, 200);
+    return ()=>clearTimeout(t);
+  },[visible]);
+  useEffect(()=>{
+    const t = setInterval(()=>setProgress(p=>{ if(p>=100){clearInterval(t);return 100;} return p+4; }),50);
+    return ()=>clearInterval(t);
+  },[]);
+  useEffect(()=>{
+    if(progress >= 100 && visible >= lines.length) {
+      const t = setTimeout(onDone, 600);
+      return ()=>clearTimeout(t);
+    }
+  },[progress, visible]);
+
+  return (
+    <div className="boot-screen">
+      <div className="boot-logo">TROTTER</div>
+      <div className="boot-sub">THE TRAVEL DECK</div>
+      <div className="boot-terminal">
+        {lines.map((l,i)=>(
+          <div key={i} className={`boot-line${i<visible?' visible':''}${l.bright?' bright':''}`}>{l.text}</div>
+        ))}
+      </div>
+      <div className="boot-progress" style={{marginTop:12}}>
+        <div className="boot-progress-fill" style={{width:`${progress}%`}}/>
+      </div>
+      <div style={{fontFamily:'Share Tech Mono',fontSize:9,color:'#2d5a1b',marginTop:6,letterSpacing:'0.1em'}}>
+        {progress}% LOADED
+      </div>
+    </div>
+  );
+}
+
+// ── FLIGHT LOG SCREEN ─────────────────────────────────────────────
+function FlightLogScreen({ onBack }) {
+  return (
+    <div className="log-screen">
+      <div className="log-header">
+        <div className="log-header-title">FLIGHT LOG</div>
+        <button className="log-back-btn" onClick={onBack}>← HOME</button>
+      </div>
+      <div className="log-body">
+        <div className="receipt-top">
+          <div className="receipt-title-art">* TROTTER *</div>
+          <div style={{fontSize:9,letterSpacing:'0.1em',color:'#8a7a5a',marginBottom:4}}>FLIGHT MANIFEST — 2024/25</div>
+          <div style={{borderBottom:'1px solid #c0b090',marginBottom:4}}/>
+        </div>
+        <div className="receipt-paper">
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'#8a7a5a',borderBottom:'1px solid #c0b090',paddingBottom:4,marginBottom:4}}>
+            <span>FLIGHT</span><span>DATE</span><span>MILES</span>
+          </div>
+          {FLIGHTS.map(f=>(
+            <div key={f.id} style={{borderBottom:'1px dashed #d0c8a8',paddingBottom:5,marginBottom:5}}>
+              <div className="receipt-flight-row">
+                <span className="flight-route">{f.from} → {f.to}</span>
+                <span className="flight-meta">{f.date}</span>
+                <span className="flight-miles">{f.mi.toLocaleString()}</span>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'#8a7a5a'}}>
+                <span>{f.carrier}</span><span>DUR: {f.dur}</span>
+              </div>
+            </div>
+          ))}
+          <div style={{borderTop:'2px solid #3a3020',paddingTop:6,marginTop:4,display:'flex',justifyContent:'space-between'}}>
+            <span style={{fontWeight:'bold',color:'#1a1408'}}>TOTAL FLIGHTS</span>
+            <span style={{color:'#1a1408'}}>{FLIGHTS.length} SECTORS</span>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',marginTop:2}}>
+            <span style={{fontWeight:'bold',color:'#1a1408'}}>LIFETIME MILES</span>
+            <span style={{color:'#e8006f',fontWeight:'bold'}}>{TOTAL_MI.toLocaleString()} MI</span>
+          </div>
+          <div style={{textAlign:'center',marginTop:12,fontSize:8,color:'#c0b090',letterSpacing:'0.1em'}}>
+            *** END OF LOG ***
+            {'\n'}PRINTED 22-APR-2026
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── STATS SCREEN ──────────────────────────────────────────────────
+function StatsScreen({ onBack }) {
+  const [count, setCount] = useState(false);
+  useEffect(()=>{ const t = setTimeout(()=>setCount(true),200); return ()=>clearTimeout(t); },[]);
+
+  function NixieCount({ target, dur }) {
+    const [n, setN] = useState(0);
+    useEffect(()=>{
+      if (!count) return;
+      const start = Date.now();
+      const tick = ()=>{
+        const p = Math.min(1,(Date.now()-start)/dur);
+        const e = 1-Math.pow(1-p,3);
+        setN(Math.floor(e*target));
+        if(p<1) requestAnimationFrame(tick); else setN(target);
+      };
+      requestAnimationFrame(tick);
+    },[count]);
+    return <>{n.toLocaleString()}</>;
+  }
+
+  return (
+    <div className="stats-screen">
+      <div className="stats-header">
+        <div className="log-header-title">TRAVEL STATS</div>
+        <button className="log-back-btn" onClick={onBack}>← HOME</button>
+      </div>
+      <div className="stats-body">
+        <div className="nixie-module">
+          <div className="nixie-label">LIFETIME MILES</div>
+          <div className="nixie-value"><NixieCount target={TOTAL_MI} dur={1800}/></div>
+          <div className="nixie-unit">NAUTICAL MILES LOGGED</div>
+        </div>
+        <div style={{display:'flex',gap:12}}>
+          <div className="nixie-module" style={{flex:1}}>
+            <div className="nixie-label">FLIGHTS</div>
+            <div className="nixie-value" style={{fontSize:30}}><NixieCount target={22} dur={1000}/></div>
+            <div className="nixie-unit">TOTAL SECTORS</div>
+          </div>
+          <div className="nixie-module" style={{flex:1}}>
+            <div className="nixie-label">COUNTRIES</div>
+            <div className="nixie-value" style={{fontSize:30}}><NixieCount target={14} dur={1200}/></div>
+            <div className="nixie-unit">VISITED</div>
+          </div>
+        </div>
+        <div className="route-map-module">
+          <div className="route-map-label">// TOP ROUTES //</div>
+          {[['JFK','LHR',8],['DXB','SIN',5],['NRT','LAX',4],['LAX','JFK',6]].map(([a,b,n],i)=>(
+            <div key={i} className="top-route">
+              <span>{a}</span>
+              <span className="route-arrow">————→</span>
+              <span>{b}</span>
+              <span className="route-count">×{n}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{background:'#1a1608',borderRadius:6,padding:'12px 14px',boxShadow:'4px 4px 0 #5a4020',border:'2px solid #0a0d06'}}>
+          <div style={{fontFamily:'Share Tech Mono',fontSize:8,color:'#804020',letterSpacing:'0.15em',marginBottom:6}}>// STATUS //</div>
+          {[['ELITE STATUS','GOLD TIER'],['NEXT MILESTONE','25,000 MI'],['REMAINING','3,208 MI'],['AVG FLIGHT','3,632 MI']].map(([k,v],i)=>(
+            <div key={i} style={{display:'flex',justifyContent:'space-between',fontFamily:'Share Tech Mono',fontSize:10,color:'#ff9500',textShadow:'0 0 6px rgba(255,149,0,0.5)',padding:'3px 0',borderBottom:'1px solid #1a1a08'}}>
+              <span style={{color:'#5a3010'}}>{k}</span>
+              <span>{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MAIN APP ──────────────────────────────────────────────────────
+function TrotterApp() {
+  const savedScreen = localStorage.getItem('trotter_screen') || 'boot';
+  const [screen, setScreenRaw] = useState(savedScreen);
+  const [activePath, setActivePath] = useState(0);
+  const [syncPressed, setSyncPressed] = useState(false);
+  const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
+  const [tweaksVisible, setTweaksVisible] = useState(false);
+  const [time, setTime] = useState(new Date());
+  const [mapMode, setMapMode] = useState('map');
+  const [worldTopo, setWorldTopo] = useState(null);
+  const [showPaths, setShowPaths] = useState(true);
+  const [showGrid,  setShowGrid]  = useState(true);
+  const [showScanlines, setShowScanlines] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [mapZoom, setMapZoom] = useState({ k:1, x:0, y:0 });
+
+  const setScreen = (s) => { setScreenRaw(s); localStorage.setItem('trotter_screen',s); };
+
+  useEffect(()=>{ const t = setInterval(()=>setTime(new Date()),1000); return ()=>clearInterval(t); },[]);
+
+  // Fetch world topojson once
+  useEffect(()=>{
+    fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+      .then(r=>r.json()).then(setWorldTopo).catch(()=>{});
+  },[]);
+
+  // Animate flight paths on home screen
+  useEffect(()=>{
+    if (screen !== 'home') return;
+    setActivePath(0);
+    let i = 0;
+    const t = setInterval(()=>{
+      i++;
+      setActivePath(i);
+      if (i >= FLIGHTS.length) clearInterval(t);
+    }, 700);
+    return ()=>clearInterval(t);
+  },[screen]);
+
+  const pad2 = n => String(n).padStart(2,'0');
+  const timeStr = `${pad2(time.getHours())}.${pad2(time.getMinutes())}`;
+  const dateStr = `${pad2(time.getDate())}-${pad2(time.getMonth()+1)}-${String(time.getFullYear()).slice(2)}`;
+
+  const displayMode = tweaks.display;
+  const casingColor = tweaks.casing === 'yellow' ? '#e8c800' : '#d4c8a8';
+  const casingDark = tweaks.casing === 'yellow' ? '#b09000' : '#8a7d5a';
+  const casingMid = tweaks.casing === 'yellow' ? '#d4bc00' : '#c8bc98';
+  const casingPanel = tweaks.casing === 'yellow' ? '#d0bc00' : '#cec29e';
+
+  const handleSync = () => {
+    setSyncPressed(true);
+    setIsSyncing(true);
+    setActivePath(0);
+    let i = 0;
+    const t = setInterval(()=>{
+      i++; setActivePath(i);
+      if(i>=FLIGHTS.length){ clearInterval(t); setSyncPressed(false); setIsSyncing(false); }
+    },600);
+  };
+
+  // Tweaks postMessage protocol
+  useEffect(()=>{
+    const handler = (e) => {
+      if (e.data?.type === '__activate_edit_mode') setTweaksVisible(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksVisible(false);
+    };
+    window.addEventListener('message', handler);
+    window.parent.postMessage({type:'__edit_mode_available'},'*');
+    return ()=>window.removeEventListener('message',handler);
+  },[]);
+
+  const applyTweak = (key, val) => {
+    const next = {...tweaks, [key]: val};
+    setTweaks(next);
+    window.parent.postMessage({type:'__edit_mode_set_keys', edits: next},'*');
+  };
+
+  return (
+    <>
+      {/* Tweaks panel */}
+      <div className={`tweaks-panel${tweaksVisible?' visible':''}`}>
+        <div className="tweaks-title">Tweaks</div>
+        <div className="tweak-row">
+          <span className="tweak-label">Casing</span>
+          <div className="tweak-btn-group">
+            {['beige','yellow'].map(v=>(
+              <button key={v} className={`tweak-opt${tweaks.casing===v?' active':''}`} onClick={()=>applyTweak('casing',v)}>{v}</button>
+            ))}
+          </div>
+        </div>
+        <div className="tweak-row">
+          <span className="tweak-label">Display</span>
+          <div className="tweak-btn-group">
+            {['green','amber'].map(v=>(
+              <button key={v} className={`tweak-opt${tweaks.display===v?' active':''}`} onClick={()=>applyTweak('display',v)}>{v}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="trotter-shell" style={{background: casingColor}}>
+        {/* Boot screen overlay */}
+        {screen === 'boot' && <BootScreen onDone={()=>setScreen('home')}/>}
+        {screen === 'log' && <FlightLogScreen onBack={()=>setScreen('home')}/>}
+        {screen === 'stats' && <StatsScreen onBack={()=>setScreen('home')}/>}
+
+        {/* Status bar */}
+        <div className="status-bar" style={{background:casingMid, borderBottomColor:casingDark}}>
+          <span className="status-label">{dateStr}</span>
+          <span className="status-brand">TROTTER</span>
+          <span className="status-label">{timeStr}</span>
+        </div>
+
+        <div className={`crt-zone${showScanlines?'':' scanlines-off'}`} style={{borderBottomColor:casingDark}}>
+          <div className="crt-bezel">
+            <div className="crt-screen" style={{background: displayMode==='amber'
+              ? 'radial-gradient(ellipse at 50% 40%, #1a0a00 0%, #080400 100%)'
+              : 'radial-gradient(ellipse at 50% 40%, #0d2209 0%, #050c03 100%)'}}>
+              {mapMode === 'map'
+                ? <WorldMap activePath={activePath} displayMode={displayMode} worldTopo={worldTopo}
+                    showPaths={showPaths} showGrid={showGrid} zoom={mapZoom} onZoom={setMapZoom}/>
+                : <GlobeMap activePath={activePath} displayMode={displayMode} worldTopo={worldTopo}
+                    showPaths={showPaths} showGrid={showGrid}/>
+              }
+              <div className="crt-label">{mapMode==='map' ? 'RADAR / FLIGHT MAP' : 'ORTHOGRAPHIC GLOBE'}</div>
+              <div className="crt-coords">
+                {activePath > 0 ? `${activePath}/${FLIGHTS.length} PATHS` : 'AWAITING SYNC'}
+              </div>
+            </div>
+          </div>
+          {/* View toggle bar */}
+          <div className="view-toggle-bar">
+            {[
+              { id:'map',   icon:'▦', label:'MAP'   },
+              { id:'globe', icon:'◉', label:'GLOBE' },
+            ].map(({id, icon, label}) => (
+              <button key={id}
+                className={`view-toggle-btn${mapMode===id ? (displayMode==='amber' ? ' active-amber' : ' active') : ''}`}
+                onClick={()=>setMapMode(id)}
+              >
+                {icon} {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Corner screws */}
+        {[{top:14,left:14},{top:14,right:14},{bottom:48,left:14},{bottom:48,right:14}].map((pos,i)=>(
+          <div key={i} className="screw" style={{position:'absolute',...pos}}/>
+        ))}
+
+        {/* CONTROL PANEL */}
+        <div className="control-panel" style={{background:casingPanel}}>
+
+          {/* Stats Row */}
+          <div className="stats-row">
+            <div className="miles-module">
+              <div className="miles-label">LIFETIME MI</div>
+              <div className="miles-counter">
+                {screen === 'home' && <FlipCounter target={TOTAL_MI} duration={2000}/>}
+              </div>
+            </div>
+            <div className="stat-module">
+              <div className="stat-module-label">LOCAL</div>
+              <SegDisplay value={timeStr}/>
+            </div>
+          </div>
+
+          <div className="panel-divider" style={{background:`linear-gradient(90deg,${casingDark} 0%,#a09070 50%,${casingDark} 100%)`}}/>
+
+          {/* Cassette + Layer Toggles row */}
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <CassetteWindow syncing={isSyncing}/>
+            <div style={{flex:1}}/>
+            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
+              <div style={{fontSize:7,fontWeight:900,letterSpacing:'0.12em',color:'rgba(55,45,25,0.55)',textTransform:'uppercase'}}>LAYERS</div>
+              <div className="toggle-bank">
+                <ToggleSwitch label="PATHS" on={showPaths}  onChange={()=>setShowPaths(v=>!v)} ledColor="#e8006f"/>
+                <ToggleSwitch label="GRID"  on={showGrid}   onChange={()=>setShowGrid(v=>!v)}  ledColor="#4a9a20"/>
+                <ToggleSwitch label="SCAN"  on={showScanlines} onChange={()=>setShowScanlines(v=>!v)} ledColor="#6a8a50"/>
+              </div>
+            </div>
+          </div>
+
+          {/* Receipt slit */}
+          <div className="receipt-slit"/>
+
+          {/* Receipt flight log snippet */}
+          <div className="receipt-module" style={{boxShadow:`3px 3px 0 ${casingDark}`}}>
+            <div className="receipt-header">
+              <span className="receipt-header-text">RECENT FLIGHTS</span>
+              <span style={{fontSize:8,color:'#e8006f',fontWeight:900,letterSpacing:'0.1em'}}>← SCROLL</span>
+            </div>
+            <div className="receipt-slot">
+              {FLIGHTS.slice(0,3).map(f=>(
+                <div key={f.id} className="receipt-row" style={{display:'flex',justifyContent:'space-between',borderBottom:'1px dotted #c0b090',padding:'2px 0'}}>
+                  <span style={{fontWeight:'bold'}}>{f.from}→{f.to}</span>
+                  <span style={{color:'#8a7a5a',fontSize:9}}>{f.date}</span>
+                  <span style={{color:'#e8006f'}}>{f.mi.toLocaleString()}mi</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel-divider" style={{background:`linear-gradient(90deg,${casingDark} 0%,#a09070 50%,${casingDark} 100%)`}}/>
+
+          {/* Buttons + Rotary Dial */}
+          <div className="buttons-row">
+            <button
+              className={`chunky-btn primary${syncPressed?' pressed':''}`}
+              onMouseDown={()=>setSyncPressed(true)}
+              onMouseUp={()=>setSyncPressed(false)}
+              onTouchStart={()=>setSyncPressed(true)}
+              onTouchEnd={()=>{setSyncPressed(false);handleSync();}}
+              onClick={handleSync}
+            >⟳ SYNC</button>
+            <button className="chunky-btn" onClick={()=>setScreen('log')}>FLIGHT LOG</button>
+            <button className="chunky-btn accent" onClick={()=>setScreen('stats')}>STATS</button>
+            {mapMode==='map' && (
+              <RotaryDial zoomK={mapZoom.k} onDial={k=>setMapZoom({k,x:0,y:0})}/>
+            )}
+          </div>
+
+          {/* Speaker grille */}
+          <div className="speaker-grille" style={{borderTopColor:casingDark}}>
+            {Array.from({length:42}).map((_,i)=><div key={i} className="speaker-dot"/>)}
+          </div>
+
+          {/* Stickers */}
+          <div className="stickers-row">
+            <span className="warning-sticker">⚠ CAUTION: DATA LINK</span>
+            <div style={{flex:1}}/>
+            <span className="serial-sticker">S/N TR0TT-MK2-260422</span>
+          </div>
+        </div>
+
+        {/* Home indicator */}
+        <div className="home-ind" style={{background:casingMid,borderTopColor:casingDark}}>
+          <div className="home-bar" style={{background:casingDark}}/>
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes dashMove {
+          from { stroke-dashoffset: 0; }
+          to   { stroke-dashoffset: -14; }
+        }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #f0ead8; }
+        ::-webkit-scrollbar-thumb { background: #8a7d5a; }
+      `}</style>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<TrotterApp/>);
+</script>
+</body>
+</html>
