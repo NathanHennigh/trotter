@@ -212,6 +212,241 @@ class TestCheckIdentity:
 
 
 class TestHeuristicParser:
+    def test_delta_trip_details_compact_route(self):
+        from app.services.parser import parse_email
+
+        text = """
+        Your LGA > ATL Trip Details
+        Everything you need to know for your upcoming flight.
+        DELTA CONFIRMATION: ABC123
+        DEPARTURE LGA 6:20 PM Mon, Apr 27 DL343
+        DESTINATION ATL 8:53 PM Mon, Apr 27
+        Get Ready To Go
+        """
+
+        result = parse_email(
+            html="",
+            plain_text=text,
+            attachments=[],
+            user_name="Nathan Hennigh",
+            aliases=[],
+            received_at="Fri, 24 Apr 2020 12:00:00 +0000",
+            subject="Your LGA > ATL Trip Details",
+            from_email="DeltaAirLines@t.delta.com",
+        )
+
+        assert len(result.flights) == 1
+        flight = result.flights[0]
+        assert flight.dep_airport == "LGA"
+        assert flight.arr_airport == "ATL"
+        assert flight.flight_number == "DL343"
+        assert flight.dep_time.year == 2020
+        assert flight.dep_time.hour == 18
+        assert flight.arr_time.hour == 20
+
+    def test_aa_trip_confirmation_rows(self):
+        from app.services.parser import parse_email
+
+        text = """
+        Your trip confirmation-PEPHOZ
+        Thursday, November 1, 2018 LGA DFW 3:59 PM 6:59 PM New York La Guardia
+        Dallas/Fort Worth American Airlines 1608 Economy
+        Sunday, November 4, 2018 DFW LGA 4:47 PM 9:03 PM Dallas/Fort Worth
+        New York La Guardia American Airlines 1294 Economy
+        """
+
+        result = parse_email(
+            html="",
+            plain_text=text,
+            attachments=[],
+            user_name="Nathan Hennigh",
+            aliases=[],
+            received_at="Wed, 31 Oct 2018 12:00:00 +0000",
+            subject="Your trip confirmation-PEPHOZ 01NOV",
+            from_email="American Airlines <notify.email.aa.com>",
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["AA1608", "AA1294"]
+        assert [(flight.dep_airport, flight.arr_airport) for flight in result.flights] == [
+            ("LGA", "DFW"),
+            ("DFW", "LGA"),
+        ]
+        assert result.flights[0].dep_time.year == 2018
+
+    def test_united_eticket_rows(self):
+        from app.services.parser import parse_email
+
+        text = """
+        FLIGHT INFORMATION Day, Date Flight Class Departure City and Time Arrival City and Time
+        Wed, 27MAR19 UA2044 N SAN FRANCISCO, CA (SFO) 3:00 PM NEWARK, NJ (EWR - LIBERTY) 11:36 PM 757-200
+        Mon, 01APR19 UA1885 N NEWARK, NJ (EWR - LIBERTY) 4:00 PM SAN FRANCISCO, CA (SFO) 7:26 PM A320
+        """
+
+        result = parse_email(
+            html="",
+            plain_text=text,
+            attachments=[],
+            user_name="Nathan Hennigh",
+            aliases=[],
+            received_at="Tue, 26 Mar 2019 12:00:00 +0000",
+            subject="eTicket Itinerary and Receipt for Confirmation EM1HC7",
+            from_email="United Airlines <united.com>",
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["UA2044", "UA1885"]
+        assert [(flight.dep_airport, flight.arr_airport) for flight in result.flights] == [
+            ("SFO", "EWR"),
+            ("EWR", "SFO"),
+        ]
+        assert result.flights[0].dep_time.year == 2019
+
+    def test_frontier_confirmation_rows(self):
+        from app.services.parser import parse_email
+
+        text = """
+        Your Flight Confirmation Code A6RVTV
+        DEPARTING FLIGHT 507 Dallas (DFW) to Denver (DEN)
+        Depart: 3/4/2022 6:00 AM | Arrive: 3/4/2022 7:12 AM Total Duration
+        RETURNING FLIGHT 506 Denver (DEN) to Dallas (DFW)
+        Depart: 3/11/2022 8:00 PM | Arrive: 3/11/2022 10:56 PM Total Duration
+        """
+
+        result = parse_email(
+            html="",
+            plain_text=text,
+            attachments=[],
+            user_name="Nathan Hennigh",
+            aliases=[],
+            received_at="Thu, 03 Mar 2022 12:00:00 +0000",
+            subject="Your Flight Confirmation Code A6RVTV",
+            from_email="Frontier Airlines <emails.flyfrontier.com>",
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["F9507", "F9506"]
+        assert [(flight.dep_airport, flight.arr_airport) for flight in result.flights] == [
+            ("DFW", "DEN"),
+            ("DEN", "DFW"),
+        ]
+
+    def test_studentuniverse_departs_arrives_rows(self):
+        from app.services.parser import parse_email
+
+        text = """
+        Your StudentUniverse Order
+        Traveler Nathan Hennigh
+        Royal Air Maroc Flight 0262 has been confirmed and departs NBO 3:30AM
+        Sat, Jul 16, 2016 arrives CMN 9:50AM Sat, Jul 16, 2016 8hr 20min
+        Royal Air Maroc Flight 0200 departs CMN 3:05PM Sat, Jul 16, 2016
+        arrives JFK 5:55PM Sat, Jul 16, 2016
+        """
+
+        result = parse_email(
+            html="",
+            plain_text=text,
+            attachments=[],
+            user_name="Nathan Hennigh",
+            aliases=[],
+            received_at="Mon, 13 Jun 2016 12:00:00 +0000",
+            subject="Your StudentUniverse Order - June 13, 2016",
+            from_email="StudentUniverse <travel@studentuniverse.com>",
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["AT0262", "AT0200"]
+        assert [(flight.dep_airport, flight.arr_airport) for flight in result.flights] == [
+            ("NBO", "CMN"),
+            ("CMN", "JFK"),
+        ]
+
+    def test_southwest_forwarded_pretrip_markup(self):
+        from app.services.parser import parse_email
+
+        text = """
+        From: Southwest Airlines
+        Confirmation # *3YWWF2*
+        PASSENGER Nathan Hennigh
+        Your complete itinerary
+        *Flight :* Saturday 01/14/2023
+        FLIGHT # 1783
+        DEPARTS *BNA 2:20*PM Nashville
+        ARRIVES *DAL 4:30*PM Dallas (Love)
+        """
+
+        result = parse_email(
+            html="",
+            plain_text=text,
+            attachments=[],
+            user_name="Nathan Hennigh",
+            aliases=[],
+            received_at="Fri, 13 Jan 2023 12:00:00 +0000",
+            subject="Fwd: What you'll need for your Dallas trip (3YWWF2).",
+            from_email="Southwest Airlines <SouthwestAirlines@iluv.southwest.com>",
+        )
+
+        assert len(result.flights) == 1
+        assert result.flights[0].flight_number == "WN1783"
+        assert result.flights[0].dep_airport == "BNA"
+        assert result.flights[0].arr_airport == "DAL"
+
+    def test_emirates_labeled_route_time_rows(self):
+        from app.services.parser import parse_email
+
+        text = """
+        Your itinerary
+        Booking reference NPDTXW
+        *Depart* *Arrive*
+        * NBO * Nairobi * DXB * Dubai * 16:50 * Friday 10 Jan 20 * 22:50 * Friday 10 Jan 20 *
+        Flight * EK720 *Aircraft* Boeing 777-300ER
+        * DXB * Dubai * EWR * Newark * 02:40 * Saturday 11 Jan 20 * 07:55 * Saturday 11 Jan 20 *
+        Flight * EK223 *Aircraft* Boeing 777-300ER
+        Passengers Nathancharles Hennigh
+        """
+
+        result = parse_email(
+            html="",
+            plain_text=text,
+            attachments=[],
+            user_name="Nathan Hennigh",
+            aliases=["Nathancharles Hennigh"],
+            received_at="Thu, 09 Jan 2020 12:00:00 +0000",
+            subject="Your itinerary - NPDTXW",
+            from_email="Emirates <do-not-reply@emirates.email>",
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["EK720", "EK223"]
+        assert [(flight.dep_airport, flight.arr_airport) for flight in result.flights] == [
+            ("NBO", "DXB"),
+            ("DXB", "EWR"),
+        ]
+        assert result.flights[0].dep_time.year == 2020
+
+    def test_spirit_confirmation_table_without_flight_number(self):
+        from app.services.parser import parse_email
+
+        html = """
+        <html><body>
+        <p>Spirit Airlines Flight Confirmation: GJPWKE</p>
+        <tr id="FlightHeader"><td><strong>SUNDAY, AUGUST 18, 2019 </strong></td><td>TIME</td></tr>
+        <tr id="FlightFrom"><td>New York, NY - LaGuardia </td><td>1:49 PM</td><td>03 h 51 min</td></tr>
+        <tr id="FlightTo"><td>Dallas/Fort Worth, TX </td><td>4:40 PM </td><td></td></tr>
+        </body></html>
+        """
+
+        result = parse_email(
+            html=html,
+            plain_text="",
+            attachments=[],
+            user_name="Nathan Hennigh",
+            aliases=[],
+            received_at="Tue, 30 Jul 2019 12:00:00 +0000",
+            subject="Spirit Airlines Flight Confirmation: GJPWKE",
+            from_email="Spirit Airlines <booking@fly.spirit-airlines.com>",
+        )
+
+        assert len(result.flights) == 1
+        assert result.flights[0].airline == "NK"
+        assert result.flights[0].dep_airport == "LGA"
+        assert result.flights[0].arr_airport == "DFW"
+
     def test_no_flight_text_returns_empty(self):
         from app.services.parser import extract_heuristic_flights
 
@@ -869,3 +1104,452 @@ class TestAirportExtraction:
         )
 
         assert extract_heuristic_flights(text) == []
+
+    def test_priceline_checkin_alert_parses_full_segment(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "American Airlines Flight 1382 Departs: Departs Newark Liberty Intl Airport (EWR) "
+                "Saturday, January 11 2020 at 12:02 PM Arrives: Arrives Dallas/Fort Worth Intl "
+                "Airport (DFW) Saturday, January 11 2020 at 3:07 PM"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+            subject="Fwd: Check in now for American Airlines Flight 1382 from EWR to DFW",
+            from_email="Priceline.com <trans@priceline.com>",
+        )
+
+        assert len(result.flights) == 1
+        assert result.flights[0].flight_number == "AA1382"
+        assert (result.flights[0].dep_airport, result.flights[0].arr_airport) == ("EWR", "DFW")
+
+    def test_allegiant_itinerary_parses_outbound_and_return(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Your confirmation number is: 97BCD4 Flight Details Departing Flight Information "
+                "Date Tue, Jul 23, 2019 Flight # 1915 Departure Airport Newark Liberty International "
+                "Airport (EWR) Map Departs 12:00 PM Arrival Airport Destin/Fort Walton Beach FL (VPS) "
+                "Map Arrives 01:45 PM Returning Flight Information Date Sun, Aug 04, 2019 Flight # 1904 "
+                "Departure Airport Destin/Fort Walton Beach FL (VPS) Map Departs 07:30 AM Arrival Airport "
+                "Newark Liberty International Airport (EWR) Map Arrives 11:00 AM"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["G41915", "G41904"]
+        assert [(flight.dep_airport, flight.arr_airport) for flight in result.flights] == [
+            ("EWR", "VPS"),
+            ("VPS", "EWR"),
+        ]
+
+    def test_plain_aa_trip_details_parses_table_rows(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "AA Record Locator: WAOIUG Your Itinerary Carrier Flight Number Departing Arriving "
+                "AMERICAN AIRLINES 1198 SFO San Francisco May 28, 2019 05:50 AM DFW Dallas/ Fort Worth "
+                "May 28, 2019 11:24 AM AMERICAN AIRLINES 446 DFW Dallas/ Fort Worth Jun 11, 2019 "
+                "10:24 PM SFO San Francisco Jun 12, 2019 12:10 AM"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["AA1198", "AA446"]
+        assert result.flights[1].arr_time.day == 12
+
+    def test_sun_country_trip_details_parse_route(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Reservation code: E5J34M Trip Details Dallas/Ft. Worth, TX to Punta Cana, "
+                "Dominican Republic SY739 Nonstop 8:15AM Dallas/Ft. Worth, TX (DFW) June 19, 2026 "
+                "4h 50m 2:05PM Punta Cana, Dominican Republic (PUJ) June 19, 2026"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+        )
+
+        assert len(result.flights) == 1
+        assert result.flights[0].flight_number == "SY739"
+        assert (result.flights[0].dep_airport, result.flights[0].arr_airport) == ("DFW", "PUJ")
+
+    def test_frontier_simple_confirmation_row(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Trip Confirmation Number: D7S3FZ ORLANDO, FL (MCO) RALEIGH/DURHAM, NC (RDU) "
+                "Depart: Fri, Dec 14, 2018 Flight Departure Arrival Duration F9 1712 "
+                "09:03 AM ORLANDO, FL (MCO) 10:55 AM RALEIGH/DURHAM, NC (RDU) 1hr 52min"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+        )
+
+        assert len(result.flights) == 1
+        assert result.flights[0].flight_number == "F91712"
+        assert result.flights[0].pnr == "D7S3FZ"
+
+    def test_delta_receipt_itinerary_row(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Your Trip Confirmation #: GVPIAT Fri, 08FEB DEPART ARRIVE DELTA 1353 "
+                "Basic Economy (E) NYC-KENNEDY 5:15pm SAN FRANCISCO, CA 8:59pm"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+            received_at="Fri, 01 Feb 2019 12:00:00 +0000",
+        )
+
+        assert len(result.flights) == 1
+        assert result.flights[0].flight_number == "DL1353"
+        assert (result.flights[0].dep_airport, result.flights[0].arr_airport) == ("JFK", "SFO")
+
+    def test_expedia_flight_rows_parse_each_segment(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Itinerary # 72252633231840 Dallas (DFW) to Denver (DEN) Frontier Airlines 507 "
+                "6:00am Dallas, TX, United States (DFW-Dallas-Fort Worth Intl.) to Denver, CO, "
+                "United States (DEN-Denver Intl.) Economy Fri, Mar 4, 6:00am - 7:12am 2h 12m "
+                "flight duration Denver (DEN) to Dallas (DFW) Frontier Airlines 506 8:00pm "
+                "Denver, CO, United States (DEN-Denver Intl.) to Dallas, TX, United States "
+                "(DFW-Dallas-Fort Worth Intl.) Fri, Mar 11, 8:00pm - 10:56pm 1h 56m flight duration"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+            received_at="Sat, 19 Feb 2022 12:00:00 +0000",
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["F9507", "F9506"]
+
+    def test_ba_eticket_row_infers_airports_from_places(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "British Airways booking reference: TEHAV3 AA1044: American Airlines | Economy | Confirmed "
+                "Depart: 27 Sep 2023 19:21 - Dallas Ft Worth (TX) (Dallas) - Terminal 0 "
+                "Arrive: 27 Sep 2023 21:19 - Nashville International (TN) Passenger list MR NATHAN HENNIGH"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+        )
+
+        assert len(result.flights) == 1
+        assert result.flights[0].flight_number == "AA1044"
+        assert (result.flights[0].dep_airport, result.flights[0].arr_airport) == ("DFW", "BNA")
+
+    def test_lifemiles_award_table_parses_segments(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Your reservation code: 4ZVDLA Flight 1 UA2371 New York(LGA) - Houston(IAH) "
+                "Departure: April, 8 th, 2025 07:45 Arrival: April, 8 th, 2025 10:48 "
+                "Flight 2 UA1297 Houston(IAH) - New York(LGA) Departure: April, 14 th, 2025 14:30 "
+                "Arrival: April, 14 th, 2025 19:07"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["UA2371", "UA1297"]
+
+    def test_iberia_purchase_details_parse_connection_without_cross_pairing(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "The receipts of your purchase for the booking MEQQ0 from Tangier, Morocco to Madrid, Spain "
+                "Tuesday, June 7, 2022 IB8797 Flight operated by Iberia Regional Air Nostrum Departure 12:25 h "
+                "Tangier (Tangier) Arrival 14:50 h Madrid (Madrid) from Madrid, Spain to Palma de Mallorca, Spain "
+                "Tuesday, June 7, 2022 IB3912 Flight operated by Iberia Express Departure 15:45 h Madrid (Madrid) "
+                "Arrival 17:10 h Palma de Mallorca (Palma de Mallorca)"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["IB8797", "IB3912"]
+        assert [(flight.dep_airport, flight.arr_airport) for flight in result.flights] == [
+            ("TNG", "MAD"),
+            ("MAD", "PMI"),
+        ]
+
+    def test_priceline_forwarded_checkin_omits_repeated_depart_arrive_labels(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Check in now for Emirates Airlines Flight 720 from NBO to DXB, Confirmation NPDTXW "
+                "Emirates Airlines Flight 720 Departs: Jomo Kenyatta Intl Airport (NBO) "
+                "Friday, January 10 2020 at 4:50 PM Arrives: Dubai Intl Airport (DXB) "
+                "Friday, January 10 2020 at 10:50 PM Terminal: 1B"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+        )
+
+        assert len(result.flights) == 1
+        assert result.flights[0].flight_number == "EK720"
+        assert (result.flights[0].dep_airport, result.flights[0].arr_airport) == ("NBO", "DXB")
+
+    def test_united_forwarded_reservation_table_parses_segments(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Itinerary for Record Locator BB8851 UAL Record Locator OB5PJV "
+                "Fri 11Dec 2020 United Airlines 3462 Dallas Dallas/Fort Worth Intl Apt, US "
+                "Terminal:E 02:20 PM Chicago O'Hare International Apt, US Terminal:2 04:45 PM "
+                "Duration: 2h 25m United Airlines 907 Chicago O'Hare International Apt, US "
+                "Terminal:1 06:35 PM Frankfurt International Apt, DE Terminal:1 09:45 AM Duration: 8h 10m"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+        )
+
+        assert [flight.flight_number for flight in result.flights] == ["UA3462", "UA907"]
+        assert [(flight.dep_airport, flight.arr_airport) for flight in result.flights] == [
+            ("DFW", "ORD"),
+            ("ORD", "FRA"),
+        ]
+
+    def test_alaska_partner_confirmation_parses_operating_airline(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Confirmation code: LGCOFH Flight information Flight: American 2787 "
+                "Departs: Nashville (BNA) on Tue, Mar 24, 2026 at 6:00 am "
+                "Arrives: Dallas-Ft. Worth, TX (DFW) on Tue, Mar 24, 2026 at 8:25 am"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+        )
+
+        assert len(result.flights) == 1
+        assert result.flights[0].flight_number == "AA2787"
+        assert result.flights[0].pnr == "LGCOFH"
+
+    def test_justfly_booking_shell_without_itinerary_does_not_parse(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html=(
+                "You're all set! To view or print your boarding pass, go to your airline's "
+                "website and enter your confirmation number. JustFly Booking Number: 218-974-582 "
+                "Ethiopian Airlines Confirmation Number: UTIKKU Manage my Booking"
+            ),
+            plain_text="",
+            attachments=[],
+            user_name="",
+            aliases=[],
+            subject="Re: Your trip confirmation and receipt",
+            from_email="David Hennigh <davidandjuliahennigh@gmail.com>",
+        )
+
+        assert result.flights == []
+
+    def test_legacy_terminal_itinerary_parses_without_forward_wrapper(self):
+        import json
+
+        from app.services.parser import parse_email
+
+        fixture = json.loads(
+            (FIXTURES / "regressions" / "gmail.com__Fwd_Important_Information_Regarding_Your__176e6a1ed4.json")
+            .read_text(encoding="utf-8")
+        )
+        body = fixture["plain_text"].split("Dear DAVID HENNIGH,", 1)[1]
+
+        result = parse_email(
+            html="",
+            plain_text=body,
+            attachments=[],
+            user_name="",
+            aliases=[],
+            received_at=fixture["received_at"],
+            subject="Important Information Regarding Your Travel to Nairobi",
+            from_email="travel@example.com",
+        )
+
+        assert len(result.flights) == 6
+        assert [(flight.dep_airport, flight.arr_airport) for flight in result.flights] == [
+            ("DFW", "ORD"),
+            ("ORD", "FRA"),
+            ("FRA", "NBO"),
+            ("NBO", "FRA"),
+            ("FRA", "EWR"),
+            ("EWR", "DFW"),
+        ]
+
+    def test_ba_eticket_itinerary_vertical_receipt_parses(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Your Itinerary\n"
+                "ABC123\n"
+                "American Airlines | Economy | Confirmed\n"
+                "27 Sep 2023\n"
+                "19:21\n"
+                "Dallas Ft Worth (TX) (Dallas)\n"
+                "Terminal 0\n"
+                "27 Sep 2023\n"
+                "21:19\n"
+                "Nashville International (TN)\n"
+                "Passenger MR NATHAN HENNIGH"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+            subject="Fwd: Your e-ticket receipt TEHAV3: 27 Sep 2023 19:21",
+        )
+
+        assert len(result.flights) == 1
+        flight = result.flights[0]
+        assert (flight.dep_airport, flight.arr_airport) == ("DFW", "BNA")
+        assert flight.airline == "AA"
+        assert flight.dep_time.hour == 19
+        assert flight.arr_time.hour == 21
+
+    def test_frontier_departing_row_parses_without_confirmation_shell(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Departing Flight 3283 Mar. 11, 2024 BWI 1:34 PM DFW 4:15 PM "
+                "Total Time: 03 hrs 41 min | Non-Stop"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+            subject="Important information for your upcoming trip",
+        )
+
+        assert len(result.flights) == 1
+        flight = result.flights[0]
+        assert (flight.dep_airport, flight.arr_airport) == ("BWI", "DFW")
+        assert flight.flight_number == "F93283"
+
+    def test_southwest_sparse_trip_email_parses_route_and_date(self):
+        from datetime import datetime, timezone
+
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "January 16\n"
+                "PNS\n"
+                "TPA\n"
+                "Pensacola to Tampa\n"
+                "Full itinerary\n"
+                "Confirmation # ABC123"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+            received_at=datetime(2021, 12, 17, tzinfo=timezone.utc),
+            subject="Fwd: Your 01/16 trip to Tampa is all set.",
+        )
+
+        assert len(result.flights) == 1
+        flight = result.flights[0]
+        assert (flight.dep_airport, flight.arr_airport) == ("PNS", "TPA")
+        assert flight.airline == "WN"
+        assert flight.dep_time.year == 2022
+        assert flight.dep_time.month == 1
+        assert flight.dep_time.day == 16
+
+    def test_southwest_sparse_trip_email_parses_parenthesized_place_names(self):
+        from datetime import datetime, timezone
+
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "January 14\n"
+                "BNA\n"
+                "DAL\n"
+                "Nashville to Dallas (Love)\n"
+                "Full itinerary\n"
+                "Confirmation # ABC123"
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+            received_at=datetime(2021, 12, 17, tzinfo=timezone.utc),
+            subject="Fwd: Your 01/14 trip to Dallas (Love) is all set.",
+        )
+
+        assert len(result.flights) == 1
+        flight = result.flights[0]
+        assert (flight.dep_airport, flight.arr_airport) == ("BNA", "DAL")
+        assert flight.airline == "WN"
+        assert flight.dep_time.year == 2022
+
+    def test_subject_place_route_parses_direct_or_forwarded_email(self):
+        from app.services.parser import parse_email
+
+        result = parse_email(
+            html="",
+            plain_text=(
+                "Attached to this email is the E-Ticket Itinerary Receipt that "
+                "includes all your flight details."
+            ),
+            attachments=[],
+            user_name="",
+            aliases=[],
+            subject=(
+                "Confirmation and E-Ticket Flight Itinerary for 67RXDT from Houston "
+                "George Bush Intercontinental Ap to Chicago O'Hare on 18Jun25 for HENNIGH"
+            ),
+        )
+
+        assert len(result.flights) == 1
+        flight = result.flights[0]
+        assert (flight.dep_airport, flight.arr_airport) == ("IAH", "ORD")
+        assert flight.dep_time.year == 2025
+        assert flight.dep_time.month == 6
+        assert flight.dep_time.day == 18

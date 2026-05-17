@@ -1,0 +1,24 @@
+{
+  "message_id": "synthetic-lifemiles-backtracking-hang",
+  "fixture_version": 1,
+  "frozen_at": "2026-05-07T00:00:00+00:00",
+  "parser_version_when_frozen": 14,
+  "failure_type": "timeout",
+  "sender_domain": "gmail.com",
+  "subject": "Re: Your trip confirmation and receipt",
+  "received_at": "Sat, 01 Dec 2022 18:00:00 +0000",
+  "html": "",
+  "plain_text": "Re: Your trip confirmation Departure: thing Arrival: thing Flight 1 of 2 ABC original XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK) XX 1234 Some City(LAX) - Other City(JFK)",
+  "attachment_filenames": [],
+  "expectations": {
+    "must_complete_within_seconds": 2.0,
+    "expected_flights": null,
+    "notes": "Synthetic pathological input that triggers the LifeMiles regex gate but never matches a real row. Pre-fix this hung the script indefinitely (catastrophic backtracking on .*? + DOTALL). Post-fix it must return in well under a second."
+  },
+  "source_failure_summary": {
+    "ai_label": "",
+    "ai_confidence": 0.0,
+    "parse_miss_score": 0,
+    "discovery_tiers": []
+  }
+}

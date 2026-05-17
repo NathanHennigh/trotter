@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stamp Template Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>Stamp Template Editor</h1>
+  <div class="status" id="status">loading…</div>
+  <button id="save" class="primary">Save to JSON</button>
+  <button id="reset" class="secondary">Reload from disk</button>
+</header>
+
+<main class="layout">
+  <aside class="sidebar">
+    <label class="label">
+      Shape
+      <select id="shape-select" size="10"></select>
+    </label>
+    <div class="meta" id="shape-meta"></div>
+  </aside>
+
+  <section class="preview">
+    <div class="preview-card">
+      <div class="preview-stamp" id="preview-stamp"></div>
+    </div>
+    <div class="preview-info" id="preview-info"></div>
+  </section>
+
+  <aside class="editor">
+    <div class="editor-section">
+      <div class="editor-section-header">
+        <h2>Active sub-preset</h2>
+        <select id="preset-select"></select>
+        <button id="add-preset" class="secondary small">+ Add preset</button>
+        <button id="delete-preset" class="danger small">Delete</button>
+      </div>
+      <div class="preset-range" id="preset-range"></div>
+    </div>
+
+    <div class="editor-section">
+      <h3>Frame</h3>
+      <div class="form-grid" id="form-frame"></div>
+    </div>
+
+    <div class="editor-section">
+      <h3>Country box</h3>
+      <div class="form-grid" id="form-country"></div>
+    </div>
+
+    <div class="editor-section">
+      <h3>Icon box</h3>
+      <div class="form-grid" id="form-icon"></div>
+    </div>
+
+    <div class="editor-section">
+      <h3>Place box</h3>
+      <div class="form-grid" id="form-place"></div>
+    </div>
+
+    <div class="editor-section">
+      <h3>Date box</h3>
+      <div class="form-grid" id="form-date"></div>
+    </div>
+
+    <div class="editor-section">
+      <h3>Footer box</h3>
+      <div class="form-grid" id="form-footer"></div>
+    </div>
+
+    <div class="editor-section">
+      <h3>Shape parameters</h3>
+      <div class="form-grid" id="form-shape"></div>
+    </div>
+  </aside>
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

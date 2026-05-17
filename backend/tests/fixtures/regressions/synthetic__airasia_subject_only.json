@@ -1,0 +1,26 @@
+{
+  "message_id": "synthetic-airasia-subject-only",
+  "fixture_version": 1,
+  "frozen_at": "2026-05-07T00:00:00+00:00",
+  "parser_version_when_frozen": 14,
+  "failure_type": "parser_miss",
+  "sender_domain": "booking.airasia.com",
+  "subject": "Elisha Faith Magno (CONFIRMED) Booking No: MDHIYD 28/04/2025 MNL ✈ MPH",
+  "received_at": "Mon, 31 Mar 2025 12:00:00 +0000",
+  "html": "",
+  "plain_text": "Booking confirmed Hello, Elisha Faith Magno! Yay! Pack up because your booking is confirmed!",
+  "attachment_filenames": [],
+  "expectations": {
+    "must_complete_within_seconds": 2.0,
+    "expected_flights": [
+      {"flight_number": null, "dep_airport": "MNL", "arr_airport": "MPH"}
+    ],
+    "notes": "AirAsia subject-line-only itinerary. Body is too sparse to parse. New _extract_subject_itinerary_flight fallback lifts route+date+PNR from the subject 'Booking No: PNR DD/MM/YYYY DEP ✈ ARR'. Date format is ambiguous; parser picks DD/MM (international convention) when month > 12 in MM/DD reading."
+  },
+  "source_failure_summary": {
+    "ai_label": "flight_confirmation",
+    "ai_confidence": 0.95,
+    "parse_miss_score": 10,
+    "discovery_tiers": ["initial_broad_recent"]
+  }
+}

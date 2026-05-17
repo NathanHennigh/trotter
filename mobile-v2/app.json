@@ -1,11 +1,12 @@
 {
   "expo": {
-    "name": "Trotter V2",
+    "name": "Trotter",
     "slug": "trotter-v2",
     "version": "0.1.0",
     "orientation": "portrait",
     "scheme": "trotterv2",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/app-icon.png",
     "newArchEnabled": true,
     "plugins": [
       "expo-font"
@@ -17,6 +18,7 @@
     "android": {
       "package": "com.trotter.mobilev2",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/app-icon.png",
         "backgroundColor": "#090B0D"
       }
     },

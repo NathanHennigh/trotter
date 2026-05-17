@@ -7,19 +7,26 @@ import * as THREE from 'three';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { colors } from '../theme/tokens';
-import { flightMapPoints, flightRoutes, RoutePoint } from '../data/demoTravel';
+import { flightMapPoints, flightRoutes, FlightRoute, RoutePoint } from '../data/demoTravel';
 import countryBorderRings from '../data/countryBorders110m.json';
+import { globeDayDetailTiles } from '../data/globeDayDetailTiles';
 
 const RADIUS = 2.08;
 const DEG = Math.PI / 180;
 const IDLE_ROTATION_SPEED = 0.00032;
 const DEFAULT_CAMERA_Z = 10.85;
-const MIN_CAMERA_Z = 6.7;
+const MIN_CAMERA_Z = 3.9;
 const MAX_CAMERA_Z = 12.4;
-const EARTH_DAY_TEXTURE = require('../../assets/globe/blue-marble-day-2048.jpg');
+const EARTH_DAY_TEXTURE_STANDARD = require('../../assets/globe/blue-marble-day-2048.jpg');
+const EARTH_DAY_TEXTURE_HIGH = require('../../assets/globe/blue-marble-day-4096.jpg');
 const EARTH_NIGHT_TEXTURE = require('../../assets/globe/black-marble-2016-3600.jpg');
 const HELVETIKER_FONT = require('three/examples/fonts/helvetiker_regular.typeface.json');
-const GLOBE_SEGMENTS = 72;
+const GLOBE_SEGMENTS = 96;
+const DETAIL_TILE_ROWS = globeDayDetailTiles.length;
+const DETAIL_TILE_COLS = globeDayDetailTiles[0].length;
+const DETAIL_TILE_SHOW_Z = 7.5;
+const DEFAULT_MAX_TILT = 0.42;
+const CLOSE_MAX_TILT = 1.08;
 
 const globeLabels = [
   { label: 'NORTH\nAMERICA', lat: 43, lon: -101, kind: 'land' },
@@ -78,6 +85,10 @@ function getSunDirection(date = new Date()) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function closeZoomProgress(z: number) {
+  return 1 - clamp((z - MIN_CAMERA_Z) / (DEFAULT_CAMERA_Z - MIN_CAMERA_Z), 0, 1);
 }
 
 function getTouchDistance(touches: readonly { pageX: number; pageY: number }[]) {
@@ -175,7 +186,7 @@ function makeCountryBorderGroup() {
         }
         segment = [];
       }
-      segment.push(latLonToVector(lat, lon, RADIUS + 0.012));
+      segment.push(latLonToVector(lat, lon, RADIUS + 0.0048));
     });
     if (segment.length > 1) {
       group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(segment), material));
@@ -185,12 +196,82 @@ function makeCountryBorderGroup() {
   return group;
 }
 
-function makeRouteGroup() {
+function makeTileGeometry(row: number, col: number) {
+  const latNorth = 90 - (row * 180) / DETAIL_TILE_ROWS;
+  const latSouth = 90 - ((row + 1) * 180) / DETAIL_TILE_ROWS;
+  const lonWest = -180 + (col * 360) / DETAIL_TILE_COLS;
+  const lonEast = -180 + ((col + 1) * 360) / DETAIL_TILE_COLS;
+  const horizontalSegments = 36;
+  const verticalSegments = 24;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  for (let y = 0; y <= verticalSegments; y += 1) {
+    const v = y / verticalSegments;
+    const lat = latNorth + (latSouth - latNorth) * v;
+    for (let x = 0; x <= horizontalSegments; x += 1) {
+      const u = x / horizontalSegments;
+      const lon = lonWest + (lonEast - lonWest) * u;
+      const point = latLonToVector(lat, lon, RADIUS + 0.0018);
+      positions.push(point.x, point.y, point.z);
+      uvs.push(u, v);
+    }
+  }
+
+  for (let y = 0; y < verticalSegments; y += 1) {
+    for (let x = 0; x < horizontalSegments; x += 1) {
+      const a = y * (horizontalSegments + 1) + x;
+      const b = a + horizontalSegments + 1;
+      indices.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function makeDetailTileGroup() {
   const group = new THREE.Group();
-  flightRoutes.forEach((route, index) => {
+  globeDayDetailTiles.forEach((row, rowIndex) => {
+    row.forEach((tileAsset, colIndex) => {
+      const material = new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      const centerLat = 90 - ((rowIndex + 0.5) * 180) / DETAIL_TILE_ROWS;
+      const centerLon = -180 + ((colIndex + 0.5) * 360) / DETAIL_TILE_COLS;
+      const mesh = new THREE.Mesh(makeTileGeometry(rowIndex, colIndex), material);
+      mesh.userData = {
+        tileAsset,
+        center: latLonToVector(centerLat, centerLon, 1).normalize(),
+        loaded: false,
+      };
+      group.add(mesh);
+    });
+  });
+  return group;
+}
+
+function makeRouteGroup(routeMeshes: THREE.Object3D[], routes: FlightRoute[]) {
+  const group = new THREE.Group();
+  routes.forEach((route, index) => {
     const points = makeArc(route.from, route.to);
-    group.add(makeTube(points, '#FFBE6A', index % 3 === 0 ? 0.24 : 0.16, 0.0046));
-    group.add(makeTube(points, index % 3 === 0 ? colors.orange : '#D58B45', index % 3 === 0 ? 0.72 : 0.5, 0.0018));
+    const glow = makeTube(points, '#FFBE6A', index % 3 === 0 ? 0.24 : 0.16, 0.0046);
+    const core = makeTube(points, index % 3 === 0 ? colors.orange : '#D58B45', index % 3 === 0 ? 0.72 : 0.5, 0.0018);
+    const hitArea = makeTube(points, '#FFFFFF', 0, 0.042);
+    hitArea.userData = { route };
+    core.userData = { route };
+    glow.userData = { route };
+    routeMeshes.push(hitArea, core, glow);
+    group.add(glow);
+    group.add(core);
+    group.add(hitArea);
   });
   return group;
 }
@@ -219,10 +300,10 @@ function makeOrb(group: THREE.Group, point: RoutePoint, isHub = false) {
   group.add(core);
 }
 
-function makeCityLightGroup() {
+function makeCityLightGroup(routes: FlightRoute[], mapPoints: RoutePoint[]) {
   const group = new THREE.Group();
   const seen = new Set<string>();
-  [...flightMapPoints, ...flightRoutes.flatMap((route) => [route.from, route.to])].forEach((city) => {
+  [...mapPoints, ...routes.flatMap((route) => [route.from, route.to])].forEach((city) => {
     if (seen.has(city.code)) return;
     seen.add(city.code);
     makeOrb(group, city, city.code === 'DFW');
@@ -306,10 +387,24 @@ function patchExpoPixelStorei(gl: any) {
   gl.__trotterPixelStoreiPatched = true;
 }
 
-export function GlobeScene() {
+export function GlobeScene({
+  onRoutePress,
+  routes = flightRoutes,
+  mapPoints = flightMapPoints,
+}: {
+  onRoutePress?: (route: FlightRoute) => void;
+  routes?: FlightRoute[];
+  mapPoints?: RoutePoint[];
+}) {
   const globeRef = useRef<THREE.Group | null>(null);
+  const detailTileGroupRef = useRef<THREE.Group | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const routeMeshesRef = useRef<THREE.Object3D[]>([]);
+  const glSizeRef = useRef({ width: 1, height: 1 });
+  const tileVisibilityFrameRef = useRef(0);
   const rotationRef = useRef({ x: -0.06, y: -1.18 });
   const dragStart = useRef({ x: 0, y: 0, rx: 0, ry: 0 });
+  const touchStart = useRef({ x: 0, y: 0 });
   const zoomRef = useRef({ z: DEFAULT_CAMERA_Z });
   const pinchStart = useRef({ distance: 0, z: DEFAULT_CAMERA_Z });
   const animationFrameRef = useRef<number | null>(null);
@@ -328,7 +423,7 @@ export function GlobeScene() {
 
   const panResponder = useMemo(
     () => PanResponder.create({
-      onStartShouldSetPanResponder: (event) => event.nativeEvent.touches.length >= 2,
+      onStartShouldSetPanResponder: () => true,
       onStartShouldSetPanResponderCapture: (event) => event.nativeEvent.touches.length >= 2,
       onMoveShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponderCapture: (event) => event.nativeEvent.touches.length >= 2,
@@ -340,6 +435,7 @@ export function GlobeScene() {
             z: zoomRef.current.z,
           };
         } else {
+          touchStart.current = { x: gesture.x0, y: gesture.y0 };
           dragStart.current = {
             x: gesture.x0,
             y: gesture.y0,
@@ -352,24 +448,53 @@ export function GlobeScene() {
         const touches = event.nativeEvent.touches;
         if (touches.length >= 2) {
           const currentDistance = getTouchDistance(touches);
+          if (pinchStart.current.distance <= 0 && currentDistance > 0) {
+            pinchStart.current = {
+              distance: currentDistance,
+              z: zoomRef.current.z,
+            };
+            return;
+          }
           if (pinchStart.current.distance > 0 && currentDistance > 0) {
             const scale = currentDistance / pinchStart.current.distance;
             zoomRef.current.z = clamp(pinchStart.current.z / scale, MIN_CAMERA_Z, MAX_CAMERA_Z);
           }
           return;
         }
-        rotationRef.current.y = dragStart.current.ry + gesture.dx * 0.006;
-        rotationRef.current.x = clamp(dragStart.current.rx + gesture.dy * 0.0035, -0.42, 0.42);
+        const dragScale = THREE.MathUtils.lerp(1, 0.34, closeZoomProgress(zoomRef.current.z));
+        const maxTilt = THREE.MathUtils.lerp(DEFAULT_MAX_TILT, CLOSE_MAX_TILT, closeZoomProgress(zoomRef.current.z));
+        rotationRef.current.y = dragStart.current.ry + gesture.dx * 0.006 * dragScale;
+        rotationRef.current.x = clamp(dragStart.current.rx + gesture.dy * 0.0035 * dragScale, -maxTilt, maxTilt);
       },
-      onPanResponderRelease: () => {
+      onPanResponderRelease: (event, gesture) => {
         pinchStart.current.distance = 0;
+        const dx = Math.abs(gesture.dx);
+        const dy = Math.abs(gesture.dy);
+        if (dx < 14 && dy < 14) {
+          const nativeEvent = event.nativeEvent;
+          const route = pickRouteAt(nativeEvent?.locationX ?? 0, nativeEvent?.locationY ?? 0);
+          if (route) onRoutePress?.(route);
+        }
       },
       onPanResponderTerminate: () => {
         pinchStart.current.distance = 0;
       },
     }),
-    [],
+    [onRoutePress],
   );
+
+  const pickRouteAt = useCallback((x: number, y: number) => {
+    const camera = cameraRef.current;
+    const meshes = routeMeshesRef.current;
+    if (!camera || meshes.length === 0) return undefined;
+    const { width, height } = glSizeRef.current;
+    const pointer = new THREE.Vector2((x / width) * 2 - 1, -(y / height) * 2 + 1);
+    const raycaster = new THREE.Raycaster();
+    raycaster.params.Line.threshold = 0.08;
+    raycaster.setFromCamera(pointer, camera);
+    const hit = raycaster.intersectObjects(meshes, false)[0];
+    return hit?.object.userData.route as FlightRoute | undefined;
+  }, []);
 
   const onContextCreate = useCallback(async (gl: any) => {
     patchExpoPixelStorei(gl);
@@ -378,6 +503,11 @@ export function GlobeScene() {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(34, gl.drawingBufferWidth / gl.drawingBufferHeight, 0.1, 100);
+    cameraRef.current = camera;
+    if (glSizeRef.current.width <= 1 || glSizeRef.current.height <= 1) {
+      glSizeRef.current = { width: gl.drawingBufferWidth, height: gl.drawingBufferHeight };
+    }
+    routeMeshesRef.current = [];
     camera.position.set(0, 0, zoomRef.current.z);
     camera.lookAt(0, 0, 0);
 
@@ -387,12 +517,19 @@ export function GlobeScene() {
     globeRef.current = globe;
     scene.add(globe);
 
-    const dayTexture = new TextureLoader().load(EARTH_DAY_TEXTURE);
+    const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) ?? 2048;
+    const dayTextureAsset =
+      typeof maxTextureSize === 'number' && maxTextureSize >= 4096
+        ? EARTH_DAY_TEXTURE_HIGH
+        : EARTH_DAY_TEXTURE_STANDARD;
+    const dayTexture = new TextureLoader().load(dayTextureAsset);
     const nightTexture = new TextureLoader().load(EARTH_NIGHT_TEXTURE);
+    const maxAnisotropy = renderer.capabilities?.getMaxAnisotropy?.() ?? 1;
+    const textureAnisotropy = Math.max(1, Math.min(4, maxAnisotropy || 1));
+    dayTexture.anisotropy = textureAnisotropy;
+    nightTexture.anisotropy = textureAnisotropy;
     dayTexture.colorSpace = THREE.SRGBColorSpace;
     nightTexture.colorSpace = THREE.SRGBColorSpace;
-    dayTexture.anisotropy = 1;
-    nightTexture.anisotropy = 1;
     dayTexture.flipY = false;
     nightTexture.flipY = false;
 
@@ -457,10 +594,13 @@ export function GlobeScene() {
       }),
     );
     globe.add(landShadow);
+    const detailTileGroup = makeDetailTileGroup();
+    detailTileGroupRef.current = detailTileGroup;
+    globe.add(detailTileGroup);
     globe.add(makeGridLines());
     globe.add(makeCountryBorderGroup());
-    globe.add(makeRouteGroup());
-    globe.add(makeCityLightGroup());
+    globe.add(makeRouteGroup(routeMeshesRef.current, routes));
+    globe.add(makeCityLightGroup(routes, mapPoints));
 
     const labelObjects = makeGlobeLabelObjects();
     labelObjects.forEach((label) => scene.add(label));
@@ -505,10 +645,33 @@ export function GlobeScene() {
       if (!isMountedRef.current) return;
       animationFrameRef.current = requestAnimationFrame(animate);
       if (globeRef.current) {
-        rotationRef.current.y += IDLE_ROTATION_SPEED;
+        const spinScale = zoomRef.current.z / DEFAULT_CAMERA_Z;
+        rotationRef.current.y += IDLE_ROTATION_SPEED * spinScale;
         globeRef.current.rotation.x = rotationRef.current.x;
         globeRef.current.rotation.y = rotationRef.current.y;
         globeRef.current.updateMatrixWorld();
+      }
+      tileVisibilityFrameRef.current += 1;
+      if (detailTileGroupRef.current && tileVisibilityFrameRef.current % 4 === 0) {
+        const opacity = THREE.MathUtils.smoothstep(DETAIL_TILE_SHOW_Z - zoomRef.current.z, 0, 1.1);
+        const cameraDirection = camera.position.clone().normalize();
+        detailTileGroupRef.current.visible = opacity > 0;
+        detailTileGroupRef.current.children.forEach((child) => {
+          const mesh = child as THREE.Mesh;
+          const center = (mesh.userData.center as THREE.Vector3).clone().applyMatrix4(globe.matrixWorld).normalize();
+          const isNearVisibleHemisphere = center.dot(cameraDirection) > -0.16;
+          const material = mesh.material as THREE.MeshBasicMaterial;
+          mesh.visible = opacity > 0 && isNearVisibleHemisphere;
+          material.opacity = mesh.visible ? opacity : 0;
+          if (mesh.visible && !mesh.userData.loaded) {
+            const texture = new TextureLoader().load(mesh.userData.tileAsset);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.anisotropy = textureAnisotropy;
+            material.map = texture;
+            material.needsUpdate = true;
+            mesh.userData.loaded = true;
+          }
+        });
       }
       camera.position.z += (zoomRef.current.z - camera.position.z) * 0.22;
       camera.lookAt(0, 0, 0);
@@ -535,10 +698,20 @@ export function GlobeScene() {
       gl.endFrameEXP();
     };
     animate();
-  }, []);
+  }, [mapPoints, routes]);
 
   return (
-    <View collapsable={false} style={styles.wrap} {...panResponder.panHandlers}>
+    <View
+      collapsable={false}
+      style={styles.wrap}
+      onLayout={(event) => {
+        glSizeRef.current = {
+          width: event.nativeEvent.layout.width,
+          height: event.nativeEvent.layout.height,
+        };
+      }}
+      {...panResponder.panHandlers}
+    >
       <GLView style={StyleSheet.absoluteFill} onContextCreate={onContextCreate} />
     </View>
   );

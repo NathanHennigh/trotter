@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   BottomNav,
@@ -11,6 +11,17 @@ import {
   Stamp,
 } from '../components/trotter/TrotterKit';
 import { BottomNavTab, CountryStamp, countryStamps } from '../data/trotterMock';
+import {
+  getMe,
+  getJobStatus,
+  listUnparsedCandidates,
+  requestDevToken,
+  runQueryComparison,
+  ScanJobStatus,
+  signInWithGoogle,
+  startGmailImport,
+} from '../services/scanControls';
+import { getApiBaseUrl, getStoredToken, hydrateStoredToken } from '../services/travelTrips';
 import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
 
 export function CountryStampCollectionScreen({ active, onChange }: { active: BottomNavTab; onChange: (tab: BottomNavTab) => void }) {
@@ -41,6 +52,7 @@ export function CountryStampCollectionScreen({ active, onChange }: { active: Bot
             { key: 'unvisited', label: 'UNVISITED', count: countryStamps.length - visited },
           ]}
         />
+        <TemporaryScanPanel screenPadding={screenPadding} contentWidth={contentWidth} />
         <CountrySummaryMapCard visited={visited} screenPadding={screenPadding} contentWidth={contentWidth} />
         <View style={[styles.grid, { paddingHorizontal: screenPadding, gap: layout.cardGap }]}>
           {visibleCountries.map((country) => <CountryStampCard key={country.country} country={country} width={cardWidth} />)}
@@ -51,6 +63,144 @@ export function CountryStampCollectionScreen({ active, onChange }: { active: Bot
         </PaperSurface>
       </ScrollView>
       <BottomNav active={active} onChange={onChange} />
+    </View>
+  );
+}
+
+function TemporaryScanPanel({ screenPadding, contentWidth }: { screenPadding: number; contentWidth: number }) {
+  const [busy, setBusy] = React.useState<string | null>(null);
+  const [message, setMessage] = React.useState('Manual scanning only. Nothing here runs automatically.');
+  const [jobId, setJobId] = React.useState<string | null>(null);
+  const [job, setJob] = React.useState<ScanJobStatus | null>(null);
+  const [hasToken, setHasToken] = React.useState(() => Boolean(getStoredToken()));
+  const [accountEmail, setAccountEmail] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    hydrateStoredToken().then((token) => {
+      if (!token) return;
+      setHasToken(true);
+      getMe(token).then((user) => setAccountEmail(user.email)).catch(() => setAccountEmail(null));
+    });
+  }, []);
+
+  const runAction = async (label: string, action: () => Promise<string>) => {
+    setBusy(label);
+    try {
+      setMessage(await action());
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const startImport = () => runAction('import', async () => {
+    const response = await startGmailImport();
+    setJobId(response.job_id);
+    setJob(null);
+    return `Started Gmail import ${response.job_id.slice(0, 8)}. Use Poll Job to refresh counts.`;
+  });
+
+  const pollJob = () => runAction('poll', async () => {
+    if (!jobId) return 'No current job id. Start Gmail Import first.';
+    const status = await getJobStatus(jobId);
+    setJob(status);
+    return `Job ${status.state}: scanned ${status.scanned_count}, parsed ${status.parsed_count}, segments ${status.segment_count}.`;
+  });
+
+  return (
+    <PaperSurface radius={14} padding={spacing.md} style={[styles.scanPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
+      <View style={styles.scanHeader}>
+        <View>
+          <Text allowFontScaling={false} style={styles.scanTitle}>DEV SCANS</Text>
+          <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.scanSub}>{getApiBaseUrl()}</Text>
+        </View>
+        <View style={[styles.tokenPill, hasToken && styles.tokenPillReady]}>
+          <Text allowFontScaling={false} style={[styles.tokenText, hasToken && styles.tokenTextReady]}>{hasToken ? 'TOKEN' : 'NO TOKEN'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.scanButtonGrid}>
+        <ScanButton
+          label="Google"
+          disabled={busy !== null}
+          busy={busy === 'google'}
+          onPress={() => runAction('google', async () => {
+            const user = await signInWithGoogle();
+            setHasToken(true);
+            setAccountEmail(user.email);
+            return `Connected Google for ${user.email}.`;
+          })}
+        />
+        <ScanButton
+          label="Dev Token"
+          disabled={busy !== null}
+          busy={busy === 'token'}
+          onPress={() => runAction('token', async () => {
+            const token = await requestDevToken();
+            setHasToken(true);
+            setAccountEmail(token.email);
+            return `Stored token for ${token.email}.`;
+          })}
+        />
+        <ScanButton label="Gmail Import" disabled={busy !== null} busy={busy === 'import'} onPress={startImport} />
+        <ScanButton label="Poll Job" disabled={busy !== null || !jobId} busy={busy === 'poll'} onPress={pollJob} />
+        <ScanButton
+          label="Query Test"
+          disabled={busy !== null}
+          busy={busy === 'queries'}
+          onPress={() => runAction('queries', async () => {
+            const result = await runQueryComparison();
+            return `v1 ${result.v1_count}, v2 ${result.v2_count}, v3 ${result.v3_count}. Parser comparison continues on backend.`;
+          })}
+        />
+        <ScanButton
+          label="Unparsed"
+          disabled={busy !== null}
+          busy={busy === 'unparsed'}
+          onPress={() => runAction('unparsed', async () => {
+            const result = await listUnparsedCandidates(25);
+            return `${result.total} review-required messages. Latest: ${result.candidates[0]?.subject ?? 'none'}`;
+          })}
+        />
+      </View>
+
+      {job ? (
+        <View style={styles.jobStrip}>
+          <DevMetric label="STATE" value={job.state} />
+          <DevMetric label="SCAN" value={String(job.scanned_count)} />
+          <DevMetric label="PARSE" value={String(job.parsed_count)} />
+          <DevMetric label="SEG" value={String(job.segment_count)} />
+        </View>
+      ) : null}
+      <Text maxFontSizeMultiplier={1.05} style={styles.scanMessage}>{accountEmail ? `Signed in as ${accountEmail}. ${message}` : message}</Text>
+    </PaperSurface>
+  );
+}
+
+function ScanButton({
+  label,
+  onPress,
+  disabled,
+  busy,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <Pressable onPress={onPress} disabled={disabled} style={[styles.scanButton, disabled && styles.scanButtonDisabled]}>
+      <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.scanButtonText}>{busy ? '...' : label}</Text>
+    </Pressable>
+  );
+}
+
+function DevMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.devMetric}>
+      <Text allowFontScaling={false} style={styles.devMetricLabel}>{label}</Text>
+      <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.devMetricValue}>{value}</Text>
     </View>
   );
 }
@@ -139,6 +289,106 @@ const styles = StyleSheet.create({
     fontSize: 8,
   },
   mapCard: {
+    marginTop: spacing.md,
+  },
+  scanPanel: {
+    marginTop: spacing.md,
+  },
+  scanHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  scanTitle: {
+    color: colors.red,
+    fontFamily: fonts.sansBold,
+    fontSize: 13,
+    letterSpacing: 1,
+  },
+  scanSub: {
+    color: colors.mutedInk,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    marginTop: 4,
+  },
+  tokenPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.red,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  tokenPillReady: {
+    borderColor: colors.green,
+  },
+  tokenText: {
+    color: colors.red,
+    fontFamily: fonts.sansBold,
+    fontSize: 9,
+  },
+  tokenTextReady: {
+    color: colors.green,
+  },
+  scanButtonGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  scanButton: {
+    minHeight: 38,
+    minWidth: 96,
+    flexGrow: 1,
+    flexBasis: '30%',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.dashboard,
+    borderWidth: 1,
+    borderColor: colors.darkBorder,
+    paddingHorizontal: spacing.sm,
+  },
+  scanButtonDisabled: {
+    opacity: 0.48,
+  },
+  scanButtonText: {
+    color: colors.creamText,
+    fontFamily: fonts.sansBold,
+    fontSize: 11,
+  },
+  jobStrip: {
+    marginTop: spacing.md,
+    flexDirection: 'row',
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.paperBorder,
+  },
+  devMetric: {
+    flex: 1,
+    minWidth: 0,
+    padding: spacing.sm,
+    backgroundColor: colors.paperSoft,
+    borderRightWidth: 1,
+    borderRightColor: colors.paperBorder,
+  },
+  devMetricLabel: {
+    color: colors.red,
+    fontFamily: fonts.sansBold,
+    fontSize: 8,
+  },
+  devMetricValue: {
+    color: colors.ink,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  scanMessage: {
+    color: colors.mutedInk,
+    fontFamily: fonts.sansRegular,
+    fontSize: 12,
+    lineHeight: 17,
     marginTop: spacing.md,
   },
   mapTop: {

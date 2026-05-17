@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   BottomNav,
@@ -13,8 +13,8 @@ import {
 } from '../components/trotter/TrotterKit';
 import { PngStamp, StampShapeKey } from '../components/trotter/stamps/PngStamp';
 import { CountryIconAssetKey } from '../assets/generated/stampAssetManifest';
-import { BottomNavTab, travelerProfile } from '../data/trotterMock';
-import { realTravelerProfile } from '../data/realTravelSnapshot';
+import { BottomNavTab } from '../data/trotterMock';
+import { useTravelTrips } from '../services/travelTrips';
 import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
 
 const STAMP_TEST_BASE_WIDTH = 204.75;
@@ -173,10 +173,15 @@ export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab
   const screenPadding = width < 390 ? 16 : layout.screenPadding;
   const contentWidth = width - screenPadding * 2;
   const cardWidth = (contentWidth - layout.cardGap) / 2;
+  const { profile, status, refresh } = useTravelTrips();
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={status === 'loading' || status === 'refreshing' || status === 'syncing'} onRefresh={refresh} tintColor={colors.red} />}
+        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24 }}
+      >
         <ScreenHeader
           title="PASSPORT"
           subtitle="TRAVELER IDENTITY"
@@ -188,27 +193,27 @@ export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab
             <PassportBookletGraphic />
             <View style={styles.identityCopy}>
               <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.kicker}>TRAVELER</Text>
-              <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.name}>{travelerProfile.name}</Text>
-              <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.homeAirport}>{travelerProfile.homeAirport} / {travelerProfile.homeAirportName}</Text>
-              <Text maxFontSizeMultiplier={1.05} numberOfLines={2} style={styles.firstFlight}>FIRST DISCOVERED FLIGHT {travelerProfile.firstFlightDate}</Text>
+              <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.name}>{profile.name}</Text>
+              <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.homeAirport}>{profile.homeAirport} / {profile.homeAirportName}</Text>
+              <Text maxFontSizeMultiplier={1.05} numberOfLines={2} style={styles.firstFlight}>FIRST DISCOVERED FLIGHT {profile.firstFlightDate}</Text>
             </View>
           </View>
           <View style={styles.stampRow}>
-            <Stamp type="circle" color={colors.red} title="ADVENTURE" subtitle={`${travelerProfile.flights} FLIGHTS`} footer="VERIFIED" size="sm" />
+            <Stamp type="circle" color={colors.red} title="ADVENTURE" subtitle={`${profile.flights} FLIGHTS`} footer="VERIFIED" size="sm" />
             <Stamp type="rounded-immigration" color={colors.blue} title="ISSUED" subtitle="TROTTER APP" date="2026" size="sm" />
           </View>
           <View style={styles.statStrip}>
-            <StripStat label="FLIGHTS" value={travelerProfile.flights} />
-            <StripStat label="COUNTRIES" value={travelerProfile.countries} />
-            <StripStat label="AIRPORTS" value={travelerProfile.airports} />
+            <StripStat label="FLIGHTS" value={profile.flights} />
+            <StripStat label="COUNTRIES" value={profile.countries} />
+            <StripStat label="AIRPORTS" value={profile.airports} />
           </View>
         </PaperSurface>
 
         <View style={[styles.grid, { paddingHorizontal: screenPadding, gap: layout.cardGap }]}>
-          <StatCard width={cardWidth} label="TOTAL MILES" value={travelerProfile.miles.toLocaleString()} sublabel="lifetime distance" icon="plane" />
-          <StatCard width={cardWidth} label="TIME IN AIR" value={`${travelerProfile.hoursInAir}h`} sublabel="logged cabin time" icon="crosshair" />
-          <StatCard width={cardWidth} label="COUNTRIES VISITED" value={`${travelerProfile.countries} / 195`} sublabel="top 12% of travelers" icon="globe" />
-          <StatCard width={cardWidth} label="AIRLINES FLOWN" value={`${travelerProfile.airlines}`} sublabel="carriers flown" icon="tag" />
+          <StatCard width={cardWidth} label="TOTAL MILES" value={profile.miles.toLocaleString()} sublabel="lifetime distance" icon="plane" />
+          <StatCard width={cardWidth} label="TIME IN AIR" value={`${profile.hoursInAir}h`} sublabel="logged cabin time" icon="crosshair" />
+          <StatCard width={cardWidth} label="COUNTRIES VISITED" value={`${profile.countries} / 195`} sublabel="visited from flight history" icon="globe" />
+          <StatCard width={cardWidth} label="AIRLINES FLOWN" value={`${profile.airlines}`} sublabel="carriers flown" icon="tag" />
           <StatCard width={cardWidth} label="FURTHEST FLIGHT" value="7,238 mi" sublabel="DFW to HND" icon="plane" />
           <StatCard width={cardWidth} label="LONGEST TRIP" value="9 days" sublabel="Tokyo, Japan" icon="passport" />
         </View>
@@ -218,13 +223,13 @@ export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab
           <CollectionCard
             width={cardWidth}
             title="COUNTRIES"
-            value={`${realTravelerProfile.countries || travelerProfile.countries} / 195`}
+            value={`${profile.countries} / 195`}
             onPress={() => onChange('profile')}
-            preview={<PngStamp {...japanPreviewStamp} size="md" variant="collection" rotate={-4} scale={0.94} />}
+            preview={<PngStamp {...japanPreviewStamp} size="md" variant="collection" rotate={-4} scale={0.7} />}
           />
-          <CollectionCard width={cardWidth} title="CONTINENTS" value="4 / 7" preview={<IconGlyph name="globe" color={colors.tealDeep} size={42} />} />
-          <CollectionCard width={cardWidth} title="AIRPORTS" value={`${realTravelerProfile.airports || travelerProfile.airports}`} preview={<IconGlyph name="crosshair" color={colors.mustard} size={42} />} />
-          <CollectionCard width={cardWidth} title="AIRLINES" value={`${realTravelerProfile.airlines || travelerProfile.airlines}`} preview={<IconGlyph name="plane" color={colors.blue} size={42} />} />
+          <CollectionCard width={cardWidth} title="CONTINENTS" value="4 / 7" preview={<Image source={require('../../assets/objects/globe.png')} style={{ width: 110, height: 110, resizeMode: 'contain' }} />} />
+          <CollectionCard width={cardWidth} title="AIRPORTS" value={`${profile.airports}`} preview={<Image source={require('../../assets/objects/airport.png')} style={{ width: 150, height: 150, resizeMode: 'contain' }} />} />
+          <CollectionCard width={cardWidth} title="AIRLINES" value={`${profile.airlines}`} preview={<Image source={require('../../assets/objects/airline.png')} style={{ width: 150, height: 150, resizeMode: 'contain' }} />} />
         </View>
 
         <PaperSurface radius={14} padding={spacing.md} style={[styles.countryPreviewPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
@@ -435,8 +440,7 @@ const styles = StyleSheet.create({
   },
   collectionCard: {
     alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 178,
+    height: 200,
   },
   collectionTitle: {
     color: colors.ink,
@@ -451,10 +455,12 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   collectionPreview: {
-    minHeight: 106,
+    flex: 1,
+    width: '100%',
     marginTop: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   countryPreviewPanel: {
     marginTop: spacing.md,

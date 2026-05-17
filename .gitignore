@@ -17,8 +17,31 @@ __pycache__/
 venv/
 
 # Databases / caches
+*.db
 *.sqlite
 *.sqlite3
+.cache/
+backend/scripts/flight_ai_audit_results.json
+backend/scripts/flight_ai_audit_report.csv
+backend/scripts/flight_ai_audit_report.md
+backend/scripts/flight_ai_audit_review_queue.md
+backend/scripts/flight_ai_audit_feedback.json
+backend/scripts/flight_ai_audit_results.*.json
+backend/scripts/flight_ai_audit_report.*.csv
+backend/scripts/flight_ai_audit_report.*.md
+backend/scripts/flight_ai_audit_review_queue.*.md
+backend/scripts/flight_parser_failures.jsonl
+backend/scripts/instagram_batch_results.json
+backend/scripts/instagram_batch_links.txt
+backend/scripts/rebuild_flight_segments_backup_*.json
+backend/scripts/recluster_backup_*.db
+backend/scripts/.flight_discovery_benchmark.json
+backend/scripts/inbox_scan_results.json
+backend/scripts/compare_results.json
+mobile-v2/expo-trip-detail.log
+mobile-v2/assets/photo-candidates/
+trotter-photo-curation/
+temp.md
 
 # Node / Expo
 node_modules/

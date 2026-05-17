@@ -1,0 +1,28 @@
+{
+  "attachment_filenames": [],
+  "expectations": {
+    "expected_flights": null,
+    "must_complete_within_seconds": 5.0,
+    "notes": "boarding_pass",
+    "skip_reason": "PDF-only: body says boarding passes are attached; no flight data in text."
+  },
+  "failure_type": "parser_miss",
+  "fixture_version": 1,
+  "frozen_at": "2026-05-07T23:09:50+00:00",
+  "html": "\r\n\r\n\r\n\r\n\r\n<html>\r\n\t<head>\r\n        <title>Boarding Pass Confirmation Email</title>\r\n\t\t<meta http-equiv=Content-Type content=\"text/html; charset=iso-8859-1\">\r\n\t\t<meta content=\"MSHTML [phone]\" name=GENERATOR>\r\n\t</head>\r\n\r\n\t<body>\r\n\t\t\r\n\t\t<table cellpadding=\"0\" cellspacing=\"1\" align=\"center\" bgcolor=\"#00007c\">\r\n\t\t\t<tr>\r\n\t\t\t\t<td valign=\"top\" bgcolor=\"ffffff\">\r\n\t\t\t\t\t\r\n\t\t\t\t\t\r\n\t\t\t\t\t<table align=\"center\" bgcolor=\"#ffffff\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" width=\"667\">\r\n<tr>\r\n\r\n<td align=\"left\" valign=\"top\" width=\"350\" colspan=\"6\">\r\n\t<img src=\"[url] alt=\"AAirmail\" border=\"0\" style=\"display:block;\" />\r\n</td>\r\n<td align=\"center\" valign=\"top\" width=\"77\">\r\n\t<img src=\"[url] width=\"77\" height=\"54\" style=\"display:block;\" />\r\n</td>\r\n<td align=\"right\" valign=\"top\" width=\"240\">\r\n\t<img src=\"[url] alt=\"AA/oneworld logos\" border=\"0\" style=\"display:block;\" />\r\n</td>\r\n\r\n</tr>\r\n\r\n<tr>\r\n\r\n<td align=\"left\" width=\"81\"><a href=\"[url] target=\"_blank\"><img src=\"[url] alt=\"Reservations\" border=\"0\" style=\"display:block;\" /></a></td>\r\n\r\n<td align=\"left\" width=\"8\"><a href=\"\"><img src=\"[url] alt=\"pipe separator\" border=\"0\" style=\"display:block;\" /></a></td>\r\n\r\n<td align=\"left\" width=\"111\"><a href=\"[url] target=\"_blank\"><img src=\"[url] alt=\"AAdvantage Account\" border=\"0\" style=\"display:block;\" /></a></td>\r\n\r\n<td align=\"left\" width=\"8\"><a href=\"\"><img src=\"[url] alt=\"pipe separator\" border=\"0\" style=\"display:block;\" /></a></td>\r\n\r\n<td align=\"left\" width=\"109\"><a href=\"[url] target=\"_blank\"><img src=\"[url] alt=\"Fare Sales and Offers\" border=\"0\" style=\"display:block;\" /></a></td>\r\n\r\n<td align=\"left\" width=\"33\"><img src=\"[url] width=\"33\" height=\"30\" style=\"display:block;\" /></td>\r\n\r\n<td align=\"left\" colspan=\"2\" width=\"317\"><img src=\"[url] width=\"317\" height=\"30\" style=\"display:block;\" /></td>\r\n</tr>\r\n</table>\t\t\t\t\t\r\n\t\t\t\t\t\r\n\t\t\t\t\t\r\n\t\t\t\t\t<table width=\"667\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#FFFFFF\">\r\n<tr>\r\n\t<td width=\"28\"></td>\r\n\t<td width=\"611\" valign=\"top\" style=\"font-family:arial,sanserif; font-size:12px\">\r\n\t<p align=\"justify\">You must print all attached boarding pass(es) before proceeding to the airport. This is not a valid mobile boarding pass.</p> \r\n\t<p align=\"justify\">Gate and terminal may change. Check airport monitors when you arrive or visit <a href=\"[url] target=\"_blank\">flight status</a></p>\r\n    <p align=\"justify\">Thank you for choosing American Airlines.</p>   \r\n\t\r\n\t</td>\r\n\t<td width=\"28\"></td>\r\n</tr>\r\n</table>\t\t\t\t\t\r\n\t\t\t\t\t\r\n\t\t\t\t\t\r\n\t\t\t\t\t<br>\r\n<table align=\"center\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" bgcolor=\"#ffffff\" width=\"100%\">\r\n<tr>\r\n<td align=\"center\"><a href=\"[url] target=\"_blank\"><img src=\"[url] border=\"0\"></a></td>\r\n<td align=\"center\">&nbsp;</td>\r\n<td align=\"center\"><a href=\"[url] target=\"_blank\"><img src=\"[url] border=\"0\" alt=\"AAdvantage\" hspace=\"0\"></a></td>\r\n</tr>\r\n</table>\r\n<br><table width=\"667\" bgcolor=\"#00007c\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" align=\"center\"><tr><td height=\"30\" bgcolor=\"#ced5ed\"></td></tr></table>\t\t\t\t\t\r\n\t\t\t\t</td>\r\n\t\t\t</tr>\r\n\t\t</table>\r\n\t\t\r\n\t\t\r\n\t\t<table align=\"center\" width=\"667\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#ced5ed\">\r\n\t<tr>\r\n\t<td width=\"5\">&nbsp;</td>\r\n\t<td><br><span style=\"font-family:Arial, Helvetica, sans-serif; font-size:9px\">\r\n\t<div style=\"text-align: center;\">\r\n\t<p style=\"margin: 0; margin-bottom: 10px;\">\r\n\t<a href=\"[url]\r\n\t\tUnsubscribe\r\n\t\r\n\t</a>\r\n\t&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\r\n\t<a href=\"[url]\r\n\t\tChange your email address\r\n\t</a>\r\n\t&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\r\n\t<a href=\"[url]\r\n\t\tUpdate your email preferences\r\n\t</a>\r\n\t&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\r\n\t<a href=\"[url]\r\n\t\tPrivacy Policy\r\n\t</a>\r\n\t</p>\r\n\t\r\n\t</div>\r\n\t</span>\r\n\t</td>\r\n\t<td width=\"5\">&nbsp;</td>\r\n\t</tr>\r\n\t</table>\t\t\t\t\t\r\n\t\t\r\n\t</body>\r\n</html>",
+  "message_id": "166df42f8db49508",
+  "parser_version_when_frozen": 15,
+  "plain_text": "Your boarding pass(es) are attached. Please print all pages of the attached document before proceeding to the airport. \r\n\r\nIf you are having trouble viewing or printing your boarding pass(es), please see the FAQs on AA.com for additional information.\r\n\r\nThank you for choosing American Airlines.\r\n\r\nTraveling this holiday season? Before you head off to the airport, check out [url]",
+  "received_at": "Sun, 4 Nov 2018 09:06:40 -0600 (CST)",
+  "sender_domain": "aa.com",
+  "source_failure_summary": {
+    "ai_confidence": 0.95,
+    "ai_label": "boarding_pass",
+    "discovery_tiers": [
+      "incremental_precise",
+      "incremental_precise"
+    ],
+    "parse_miss_score": 7
+  },
+  "subject": "American Airlines Boarding Pass(es)."
+}

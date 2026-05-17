@@ -1,0 +1,26 @@
+{
+  "message_id": "synthetic-allegiant-compact-reminder",
+  "fixture_version": 1,
+  "frozen_at": "2026-05-07T00:00:00+00:00",
+  "parser_version_when_frozen": 14,
+  "failure_type": "parser_miss",
+  "sender_domain": "e.allegiant.com",
+  "subject": "Your upcoming trip is only 14 days away",
+  "received_at": "Tue, 09 Jul 2019 12:00:00 +0000",
+  "html": "",
+  "plain_text": "Your upcoming trip is only 14 days away Information about your upcoming flight. Confirmation # ABC123 Flight 1915, EWR VPS Jul 23, 2019 at 12:00 PM Fasten Your Seatbelt. It's Going to Be a Relaxing Flight.",
+  "attachment_filenames": [],
+  "expectations": {
+    "must_complete_within_seconds": 2.0,
+    "expected_flights": [
+      {"flight_number": "1915", "dep_airport": "EWR", "arr_airport": "VPS"}
+    ],
+    "notes": "Allegiant 'X days away' reminder. Single-line itinerary 'Flight N, DEP ARR DATE at TIME' with no airline prefix and only departure time. v5 _v5_compact_reminder_lines rule covers this shape generically."
+  },
+  "source_failure_summary": {
+    "ai_label": "flight_confirmation",
+    "ai_confidence": 0.95,
+    "parse_miss_score": 14,
+    "discovery_tiers": ["initial_broad_recent"]
+  }
+}

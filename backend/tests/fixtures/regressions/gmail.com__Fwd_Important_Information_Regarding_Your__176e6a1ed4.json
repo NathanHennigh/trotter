@@ -1,0 +1,57 @@
+{
+  "attachment_filenames": [],
+  "expectations": {
+    "expected_flights": [
+      {
+        "arr_airport": "ORD",
+        "dep_airport": "DFW",
+        "flight_number": "UA3462"
+      },
+      {
+        "arr_airport": "FRA",
+        "dep_airport": "ORD",
+        "flight_number": "UA907"
+      },
+      {
+        "arr_airport": "NBO",
+        "dep_airport": "FRA",
+        "flight_number": null
+      },
+      {
+        "arr_airport": "FRA",
+        "dep_airport": "NBO",
+        "flight_number": null
+      },
+      {
+        "arr_airport": "EWR",
+        "dep_airport": "FRA",
+        "flight_number": "UA961"
+      },
+      {
+        "arr_airport": "DFW",
+        "dep_airport": "EWR",
+        "flight_number": "UA570"
+      }
+    ],
+    "must_complete_within_seconds": 5.0,
+    "notes": "Generic terminal/date itinerary rows with full airport names; works whether forwarded or direct."
+  },
+  "failure_type": "parser_miss",
+  "fixture_version": 1,
+  "frozen_at": "2026-05-07T23:09:51+00:00",
+  "html": "<div dir=\"ltr\"><br><br><div class=\"gmail_quote\"><div dir=\"ltr\" class=\"gmail_attr\">---------- Forwarded message ---------<br>From: <span dir=\"auto\">&lt;<a href=\"mailto:[email]\">[email]</a>&gt;</span><br>Date: Thu, Nov 26, 2020 at 10:22 PM<br>Subject: Important Information Regarding Your Travel to Nairobi<br>To:  &lt;<a href=\"mailto:[email]\">[email]</a>&gt;<br></div><br><br>\r\n   <div><span style=\"color:#fff;font-size:8px\"></span>\r\n\r\nDear DAVID HENNIGH,<br><br>Below is a copy of your itinerary:<br><br><br>Itinerary for Record Locator BB8851<br>UAL\r\nRecord Locator OB5PJV<br><br><br>Reservation<br><br><br>Airline<br><br>Flight #<br><br>Departing<br><br>Arriving<br><br>Class<br><br>Cabin<br><br>Meals<br><br><br>Airport<br><br>Date\r\n&amp; Time<br><br>Airport<br><br>Date &amp; Time<br><br><br>United Airlines<br>Operated By:<br>OPERATED BY:REPUBLIC AIRWAYS\r\nDBA UNITED EXPRESS 3462 Dallas Dallas/Fort Worth Intl Apt, US<br>Terminal:E FRI 11DEC<br>02:20 PM Chicago O&#39;Hare International\r\nApt, US<br>Terminal:2 FRI 11DEC<br>04:45 PM V Y N<br><br>NATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned<br><br><br>United\r\nAirlines 907 Chicago O&#39;Hare International Apt, US<br>Terminal:1 FRI 11DEC<br>06:35 PM Frankfurt International Apt, DE<br>Terminal:1\r\nSAT 12DEC<br>09:45 AM V Y D<br><br>NATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned<br><br><br>United Airlines<br>Operated\r\nBy:<br>LUFTHANSA GERMAN AIRLINES [phone] Frankfurt International Apt, DE<br>Terminal:1 SAT 12DEC<br>11:15 AM Nairobi\r\nJomo Kenyatta International Ap, KE<br>Terminal:1E SAT 12DEC<br>09:15 PM V Y RM<br><br>NATHAN C HENNIGH (WEB) FF# Not Set\r\nNo Seat Assigned<br><br><br>United Airlines<br>Operated By:<br>LUFTHANSA GERMAN AIRLINES [phone] Nairobi Jomo Kenyatta\r\nInternational Ap, KE<br>Terminal:1C SAT 09JAN<br>11:00 PM Frankfurt International Apt, DE<br>Terminal:1 SUN 10JAN<br>05:30\r\nAM Q Y RM<br><br>NATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned<br><br><br>United Airlines 961 Frankfurt International\r\nApt, DE<br>Terminal:1 SUN 10JAN<br>10:20 AM Newark Liberty International Apt, US<br>Terminal:B SUN 10JAN<br>01:05 PM Q\r\nY L<br><br>NATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned<br><br><br>United Airlines 570 Newark Liberty International\r\nApt, US<br>Terminal:C SUN 10JAN<br>04:08 PM Dallas Dallas/Fort Worth Intl Apt, US<br>Terminal:E SUN 10JAN<br>07:12 PM\r\nQ Y N<br><br>NATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned<br><br><br><br><br>Airline Confirmation #: OB5PJV<br><br><br>Passenger\r\n/ Ticket Number:<br><br>NATHAN HENNIGH [phone]<br><br><br>Airlines adjust flight schedules for various reasons;\r\nthis is a common practice and and since your airline can continue to change flight schedules, please call the airline to confirm\r\nyour flight information prior to each departure. As a reminder, if your itinerary includes a codeshare flight, you are required\r\nto check-in with the operating carrier upon arrival at the airport.<br><br>We hope you find this information helpful.<br><br>Sincerely,\r\n<br>Travel Services<br><br>Please do not reply to this e-mail. E-mails sent to this address will not reach an agent.<br><br>\r\n\r\n\r\n      <div id=\"m_[phone]footer\" style=\"font-family:Arial;font-size:10px;text-align:center;padding-top:20px\">\r\n         ([phone])\r\n         \r\n      </div><img height=\"1\" width=\"1\" border=\"0\" src=\"[url]\r\n   </div>\r\n\r\n</div></div>\r\n",
+  "message_id": "176e6a1ed4f90665",
+  "parser_version_when_frozen": 15,
+  "plain_text": "---------- Forwarded message ---------\r\nFrom: <[email]>\r\nDate: Thu, Nov 26, 2020 at 10:22 PM\r\nSubject: Important Information Regarding Your Travel to Nairobi\r\nTo: <[email]>\r\n\r\n\r\nDear DAVID HENNIGH,\r\n\r\nBelow is a copy of your itinerary:\r\n\r\n\r\nItinerary for Record Locator BB8851\r\nUAL Record Locator OB5PJV\r\n\r\n\r\nReservation\r\n\r\n\r\nAirline\r\n\r\nFlight #\r\n\r\nDeparting\r\n\r\nArriving\r\n\r\nClass\r\n\r\nCabin\r\n\r\nMeals\r\n\r\n\r\nAirport\r\n\r\nDate & Time\r\n\r\nAirport\r\n\r\nDate & Time\r\n\r\n\r\nUnited Airlines\r\nOperated By:\r\nOPERATED BY:REPUBLIC AIRWAYS DBA UNITED EXPRESS 3462 Dallas Dallas/Fort\r\nWorth Intl Apt, US\r\nTerminal:E FRI 11DEC\r\n02:20 PM Chicago O'Hare International Apt, US\r\nTerminal:2 FRI 11DEC\r\n04:45 PM V Y N\r\n\r\nNATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned\r\n\r\n\r\nUnited Airlines 907 Chicago O'Hare International Apt, US\r\nTerminal:1 FRI 11DEC\r\n06:35 PM Frankfurt International Apt, DE\r\nTerminal:1 SAT 12DEC\r\n09:45 AM V Y D\r\n\r\nNATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned\r\n\r\n\r\nUnited Airlines\r\nOperated By:\r\nLUFTHANSA GERMAN AIRLINES [phone] Frankfurt International Apt, DE\r\nTerminal:1 SAT 12DEC\r\n11:15 AM Nairobi Jomo Kenyatta International Ap, KE\r\nTerminal:1E SAT 12DEC\r\n09:15 PM V Y RM\r\n\r\nNATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned\r\n\r\n\r\nUnited Airlines\r\nOperated By:\r\nLUFTHANSA GERMAN AIRLINES [phone] Nairobi Jomo Kenyatta International Ap,\r\nKE\r\nTerminal:1C SAT 09JAN\r\n11:00 PM Frankfurt International Apt, DE\r\nTerminal:1 SUN 10JAN\r\n05:30 AM Q Y RM\r\n\r\nNATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned\r\n\r\n\r\nUnited Airlines 961 Frankfurt International Apt, DE\r\nTerminal:1 SUN 10JAN\r\n10:20 AM Newark Liberty International Apt, US\r\nTerminal:B SUN 10JAN\r\n01:05 PM Q Y L\r\n\r\nNATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned\r\n\r\n\r\nUnited Airlines 570 Newark Liberty International Apt, US\r\nTerminal:C SUN 10JAN\r\n04:08 PM Dallas Dallas/Fort Worth Intl Apt, US\r\nTerminal:E SUN 10JAN\r\n07:12 PM Q Y N\r\n\r\nNATHAN C HENNIGH (WEB) FF# Not Set No Seat Assigned\r\n\r\n\r\n\r\n\r\nAirline Confirmation #: OB5PJV\r\n\r\n\r\nPassenger / Ticket Number:\r\n\r\nNATHAN HENNIGH [phone]\r\n\r\n\r\nAirlines adjust flight schedules for various reasons; this is a common\r\npractice and and since your airline can continue to change flight\r\nschedules, please call the airline to confirm your flight information prior\r\nto each departure. As a reminder, if your itinerary includes a codeshare\r\nflight, you are required to check-in with the operating carrier upon\r\narrival at the airport.\r\n\r\nWe hope you find this information helpful.\r\n\r\nSincerely,\r\nTravel Services\r\n\r\nPlease do not reply to this e-mail. E-mails sent to this address will not\r\nreach an agent.\r\n\r\n([phone])\r\n",
+  "received_at": "Sat, 9 Jan 2021 05:12:09 -0500",
+  "sender_domain": "gmail.com",
+  "source_failure_summary": {
+    "ai_confidence": 0.95,
+    "ai_label": "itinerary",
+    "discovery_tiers": [
+      "incremental_precise"
+    ],
+    "parse_miss_score": 14
+  },
+  "subject": "Fwd: Important Information Regarding Your Travel to Nairobi"
+}

@@ -8,6 +8,7 @@ import {
   stampShapeAssets,
 } from '../../../assets/generated/stampAssetManifest';
 import { colors, fonts } from '../../../theme/trotterTheme';
+import stampTemplateBundles from './stampTemplates.json';
 
 export type StampShapeKey =
   | 'archedCountryCanonical'
@@ -17,9 +18,7 @@ export type StampShapeKey =
   | 'circularCityDoubleLine'
   | 'roundedImmigrationCanonical'
   | 'roundedImmigrationWithBand'
-  | 'shieldBadgeRounded'
-  | 'ticketStubNotched'
-  | 'horizontalAirportOblong';
+  | 'shieldBadgeRounded';
 
 export type CountryIconKey = CountryIconAssetKey | string;
 
@@ -31,12 +30,12 @@ export type PngStampProps = {
   city?: string;
   airportCode?: string;
   date?: string;
-  footer?: string;
   size?: 'sm' | 'md' | 'lg';
   variant?: 'trip-card' | 'country-card' | 'collection';
   faded?: boolean;
   rotate?: number;
   scale?: number;
+  templateOverride?: StampTemplate;
 };
 
 export const stampInkColors = {
@@ -56,8 +55,6 @@ const shapeAssetKeyMap: Record<StampShapeKey, StampShapeAssetKey> = {
   roundedImmigrationCanonical: 'rounded_immigration_canonical',
   roundedImmigrationWithBand: 'rounded_immigration_with_band',
   shieldBadgeRounded: 'shield_badge_rounded',
-  ticketStubNotched: 'ticket_stub_notched',
-  horizontalAirportOblong: 'horizontal_airport_oblong',
 };
 
 const sizeConfig = {
@@ -68,7 +65,7 @@ const sizeConfig = {
     country: 17.9,
     meta: 12.2,
     date: 11.05,
-    footer: 11.4,
+    airport: 11.4,
   },
   md: {
     width: 204.75,
@@ -77,7 +74,7 @@ const sizeConfig = {
     country: 22.75,
     meta: 14.6,
     date: 13.16,
-    footer: 12.2,
+    airport: 12.2,
   },
   lg: {
     width: 269.75,
@@ -86,7 +83,7 @@ const sizeConfig = {
     country: 29.25,
     meta: 17.9,
     date: 15.44,
-    footer: 14.625,
+    airport: 14.625,
   },
 } as const;
 
@@ -102,149 +99,67 @@ type TextBox = Box & {
   minScale?: number;
   charFactor?: number;
   tracking?: number;
+  adaptiveLength?: boolean;
 };
 
-type StampTemplate = {
+export type StampTemplate = {
   frame: Box;
   titleMode: 'straight' | 'arc' | 'circleArc';
   arcDepth?: number;
   arcTextLength?: number;
   straightTitleMaxChars?: number;
+  arcCenterYOffset?: number;
   maxCountryChars: number;
   maxPlaceChars: number;
   country: TextBox;
   icon: Box;
   place: TextBox;
   date: TextBox;
-  footer: TextBox;
+  airport: TextBox;
 };
 
-const templates: Record<StampShapeKey, StampTemplate> = {
-  archedCountryCanonical: {
-    frame: { left: 0.08, top: 0.03, width: 0.84, height: 0.92 },
-    titleMode: 'arc',
-    arcDepth: 0.78,
-    arcTextLength: 0.66,
-    maxCountryChars: 14,
-    maxPlaceChars: 12,
-    country: { left: 0.16, top: 0.20, width: 0.68, height: 0.16, fontScale: 0.56, minScale: 0.32, charFactor: 0.95, tracking: 0.34 },
-    icon: { left: 0.34, top: 0.40, width: 0.32, height: 0.22 },
-    place: { left: 0.19, top: 0.66, width: 0.62, height: 0.08, fontScale: 0.86, minScale: 0.52 },
-    date: { left: 0.19, top: 0.78, width: 0.62, height: 0.09, fontScale: 0.7, minScale: 0.52 },
-    footer: { left: 0.21, top: 0.86, width: 0.58, height: 0.07, fontScale: 0.9, minScale: 0.62 },
-  },
-  archedCountryBanner: {
-    frame: { left: 0.08, top: 0.03, width: 0.84, height: 0.92 },
-    titleMode: 'arc',
-    arcDepth: 0.74,
-    arcTextLength: 0.66,
-    maxCountryChars: 14,
-    maxPlaceChars: 12,
-    country: { left: 0.16, top: 0.13, width: 0.68, height: 0.16, fontScale: 0.7, minScale: 0.4, charFactor: 0.74, tracking: 0.5 },
-    icon: { left: 0.34, top: 0.40, width: 0.32, height: 0.22 },
-    place: { left: 0.18, top: 0.66, width: 0.64, height: 0.08, fontScale: 0.96, minScale: 0.58 },
-    date: { left: 0.18, top: 0.78, width: 0.64, height: 0.09, fontScale: 0.7, minScale: 0.52 },
-    footer: { left: 0.2, top: 0.86, width: 0.6, height: 0.07, fontScale: 0.9, minScale: 0.62 },
-  },
-  archedCountryVariant: {
-    frame: { left: 0.08, top: 0.04, width: 0.84, height: 0.9 },
-    titleMode: 'arc',
-    arcDepth: 0.58,
-    arcTextLength: 0.62,
-    maxCountryChars: 12,
-    maxPlaceChars: 11,
-    country: { left: 0.17, top: 0.15, width: 0.66, height: 0.14, fontScale: 0.7, minScale: 0.4, charFactor: 0.76, tracking: 0.45 },
-    icon: { left: 0.35, top: 0.40, width: 0.3, height: 0.21 },
-    place: { left: 0.2, top: 0.66, width: 0.6, height: 0.08, fontScale: 0.94, minScale: 0.58 },
-    date: { left: 0.2, top: 0.78, width: 0.6, height: 0.09, fontScale: 0.7, minScale: 0.52 },
-    footer: { left: 0.22, top: 0.86, width: 0.56, height: 0.07, fontScale: 0.9, minScale: 0.62 },
-  },
-  circularCityClean: {
-    frame: { left: 0.08, top: 0.06, width: 0.84, height: 0.84 },
-    titleMode: 'circleArc',
-    arcDepth: 2.35,
-    arcTextLength: 0.88,
-    straightTitleMaxChars: 6,
-    maxCountryChars: 13,
-    maxPlaceChars: 11,
-    country: { left: 0.08, top: 0.10, width: 0.84, height: 0.18, fontScale: 0.58, minScale: 0.30, charFactor: 0.9, tracking: 0.24 },
-    icon: { left: 0.35, top: 0.34, width: 0.3, height: 0.21 },
-    place: { left: 0.21, top: 0.55, width: 0.58, height: 0.08, fontScale: 0.72, minScale: 0.46 },
-    date: { left: 0.21, top: 0.63, width: 0.58, height: 0.08, fontScale: 0.62, minScale: 0.48 },
-    footer: { left: 0.22, top: 0.81, width: 0.56, height: 0.08, fontScale: 0.82, minScale: 0.56 },
-  },
-  circularCityDoubleLine: {
-    frame: { left: 0.08, top: 0.06, width: 0.84, height: 0.84 },
-    titleMode: 'circleArc',
-    arcDepth: 2.4,
-    arcTextLength: 0.9,
-    straightTitleMaxChars: 6,
-    maxCountryChars: 13,
-    maxPlaceChars: 11,
-    country: { left: 0.08, top: 0.10, width: 0.84, height: 0.18, fontScale: 0.56, minScale: 0.30, charFactor: 0.92, tracking: 0.22 },
-    icon: { left: 0.35, top: 0.34, width: 0.3, height: 0.21 },
-    place: { left: 0.21, top: 0.55, width: 0.58, height: 0.08, fontScale: 0.72, minScale: 0.46 },
-    date: { left: 0.21, top: 0.63, width: 0.58, height: 0.08, fontScale: 0.62, minScale: 0.48 },
-    footer: { left: 0.22, top: 0.81, width: 0.56, height: 0.08, fontScale: 0.82, minScale: 0.56 },
-  },
-  roundedImmigrationCanonical: {
-    frame: { left: 0.04, top: 0.14, width: 0.92, height: 0.72 },
-    titleMode: 'straight',
-    maxCountryChars: 20,
-    maxPlaceChars: 12,
-    country: { left: 0.12, top: 0.235, width: 0.76, height: 0.09, fontScale: 0.64, minScale: 0.36, charFactor: 0.82, tracking: 0.28 },
-    icon: { left: 0.38, top: 0.4, width: 0.24, height: 0.2 },
-    place: { left: 0.16, top: 0.60, width: 0.68, height: 0.08, fontScale: 0.92, minScale: 0.54 },
-    date: { left: 0.17, top: 0.67, width: 0.66, height: 0.08, fontScale: 0.66, minScale: 0.5 },
-    footer: { left: 0.2, top: 0.78, width: 0.6, height: 0.07, fontScale: 0.78, minScale: 0.52 },
-  },
-  roundedImmigrationWithBand: {
-    frame: { left: 0.04, top: 0.14, width: 0.92, height: 0.72 },
-    titleMode: 'straight',
-    maxCountryChars: 20,
-    maxPlaceChars: 12,
-    country: { left: 0.12, top: 0.235, width: 0.76, height: 0.09, fontScale: 0.64, minScale: 0.36, charFactor: 0.82, tracking: 0.28 },
-    icon: { left: 0.38, top: 0.4, width: 0.24, height: 0.2 },
-    place: { left: 0.16, top: 0.60, width: 0.68, height: 0.08, fontScale: 0.92, minScale: 0.54 },
-    date: { left: 0.17, top: 0.67, width: 0.66, height: 0.08, fontScale: 0.66, minScale: 0.5 },
-    footer: { left: 0.2, top: 0.78, width: 0.6, height: 0.07, fontScale: 0.78, minScale: 0.52 },
-  },
-  shieldBadgeRounded: {
-    frame: { left: 0.1, top: 0.04, width: 0.8, height: 0.9 },
-    titleMode: 'arc',
-    arcDepth: 0.35,
-    arcTextLength: 0.58,
-    maxCountryChars: 11,
-    maxPlaceChars: 10,
-    country: { left: 0.19, top: 0.18, width: 0.62, height: 0.13, fontScale: 0.66, minScale: 0.36, charFactor: 0.76, tracking: 0.4 },
-    icon: { left: 0.36, top: 0.39, width: 0.28, height: 0.2 },
-    place: { left: 0.2, top: 0.62, width: 0.6, height: 0.08, fontScale: 0.88, minScale: 0.52 },
-    date: { left: 0.21, top: 0.74, width: 0.58, height: 0.08, fontScale: 0.64, minScale: 0.48 },
-    footer: { left: 0.22, top: 0.83, width: 0.56, height: 0.07, fontScale: 0.78, minScale: 0.52 },
-  },
-  ticketStubNotched: {
-    frame: { left: 0.03, top: 0.2, width: 0.94, height: 0.6 },
-    titleMode: 'straight',
-    maxCountryChars: 16,
-    maxPlaceChars: 12,
-    country: { left: 0.13, top: 0.27, width: 0.74, height: 0.09, fontScale: 0.62, minScale: 0.42, tracking: 0.4 },
-    icon: { left: 0.38, top: 0.43, width: 0.24, height: 0.18 },
-    place: { left: 0.15, top: 0.62, width: 0.7, height: 0.08, fontScale: 0.86, minScale: 0.54 },
-    date: { left: 0.16, top: 0.71, width: 0.68, height: 0.08, minScale: 0.58 },
-    footer: { left: 0.2, top: 0.79, width: 0.6, height: 0.07, fontScale: 0.74, minScale: 0.52 },
-  },
-  horizontalAirportOblong: {
-    frame: { left: 0.03, top: 0.24, width: 0.94, height: 0.52 },
-    titleMode: 'straight',
-    maxCountryChars: 16,
-    maxPlaceChars: 12,
-    country: { left: 0.12, top: 0.31, width: 0.76, height: 0.08, fontScale: 0.6, minScale: 0.42, tracking: 0.35 },
-    icon: { left: 0.4, top: 0.44, width: 0.2, height: 0.14 },
-    place: { left: 0.15, top: 0.59, width: 0.7, height: 0.07, fontScale: 0.78, minScale: 0.5 },
-    date: { left: 0.16, top: 0.67, width: 0.68, height: 0.07, minScale: 0.54 },
-    footer: { left: 0.2, top: 0.75, width: 0.6, height: 0.06, fontScale: 0.7, minScale: 0.5 },
-  },
+type StampPresetOverrides = Partial<Omit<StampTemplate, 'frame' | 'icon'>> & {
+  frame?: Partial<Box>;
+  country?: Partial<TextBox>;
+  icon?: Partial<Box>;
+  place?: Partial<TextBox>;
+  date?: Partial<TextBox>;
+  airport?: Partial<TextBox>;
 };
+
+export type StampTemplateBundle = {
+  default: StampTemplate;
+  presets?: Array<{
+    name?: string;
+    charRange: [number, number];
+    overrides: StampPresetOverrides;
+  }>;
+};
+
+const templateBundles = stampTemplateBundles as unknown as Record<StampShapeKey, StampTemplateBundle>;
+
+export function mergeBox<T extends Record<string, any>>(base: T, override?: Partial<T>): T {
+  if (!override) return base;
+  return { ...base, ...override };
+}
+
+function resolveTemplate(shape: StampShapeKey, length: number): StampTemplate {
+  const bundle = templateBundles[shape];
+  const preset = bundle.presets?.find((p) => length >= p.charRange[0] && length <= p.charRange[1]);
+  if (!preset) return bundle.default;
+  const o = preset.overrides;
+  return {
+    ...bundle.default,
+    ...o,
+    frame: mergeBox(bundle.default.frame, o.frame),
+    country: mergeBox(bundle.default.country, o.country),
+    icon: mergeBox(bundle.default.icon, o.icon),
+    place: mergeBox(bundle.default.place, o.place),
+    date: mergeBox(bundle.default.date, o.date),
+    airport: mergeBox(bundle.default.airport, o.airport),
+  };
+}
+
 
 const iconAssets = countryIconAssets as Record<string, ImageSourcePropType>;
 const shapeAssets = stampShapeAssets as Record<string, ImageSourcePropType>;
@@ -265,9 +180,7 @@ function formatStampDate(date?: string) {
 }
 
 function getPlaceLine(city?: string, airportCode?: string, omitAirportCode?: boolean) {
-  if (omitAirportCode) return city;
-  if (city && airportCode) return `${city} (${airportCode})`;
-  return city ?? airportCode;
+  return city;
 }
 
 function fitToLimit(value: string | undefined, maxChars: number) {
@@ -278,14 +191,25 @@ function fitToLimit(value: string | undefined, maxChars: number) {
   return normalized.slice(0, maxChars);
 }
 
-function fitFontSize(text: string, baseSize: number, boxWidth: number, boxHeight: number, options?: TextBox) {
+function lengthBoost(len: number) {
+  if (len <= 4) return 1.18;
+  if (len <= 6) return 1.08;
+  if (len <= 9) return 1.0;
+  if (len <= 12) return 0.92;
+  if (len <= 15) return 0.84;
+  return 0.76;
+}
+
+function fitFontSize(text: string, baseSize: number, boxWidth: number, boxHeight: number, options?: TextBox, rootWidth: number = 204.75) {
   const charFactor = options?.charFactor ?? 0.62;
   const minScale = options?.minScale ?? 0.5;
-  const tracking = options?.tracking ?? 0;
-  const estimatedWidth = Math.max(1, text.length * baseSize * charFactor + Math.max(0, text.length - 1) * tracking);
+  const tracking = (options?.tracking ?? 0) * (rootWidth / 204.75);
+  const adaptive = options?.adaptiveLength === false ? 1 : lengthBoost(text.length);
+  const adjusted = baseSize * adaptive;
+  const estimatedWidth = Math.max(1, text.length * adjusted * charFactor + Math.max(0, text.length - 1) * tracking);
   const widthScale = Math.min(1, boxWidth / estimatedWidth);
-  const heightScale = Math.min(1, (boxHeight * 0.88) / baseSize);
-  return baseSize * Math.max(minScale, Math.min(widthScale, heightScale));
+  const heightScale = Math.min(1, (boxHeight * 0.88) / adjusted);
+  return adjusted * Math.max(minScale, Math.min(widthScale, heightScale));
 }
 
 function StampText({
@@ -308,14 +232,12 @@ function StampText({
   if (!text) return null;
   const boxWidth = rootWidth * box.width;
   const boxHeight = rootHeight * box.height;
-  const fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), boxWidth, boxHeight, box);
+  const fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), boxWidth, boxHeight, box, rootWidth);
 
   return (
     <Text
       allowFontScaling={false}
       numberOfLines={1}
-      adjustsFontSizeToFit
-      minimumFontScale={box.minScale ?? 0.5}
       style={[
         styles.text,
         {
@@ -323,7 +245,7 @@ function StampText({
           fontFamily: mono ? fonts.mono : fonts.sansBold,
           fontSize,
           lineHeight: boxHeight,
-          letterSpacing: (box.tracking ?? 0.4) * Math.min(1, fontSize / baseSize),
+          letterSpacing: (box.tracking ?? 0) * (rootWidth / 204.75),
           left: rootWidth * box.left,
           top: rootHeight * box.top,
           width: boxWidth,
@@ -359,24 +281,39 @@ function ArcStampText({
   if (!text) return null;
   const boxWidth = rootWidth * box.width;
   const boxHeight = rootHeight * box.height;
-  const fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), boxWidth, boxHeight * 0.58, box);
+  const fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), boxWidth, boxHeight * 0.85, box, rootWidth);
   const isCircleArc = arcDepth >= 1.8;
-  const yStart = boxHeight * (isCircleArc ? 0.96 : Math.min(0.88, 0.6 + arcDepth * 0.15));
-  const yMid = boxHeight * (isCircleArc ? -0.18 : Math.max(0.06, 0.52 - arcDepth * 0.34));
+  const rawYStart = boxHeight * (isCircleArc ? 0.96 : Math.min(0.88, 0.6 + arcDepth * 0.15));
+  const rawYMid = boxHeight * (isCircleArc ? -0.18 : Math.max(0.06, 0.52 - arcDepth * 0.34));
+
+  // Prevent clipping by expanding the SVG bounding box if the arc exceeds boxHeight
+  const topOverflow = Math.max(0, -(rawYMid - fontSize * 1.5));
+  const bottomOverflow = Math.max(0, (rawYStart + fontSize * 1.5) - boxHeight);
+  const svgHeight = boxHeight + topOverflow + bottomOverflow;
+
+  const yStart = rawYStart + topOverflow;
+  const yMid = rawYMid + topOverflow;
+
   const xInset = isCircleArc ? -0.06 : arcDepth >= 1.2 ? 0.04 : 0.08;
-  const path = `M ${boxWidth * xInset} ${yStart} C ${boxWidth * 0.18} ${yMid}, ${boxWidth * 0.82} ${yMid}, ${boxWidth * (1 - xInset)} ${yStart}`;
-  const textLength = boxWidth * (arcTextLength ?? (isCircleArc ? 0.88 : 0.64));
+  const startX = boxWidth * xInset;
+  const endX = boxWidth * (1 - xInset);
+  const cp1X = boxWidth * 0.25;
+  const cp2X = boxWidth * 0.75;
+  const cpY = yMid - (yStart - yMid) * 0.4;
+  const path = `M ${startX} ${yStart} C ${cp1X} ${cpY}, ${cp2X} ${cpY}, ${endX} ${yStart}`;
+  const textLength = boxWidth * (arcTextLength ?? 0.7);
 
   return (
     <Svg
       pointerEvents="none"
       width={boxWidth}
-      height={boxHeight}
+      height={svgHeight}
       style={[
         styles.svgText,
         {
           left: rootWidth * box.left,
-          top: rootHeight * box.top,
+          top: rootHeight * box.top - topOverflow,
+          overflow: 'visible',
         },
       ]}
     >
@@ -388,10 +325,11 @@ function ArcStampText({
         fontFamily={fonts.sansBold}
         fontSize={fontSize}
         fontWeight="700"
-        letterSpacing={(box.tracking ?? 0.3) * Math.min(1, fontSize / baseSize)}
+        letterSpacing={(box.tracking ?? 0) * (rootWidth / 204.75)}
         lengthAdjust="spacingAndGlyphs"
         textAnchor="middle"
         textLength={textLength}
+        dy={fontSize * 0.32}
       >
         <TextPath href={`#${pathId}`} startOffset="50%">
           {text}
@@ -409,6 +347,7 @@ function CircleArcStampText({
   rootHeight,
   baseSize,
   color,
+  arcCenterYOffset,
 }: {
   text?: string;
   box: TextBox;
@@ -417,6 +356,7 @@ function CircleArcStampText({
   rootHeight: number;
   baseSize: number;
   color: string;
+  arcCenterYOffset?: number;
 }) {
   if (!text) return null;
   const frameLeft = rootWidth * frame.left;
@@ -425,13 +365,13 @@ function CircleArcStampText({
   const frameHeight = rootHeight * frame.height;
   const ringSize = Math.min(frameWidth, frameHeight);
   const centerX = frameLeft + frameWidth / 2;
-  const centerY = frameTop + frameHeight / 2 - frameHeight * 0.02;
+  const centerY = frameTop + frameHeight / 2 + frameHeight * (arcCenterYOffset ?? -0.02);
   const radius = ringSize * 0.32;
   const maxArcWidth = radius * 2.35;
   const chars = text.split('');
   const minHalfAngle = chars.length >= 10 ? 53 : chars.length >= 8 ? 44 : chars.length >= 7 ? 36 : 0;
   const maxHalfAngle = chars.length >= 14 ? 78 : chars.length >= 10 ? 70 : chars.length >= 8 ? 60 : 48;
-  let fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), maxArcWidth, rootHeight * box.height * 0.42, box);
+  let fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), maxArcWidth, rootHeight * box.height * 0.7, box, rootWidth);
   if (chars.length > 1) {
     const arcLengthAtMaxAngle = ((maxHalfAngle * 2) * Math.PI) / 180 * radius;
     const requiredArcLength = (chars.length - 1) * fontSize * 0.78;
@@ -440,7 +380,7 @@ function CircleArcStampText({
       fontSize = Math.max(minFontFloor, (arcLengthAtMaxAngle / (chars.length - 1)) / 0.78);
     }
   }
-  const charWidth = Math.max(fontSize * 0.78, 4);
+  const charBoxWidth = Math.max(fontSize * 1.5, 8);
   const desiredStepRad = (fontSize * 0.76) / radius;
   const computedHalfAngle = ((desiredStepRad * Math.max(0, chars.length - 1)) / 2) * (180 / Math.PI);
   const halfAngleDeg = Math.min(maxHalfAngle, Math.max(minHalfAngle, computedHalfAngle));
@@ -462,8 +402,8 @@ function CircleArcStampText({
       {chars.map((char, index) => {
         const angleDeg = chars.length > 1 ? -halfAngleDeg + step * index : 0;
         const angle = (angleDeg * Math.PI) / 180;
-        const x = centerX + Math.sin(angle) * radius - charWidth / 2;
-        const y = centerY - Math.cos(angle) * radius - fontSize * 0.52;
+        const x = centerX + Math.sin(angle) * radius - charBoxWidth / 2;
+        const y = centerY - Math.cos(angle) * radius - fontSize * 1.06;
 
         return (
           <Text
@@ -475,10 +415,10 @@ function CircleArcStampText({
                 color,
                 fontSize,
                 lineHeight: fontSize * 1.08,
-                width: charWidth,
+                width: charBoxWidth,
                 left: x,
                 top: y,
-                transform: [{ rotate: `${angleDeg * 0.92}deg` }],
+                transform: [{ rotate: `${angleDeg * 0.92}deg` }, { translateY: -fontSize * 0.26 }],
               },
             ]}
           >
@@ -498,34 +438,33 @@ export function PngStamp({
   city,
   airportCode,
   date,
-  footer,
   size = 'md',
   variant = 'collection',
   faded = false,
   rotate = 0,
   scale = 1,
+  templateOverride,
 }: PngStampProps) {
   const config = sizeConfig[size];
-  const template = templates[shape];
+  const upperCountry = country.toUpperCase();
+  const template = templateOverride || resolveTemplate(shape, upperCountry.length);
   const width = config.width * scale;
   const height = config.height * scale;
   const omitAirportCode = variant === 'collection' || variant === 'country-card';
-  const countryLabel = fitToLimit(country.toUpperCase(), template.maxCountryChars) ?? country.toUpperCase().slice(0, template.maxCountryChars);
+  const countryLabel = fitToLimit(upperCountry, template.maxCountryChars) ?? upperCountry.slice(0, template.maxCountryChars);
   const placeLine = fitToLimit(getPlaceLine(city, airportCode, omitAirportCode)?.toUpperCase(), template.maxPlaceChars);
   const stampDate = formatStampDate(date);
   const iconSource = resolveIcon(icon);
   const shapeSource = shapeAssets[shapeAssetKeyMap[shape]];
   const textColor = faded ? colors.mutedInk : color;
   const inkOpacity = faded ? 0.36 : 0.92;
-  const visibleFooter = footer?.toUpperCase() === 'FIRST VISIT' ? undefined : footer;
   const titleShouldArc =
     (template.titleMode === 'arc' || template.titleMode === 'circleArc') &&
     (!template.straightTitleMaxChars || countryLabel.length > template.straightTitleMaxChars);
-  const iconScale = 1.1;
-  const iconWidth = width * template.icon.width * iconScale;
-  const iconHeight = height * template.icon.height * iconScale;
-  const iconLeft = width * (template.icon.left + template.icon.width / 2) - iconWidth / 2;
-  const iconTop = height * (template.icon.top + template.icon.height / 2) - iconHeight / 2;
+  const iconWidth = width * template.icon.width;
+  const iconHeight = height * template.icon.height;
+  const iconLeft = width * template.icon.left;
+  const iconTop = height * template.icon.top;
 
   return (
     <View
@@ -564,6 +503,7 @@ export function PngStamp({
           rootHeight={height}
           baseSize={config.country * scale}
           color={textColor}
+          arcCenterYOffset={template.arcCenterYOffset}
         />
       ) : titleShouldArc ? (
         <ArcStampText
@@ -623,12 +563,13 @@ export function PngStamp({
         mono
       />
       <StampText
-        text={visibleFooter?.toUpperCase()}
-        box={template.footer}
+        text={airportCode?.toUpperCase()}
+        box={template.airport}
         rootWidth={width}
         rootHeight={height}
-        baseSize={config.footer * scale}
+        baseSize={config.airport * scale}
         color={textColor}
+        mono
       />
     </View>
   );
@@ -647,6 +588,7 @@ const styles = StyleSheet.create({
   text: {
     position: 'absolute',
     textAlign: 'center',
+    textAlignVertical: 'center',
     textTransform: 'uppercase',
     includeFontPadding: false,
   },

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Platform } from 'react-native';
+import { Linking } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { CountryIconKey, StampShapeKey } from '../components/trotter/stamps/PngStamp';
 import { realTravelerProfile, realTravelTrips } from '../data/realTravelSnapshot';
 import type { TravelerProfile, TripSummary } from '../data/trotterMock';
@@ -12,6 +13,7 @@ type ApiSegment = {
   dep_time: string;
   arr_time: string;
   airline?: string | null;
+  flight_number?: string | null;
   distance_km?: number | null;
   meta_json?: Record<string, unknown> | string | null;
 };
@@ -28,6 +30,10 @@ type AirportInfo = {
   city?: string;
   country_code?: string;
   country_name?: string;
+  countryCode?: string;
+  countryName?: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 const HOME_AIRPORTS = new Set(['IAH', 'DFW', 'HOU', 'DAL']);
@@ -77,58 +83,247 @@ const TITLE_AIRPORT_HINTS: Record<string, string> = {
   germany: 'FRA',
 };
 
-export function useTravelTrips() {
-  const [trips, setTrips] = React.useState<TripSummary[]>(realTravelTrips);
-  const [profile, setProfile] = React.useState<TravelerProfile>(realTravelerProfile);
-  const [source, setSource] = React.useState<'snapshot' | 'api'>('snapshot');
+const US_STATES: Record<string, string> = {
+  'Nashville': 'TN',
+  'Charlotte': 'NC',
+  'Denver': 'CO',
+  'Houston': 'TX',
+  'Dallas-Fort Worth': 'TX',
+  'Dallas': 'TX',
+  'Los Angeles': 'CA',
+  'Miami': 'FL',
+  'New York': 'NY',
+  'Washington': 'D.C.',
+  'District of Columbia': 'D.C.',
+  'Newark': 'NJ',
+  'Fort Lauderdale': 'FL',
+  'Chicago': 'IL',
+  'Phoenix': 'AZ',
+  'Orlando': 'FL',
+  'San Francisco': 'CA',
+  'Seattle': 'WA',
+  'Boston': 'MA',
+  'Las Vegas': 'NV',
+  'Austin': 'TX',
+  'Atlanta': 'GA',
+  'Dulles': 'VA',
+};
 
-  React.useEffect(() => {
-    let cancelled = false;
-    const token = getStoredToken();
-    if (!token) return;
+const COUNTRY_ABBREVIATIONS: Record<string, string> = {
+  'Dominican Republic': 'D.R.',
+  'United Kingdom': 'UK',
+  'United Arab Emirates': 'UAE',
+};
 
-    fetch(`${getApiBaseUrl()}/trips`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error(`Trips API returned ${response.status}`);
-        return response.json() as Promise<ApiTrip[]>;
-      })
-      .then((apiTrips) => {
-        if (cancelled || !Array.isArray(apiTrips) || apiTrips.length === 0) return;
-        const mappedTrips = mapApiTrips(apiTrips);
-        setTrips(mappedTrips);
-        setProfile(buildProfile(mappedTrips));
-        setSource('api');
-      })
-      .catch(() => {
-        if (!cancelled) setSource('snapshot');
-      });
+const DEFAULT_API_BASE_URL = 'https://affectionate-aeroscopically-rhys.ngrok-free.dev';
+let memoryAuthToken: string | undefined;
+const AUTH_TOKEN_STORAGE_KEY = 'trotterAuthToken';
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+export type TravelTripsSource = 'snapshot' | 'api';
+export type TravelTripsStatus = 'idle' | 'loading' | 'refreshing' | 'syncing' | 'error';
 
-  return { trips, profile, source };
+type TravelTripsContextValue = {
+  trips: TripSummary[];
+  profile: TravelerProfile;
+  source: TravelTripsSource;
+  status: TravelTripsStatus;
+  error?: string;
+  accountEmail?: string;
+  lastSyncedAt?: string;
+  refresh: () => Promise<void>;
+  loadTripDetail: (backendId: number) => Promise<TripSummary | undefined>;
+  syncFromGmail: () => Promise<void>;
+};
+
+const snapshotTrips = realTravelTrips.map(trip => ({
+  ...trip,
+  title: displayTitle(trip.title, trip.country, trip.countryCode, trip.city)
+}));
+
+const TravelTripsContext = React.createContext<TravelTripsContextValue | null>(null);
+
+export function TravelTripsProvider({ children }: { children: React.ReactNode }) {
+  const value = useTravelTripsState();
+  return React.createElement(TravelTripsContext.Provider, { value }, children);
 }
 
-function getApiBaseUrl() {
+export function useTravelTrips() {
+  return React.useContext(TravelTripsContext) ?? useTravelTripsState();
+}
+
+function useTravelTripsState(): TravelTripsContextValue {
+  const [trips, setTrips] = React.useState<TripSummary[]>(snapshotTrips);
+  const [profile, setProfile] = React.useState<TravelerProfile>(realTravelerProfile);
+  const [source, setSource] = React.useState<TravelTripsSource>('snapshot');
+  const [status, setStatus] = React.useState<TravelTripsStatus>('idle');
+  const [error, setError] = React.useState<string | undefined>();
+  const [accountEmail, setAccountEmail] = React.useState<string | undefined>();
+  const [lastSyncedAt, setLastSyncedAt] = React.useState<string | undefined>();
+
+  const loadTrips = React.useCallback(async (mode: 'loading' | 'refreshing' = 'refreshing') => {
+    setStatus(mode);
+    const token = getStoredToken() ?? await hydrateStoredToken();
+    if (!token) {
+      setStatus('idle');
+      setSource('snapshot');
+      setAccountEmail(undefined);
+      return;
+    }
+
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const [meResponse, response] = await Promise.all([
+        fetch(`${getApiBaseUrl()}/auth/me`, { headers }),
+        fetch(`${getApiBaseUrl()}/trips`, { headers }),
+      ]);
+      if (response.status === 401) {
+        clearAuthToken();
+        setSource('snapshot');
+        setAccountEmail(undefined);
+        throw new Error('Session expired. Sign in with Google again.');
+      }
+      if (!meResponse.ok) throw new Error(`Profile API returned ${meResponse.status}`);
+      if (!response.ok) throw new Error(`Trips API returned ${response.status}`);
+      const me = await meResponse.json() as { email?: string };
+      const apiTrips = await response.json() as ApiTrip[];
+      if (!Array.isArray(apiTrips)) throw new Error('Trips API returned an unexpected payload.');
+      const mappedTrips = mapApiTrips(apiTrips);
+      setTrips(mappedTrips);
+      setProfile(buildProfile(mappedTrips));
+      setSource('api');
+      setAccountEmail(me.email);
+      setLastSyncedAt(new Date().toISOString());
+      setError(undefined);
+      setStatus('idle');
+    } catch (caught) {
+      setSource((current) => current === 'api' ? 'api' : 'snapshot');
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setStatus('error');
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadTrips('loading');
+  }, [loadTrips]);
+
+  const loadTripDetail = React.useCallback(async (backendId: number) => {
+    const token = getStoredToken() ?? await hydrateStoredToken();
+    if (!token) return undefined;
+    const response = await authFetch(`/trips/${backendId}`, undefined, token);
+    if (response.status === 401) {
+      clearAuthToken();
+      setSource('snapshot');
+      throw new Error('Session expired. Sign in with Google again.');
+    }
+    const data = await readJson(response) as ApiTrip & { detail?: unknown };
+    if (!response.ok) throw new Error(readError(data, `Trip detail failed: ${response.status}`));
+    if (!Array.isArray(data.segments)) throw new Error('Trip detail returned an unexpected payload.');
+
+    let mapped: TripSummary | undefined;
+    setTrips((current) => {
+      const existingIndex = Math.max(0, current.findIndex((trip) => trip.backendId === backendId));
+      mapped = mapApiTrip(data, existingIndex);
+      const next = current.map((trip) => trip.backendId === backendId ? mapped as TripSummary : trip);
+      return next.some((trip) => trip.backendId === backendId) ? next : [...next, mapped as TripSummary];
+    });
+    setSource('api');
+    setLastSyncedAt(new Date().toISOString());
+    setError(undefined);
+    return mapped;
+  }, []);
+
+  React.useEffect(() => {
+    const handleUrl = ({ url }: { url: string }) => {
+      const token = readTokenFromUrl(url);
+      if (!token) return;
+      storeAuthToken(token);
+      loadTrips('refreshing');
+    };
+
+    const subscription = Linking.addEventListener('url', handleUrl);
+    Linking.getInitialURL()
+      .then((url) => {
+        if (url) handleUrl({ url });
+      })
+      .catch(() => undefined);
+    return () => subscription.remove();
+  }, [loadTrips]);
+
+  return {
+    trips,
+    profile,
+    source,
+    status,
+    error,
+    accountEmail,
+    lastSyncedAt,
+    refresh: () => loadTrips('refreshing'),
+    loadTripDetail,
+    syncFromGmail: async () => {
+      setStatus('syncing');
+      try {
+        const token = getStoredToken() ?? await hydrateStoredToken();
+        if (!token) throw new Error('No auth token. Sign in with Google first.');
+        const importResponse = await authFetch('/ingest/gmail/import', { method: 'POST' }, token);
+        if (importResponse.status === 401) {
+          clearAuthToken();
+          throw new Error('Session expired. Sign in with Google again.');
+        }
+        const importData = await readJson(importResponse) as { job_id?: string; detail?: unknown };
+        if (!importResponse.ok || !importData.job_id) {
+          throw new Error(readError(importData, `Import failed: ${importResponse.status}`));
+        }
+        await waitForImport(importData.job_id, token);
+        await loadTrips('refreshing');
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+        setStatus('error');
+      }
+    },
+  };
+}
+
+export function getApiBaseUrl() {
   const params = getUrlParams();
   const configured = params.get('apiUrl') || getProcessEnv('EXPO_PUBLIC_TROTTER_API_URL');
   if (configured) return configured.replace(/\/$/, '');
-  return Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://localhost:8000';
+  return DEFAULT_API_BASE_URL;
 }
 
-function getStoredToken() {
+export function getStoredToken() {
   const params = getUrlParams();
   const token = params.get('token') || getProcessEnv('EXPO_PUBLIC_TROTTER_AUTH_TOKEN');
   const storage = getLocalStorage();
   if (token) {
-    storage?.setItem('trotterAuthToken', token);
+    storeAuthToken(token);
     return token;
   }
-  return storage?.getItem('trotterAuthToken') ?? undefined;
+  return storage?.getItem(AUTH_TOKEN_STORAGE_KEY) ?? memoryAuthToken;
+}
+
+export function storeAuthToken(token: string) {
+  memoryAuthToken = token;
+  getLocalStorage()?.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+  AsyncStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token).catch(() => undefined);
+}
+
+export function clearAuthToken() {
+  memoryAuthToken = undefined;
+  getLocalStorage()?.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  AsyncStorage.removeItem(AUTH_TOKEN_STORAGE_KEY).catch(() => undefined);
+}
+
+export async function hydrateStoredToken() {
+  if (memoryAuthToken) return memoryAuthToken;
+  const webToken = getLocalStorage()?.getItem(AUTH_TOKEN_STORAGE_KEY);
+  if (webToken) return webToken;
+  try {
+    const token = await AsyncStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    if (token) memoryAuthToken = token;
+    return token ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function getUrlParams() {
@@ -138,6 +333,60 @@ function getUrlParams() {
 
 function getLocalStorage() {
   return (globalThis as { localStorage?: Storage }).localStorage;
+}
+
+function readTokenFromUrl(url: string) {
+  try {
+    return new URL(url).searchParams.get('token') ?? undefined;
+  } catch {
+    const match = /[?&]token=([^&]+)/.exec(url);
+    return match ? decodeURIComponent(match[1]) : undefined;
+  }
+}
+
+async function authFetch(path: string, init: RequestInit | undefined, token: string) {
+  return fetch(`${getApiBaseUrl()}${path}`, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+async function waitForImport(jobId: string, token: string) {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const response = await authFetch(`/ingest/jobs/${jobId}`, undefined, token);
+    if (response.status === 401) {
+      clearAuthToken();
+      throw new Error('Session expired. Sign in with Google again.');
+    }
+    const data = await readJson(response) as { state?: string; error_message?: string | null; detail?: unknown };
+    if (!response.ok) throw new Error(readError(data, `Job status failed: ${response.status}`));
+    if (data.state === 'done' || data.state === 'completed' || data.state === 'success') return;
+    if (data.state === 'failed' || data.state === 'error') throw new Error(data.error_message || 'Gmail import failed.');
+    await delay(2000);
+  }
+  throw new Error('Gmail import did not finish before the sync timeout.');
+}
+
+async function readJson(response: Response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return { detail: text };
+  }
+}
+
+function readError(data: unknown, fallback: string) {
+  if (data && typeof data === 'object' && 'detail' in data) return String((data as { detail: unknown }).detail);
+  return fallback;
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 function getProcessEnv(key: string) {
@@ -154,8 +403,8 @@ function mapApiTrips(apiTrips: ApiTrip[]): TripSummary[] {
 function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
   const segments = [...trip.segments].sort((a, b) => dateMs(a.dep_time) - dateMs(b.dep_time) || a.id - b.id);
   const destination = pickDestination(trip.title, segments);
-  const country = destination.info.country_name ?? countryHint(trip.title) ?? trip.title ?? 'United States';
-  const countryCode = destination.info.country_code ?? (country === 'United States' ? 'US' : undefined);
+  const country = destination.info.country_name ?? destination.info.countryName ?? countryHint(trip.title) ?? trip.title ?? 'United States';
+  const countryCode = destination.info.country_code ?? destination.info.countryCode ?? (country === 'United States' ? 'US' : undefined);
   const city = cleanCity(destination.info.city) || trip.title || undefined;
   const startDate = toDateOnly(trip.start_ts ?? segments[0].dep_time);
   const endDate = toDateOnly(trip.end_ts ?? segments[segments.length - 1].arr_time);
@@ -166,7 +415,8 @@ function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
 
   return {
     id: `api-trip-${trip.id}`,
-    title: displayTitle(trip.title, country, countryCode),
+    backendId: trip.id,
+    title: displayTitle(trip.title, country, countryCode, city),
     country,
     countryCode,
     city,
@@ -178,6 +428,9 @@ function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
     miles: Math.round(segments.reduce((sum, segment) => sum + (segment.distance_km ?? 0), 0) * 0.621371),
     flightCount: segments.length,
     airlineCount: airlines.size,
+    airlines: Array.from(airlines).sort() as string[],
+    airports: uniqueAirports(segments),
+    segments: segments.map(mapApiSegment),
     accent: ACCENTS[index % ACCENTS.length],
     stamp: {
       shape,
@@ -190,6 +443,55 @@ function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
       footer: isDomestic ? 'DOMESTIC' : 'FIRST VISIT',
     },
   };
+}
+
+function mapApiSegment(segment: ApiSegment) {
+  const meta = parseMeta(segment.meta_json);
+  const confidence = typeof meta.confidence === 'number' ? meta.confidence : undefined;
+  const departure = airportInfo(segment, 'departure');
+  const arrival = airportInfo(segment, 'arrival');
+  return {
+    id: `api-segment-${segment.id}`,
+    mode: 'flight' as const,
+    depAirport: segment.dep_airport,
+    arrAirport: segment.arr_airport,
+    depTime: segment.dep_time,
+    arrTime: segment.arr_time,
+    airline: segment.airline ?? undefined,
+    flightNumber: readFlightNumber(segment),
+    distanceMiles: typeof segment.distance_km === 'number' ? Math.round(segment.distance_km * 0.621371) : undefined,
+    confidence,
+    depPoint: routePoint(segment.dep_airport, departure),
+    arrPoint: routePoint(segment.arr_airport, arrival),
+  };
+}
+
+function routePoint(code: string, info: AirportInfo) {
+  if (typeof info.latitude !== 'number' || typeof info.longitude !== 'number') return undefined;
+  return {
+    code,
+    city: cleanCity(info.city) || code,
+    lat: info.latitude,
+    lon: info.longitude,
+  };
+}
+
+function readFlightNumber(segment: ApiSegment) {
+  const value = (segment as ApiSegment & { flight_number?: string | null }).flight_number;
+  return value ?? undefined;
+}
+
+function uniqueAirports(segments: ApiSegment[]) {
+  const seen = new Set<string>();
+  const airports: string[] = [];
+  for (const segment of segments) {
+    for (const code of [segment.dep_airport, segment.arr_airport]) {
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      airports.push(code);
+    }
+  }
+  return airports;
 }
 
 function pickDestination(title: string | null | undefined, segments: ApiSegment[]) {
@@ -212,10 +514,18 @@ function pickDestination(title: string | null | undefined, segments: ApiSegment[
       info: airportInfo(segment, 'departure'),
     },
   ]);
+  const first = segments[0];
+  const last = segments[segments.length - 1];
+  const openEndedFinal = last?.arr_airport
+    && last.arr_airport !== first?.dep_airport
+    && !HOME_AIRPORTS.has(last.arr_airport)
+    ? candidates.find((candidate) => candidate.side === 'arrival' && candidate.airport === last.arr_airport)
+    : undefined;
 
   return (
     candidates.find((candidate) => candidate.airport === airportHint) ??
     candidates.find((candidate) => candidate.info.country_name === country && !HOME_AIRPORTS.has(candidate.airport)) ??
+    openEndedFinal ??
     candidates.find((candidate) => !HOME_AIRPORTS.has(candidate.airport)) ??
     candidates[0]
   );
@@ -260,8 +570,14 @@ function buildProfile(trips: TripSummary[]): TravelerProfile {
   const flights = trips.reduce((sum, trip) => sum + trip.flightCount, 0);
   const miles = trips.reduce((sum, trip) => sum + trip.miles, 0);
   const countries = new Set(trips.map((trip) => trip.country).filter(Boolean)).size;
-  const airports = new Set(trips.flatMap((trip) => trip.routeLabel.split('->').map((part) => part.trim())).concat(trips.map((trip) => trip.airportCode ?? ''))).size;
-  const airlines = trips.reduce((max, trip) => Math.max(max, trip.airlineCount), 0);
+  const airports = new Set(
+    trips
+      .flatMap((trip) => trip.airports ?? trip.routeLabel.split('->').map((part) => part.trim()))
+      .concat(trips.map((trip) => trip.airportCode ?? ''))
+      .filter(Boolean)
+  ).size;
+  const airlineCodes = new Set(trips.flatMap((trip) => trip.airlines ?? []));
+  const airlines = airlineCodes.size || trips.reduce((max, trip) => Math.max(max, trip.airlineCount), 0);
 
   return {
     ...realTravelerProfile,
@@ -281,11 +597,22 @@ function countryHint(title?: string | null) {
   return TITLE_COUNTRY_HINTS[normalizeTitle(title)];
 }
 
-function displayTitle(title: string | null | undefined, country: string, countryCode?: string) {
-  const clean = title?.trim();
-  if (!clean) return country;
-  if (countryCode === 'US' || clean.toLowerCase().includes(country.toLowerCase())) return clean;
-  return `${clean}, ${country}`;
+function displayTitle(title: string | null | undefined, country: string, countryCode?: string, city?: string) {
+  const cleanTitle = title?.trim();
+  const primaryName = (city && city.toLowerCase() !== country.toLowerCase()) ? city : (cleanTitle || country);
+
+  if (countryCode === 'US') {
+    const state = US_STATES[primaryName] || US_STATES[cleanTitle || ''];
+    if (state) return `${primaryName}, ${state}`;
+    return primaryName;
+  }
+
+  const displayCountry = COUNTRY_ABBREVIATIONS[country] || country;
+
+  if (primaryName.toLowerCase() === country.toLowerCase()) return displayCountry;
+  if (primaryName.toLowerCase().includes(country.toLowerCase())) return primaryName;
+
+  return `${primaryName}, ${displayCountry}`;
 }
 
 function cleanCity(value: unknown) {

@@ -1,9 +1,10 @@
 import React from 'react';
-import { Image, ImageBackground, StyleSheet, Text, View } from 'react-native';
+import { GestureResponderEvent, Image, ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native';
 import { TripSummary } from '../../data/trotterMock';
 import { accentColors, colors, fonts, radii, shadows } from '../../theme/trotterTheme';
 import { IconGlyph } from './TrotterKit';
-import { PngStamp } from './stamps/PngStamp';
+import Svg, { Path } from 'react-native-svg';
+import { mapboxFlightImageUrl } from '../../utils/mapboxFlightImage';
 
 const paperTexture = require('../../../assets/textures/paper_texture_clean.png');
 
@@ -11,21 +12,27 @@ type TripCardProps = {
   trip: TripSummary;
   width: number;
   favorite?: boolean;
+  upcoming?: boolean;
+  onFavorite?: () => void;
+  onPress?: () => void;
 };
 
-export function TripCard({ trip, width, favorite = false }: TripCardProps) {
+export function TripCard({ trip, width, favorite = false, upcoming = false, onFavorite, onPress }: TripCardProps) {
   const compact = width < 370;
   const accent = accentColors[trip.accent];
-  const cardHeight = compact ? 140 : 156;
+  const cardHeight = compact ? 168 : 192;
   const stripWidth = compact ? 48 : 54;
-  const dateWidth = compact ? 54 : 58;
-  const imageWidth = Math.max(compact ? 106 : 116, Math.min(compact ? 114 : 128, width * 0.32));
-  const imageHeight = compact ? 72 : 84;
-  const stampSize = 'md';
+  const imageWidth = compact ? 156 : 180;
+  const imageHeight = compact ? 112 : 130;
   const [origin, destination] = splitRoute(trip.routeLabel);
+  const mapUrl = mapboxFlightImageUrl(origin, destination, 400, 320, accent);
 
   return (
-    <View style={[styles.shadowWrap, { width }]}>
+    <Pressable
+      onPress={onPress}
+      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+      style={[styles.shadowWrap, { width }]}
+    >
       <ImageBackground
         source={paperTexture}
         resizeMode="cover"
@@ -39,27 +46,27 @@ export function TripCard({ trip, width, favorite = false }: TripCardProps) {
           </View>
         </View>
 
-        <View style={[styles.dateColumn, { width: dateWidth }]}>
-          <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.verticalDate}>
-            {formatVerticalDate(trip.startDate, trip.endDate)}
-          </Text>
-        </View>
-
-        <View style={[styles.mainContent, { marginRight: imageWidth - (compact ? 20 : 16) }]}>
+        <View style={[styles.mainContent, { paddingLeft: compact ? 12 : 16, marginRight: imageWidth + 24 }]}>
           <View style={styles.titleRow}>
             <Text maxFontSizeMultiplier={1.05} numberOfLines={1} adjustsFontSizeToFit style={[styles.title, compact && styles.titleCompact]}>
               {trip.title}
             </Text>
-            {trip.countryCode ? (
-              <Text allowFontScaling={false} numberOfLines={1} style={styles.countryCode}>
-                {trip.countryCode}
-              </Text>
-            ) : null}
           </View>
 
           <View style={styles.routeRow}>
             <Text allowFontScaling={false} numberOfLines={1} style={[styles.airportCode, { color: accent }]}>{origin}</Text>
-            <IconGlyph name="plane" color={accent} size={20} />
+            <View style={styles.flightPathWrap}>
+              <Svg width="40" height="16" viewBox="0 0 40 16">
+                <Path
+                  d="M 2 13 Q 20 4 38 13"
+                  fill="none"
+                  stroke={accent}
+                  strokeWidth="1.5"
+                  strokeDasharray="3,3"
+                  strokeLinecap="round"
+                />
+              </Svg>
+            </View>
             <Text allowFontScaling={false} numberOfLines={1} style={[styles.airportCode, { color: accent }]}>{destination}</Text>
           </View>
 
@@ -67,22 +74,21 @@ export function TripCard({ trip, width, favorite = false }: TripCardProps) {
             {formatReadableDate(trip.startDate, trip.endDate)}
           </Text>
           <Text maxFontSizeMultiplier={1.05} numberOfLines={1} adjustsFontSizeToFit style={styles.metaText}>
-            {trip.flightCount} flights  •  {trip.miles.toLocaleString()} mi  •  {trip.airlineCount} airline{trip.airlineCount === 1 ? '' : 's'}
+            {trip.flightCount} flights  •  {trip.miles.toLocaleString()} mi
           </Text>
         </View>
 
-        <View pointerEvents="none" style={[styles.stampWrap, { right: compact ? 105 : 112 }]}>
-          <PngStamp
-            {...trip.stamp}
-            size={stampSize}
-            variant="trip-card"
-            rotate={trip.id.includes('paris') ? 2 : -8}
-          />
-        </View>
+
 
         <View style={[styles.photoFrame, { width: imageWidth, height: imageHeight }]}>
           {trip.destinationImage ? (
             <Image source={trip.destinationImage} resizeMode="cover" style={StyleSheet.absoluteFillObject} />
+          ) : mapUrl ? (
+            <Image
+              source={{ uri: mapUrl }}
+              resizeMode="cover"
+              style={StyleSheet.absoluteFillObject}
+            />
           ) : (
             <View style={[styles.photoPlaceholder, { backgroundColor: getPhotoTone(trip.id) }]}>
               <View style={styles.placeholderSun} />
@@ -92,14 +98,21 @@ export function TripCard({ trip, width, favorite = false }: TripCardProps) {
               <Text allowFontScaling={false} style={styles.placeholderCode}>{trip.countryCode}</Text>
             </View>
           )}
-          <View style={styles.favoriteBubble}>
+          <Pressable
+            hitSlop={8}
+            onPress={(event: GestureResponderEvent) => {
+            event.stopPropagation();
+            onFavorite?.();
+          }}
+            style={styles.favoriteBubble}
+          >
             <Text allowFontScaling={false} style={[styles.favoriteStar, favorite && styles.favoriteStarFilled]}>
               {favorite ? '★' : '☆'}
             </Text>
-          </View>
+          </Pressable>
         </View>
       </ImageBackground>
-    </View>
+    </Pressable>
   );
 }
 
@@ -183,23 +196,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.paperBorder,
   },
-  dateColumn: {
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRightWidth: 1,
-    borderStyle: 'dotted',
-    borderRightColor: colors.divider,
-  },
-  verticalDate: {
-    width: 142,
-    color: colors.ink,
-    fontFamily: fonts.mono,
-    fontSize: 10.5,
-    letterSpacing: 0.7,
-    textAlign: 'center',
-    transform: [{ rotate: '-90deg' }],
-  },
+
   mainContent: {
     flex: 1,
     minWidth: 0,
@@ -240,13 +237,20 @@ const styles = StyleSheet.create({
   routeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
     marginTop: 7,
+  },
+  flightPathWrap: {
+    width: 40,
+    height: 16,
+    marginHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginTop: 2,
   },
   airportCode: {
     fontFamily: fonts.sansBold,
-    fontSize: 18,
-    letterSpacing: 1.4,
+    fontSize: 16,
+    letterSpacing: 1.2,
   },
   dateText: {
     color: colors.ink,
@@ -260,17 +264,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 5,
   },
-  stampWrap: {
-    position: 'absolute',
-    top: 56,
-    zIndex: 1,
-    opacity: 0.78,
-    transform: [{ scale: 0.84 }],
-  },
+
   photoFrame: {
     position: 'absolute',
-    right: 20,
-    top: 36,
+    right: 4,
+    top: 28,
     borderWidth: 6,
     borderColor: colors.paperSoft,
     backgroundColor: colors.dashboard,

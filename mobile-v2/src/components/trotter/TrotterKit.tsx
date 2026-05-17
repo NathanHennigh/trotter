@@ -433,18 +433,32 @@ export function RecentTripsSheet({ trips, onViewAll }: { trips: TripSummary[]; o
   );
 }
 
-export function NewFlightsBanner({ count, sourceLabel, onReview }: { count: number; sourceLabel: string; onReview: () => void }) {
+export function NewFlightsBanner({
+  count,
+  sourceLabel,
+  onReview,
+  eyebrow = 'NEW FLIGHTS FOUND',
+  title,
+  actionLabel = 'REVIEW',
+}: {
+  count: number;
+  sourceLabel: string;
+  onReview: () => void;
+  eyebrow?: string;
+  title?: string;
+  actionLabel?: string;
+}) {
   return (
     <PaperSurface radius={radii.md} padding={spacing.sm} style={styles.newFlights}>
       <View style={styles.terminal}>
-        <Text style={styles.terminalTiny}>NEW FLIGHTS FOUND</Text>
+        <Text style={styles.terminalTiny}>{eyebrow}</Text>
         <Text style={styles.terminalCount}>{count}</Text>
       </View>
       <View style={styles.newCopy}>
-        <Text style={styles.newTitle}>{count} new flights added</Text>
+        <Text style={styles.newTitle}>{title ?? `${count} new flights added`}</Text>
         <Text style={styles.newSub}>from {sourceLabel}</Text>
       </View>
-      <Pressable onPress={onReview} style={styles.reviewButton}><Text style={styles.reviewText}>REVIEW</Text></Pressable>
+      <Pressable onPress={onReview} style={styles.reviewButton}><Text style={styles.reviewText}>{actionLabel}</Text></Pressable>
     </PaperSurface>
   );
 }

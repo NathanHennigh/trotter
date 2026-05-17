@@ -133,7 +133,7 @@ async def google_start(app_redirect_uri: str):
     client_id, _, backend_url = _get_google_config()
 
     # Validate the app redirect URI — only allow known schemes
-    allowed = ("trotter://", "exp://", "com.trotter")
+    allowed = ("trotter://", "trotterv2://", "exp://", "com.trotter")
     if not any(app_redirect_uri.startswith(s) for s in allowed):
         raise HTTPException(400, "Disallowed redirect URI scheme")
 

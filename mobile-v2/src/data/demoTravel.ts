@@ -14,6 +14,17 @@ export interface DemoRoute {
   color?: string;
 }
 
+export type FlightRoute = DemoRoute & {
+  segmentId?: number;
+  tripId?: number;
+  tripTitle?: string | null;
+  depTime?: string | null;
+  arrTime?: string | null;
+  airline?: string | null;
+  flightNumber?: string | null;
+  distanceKm?: number | null;
+};
+
 export interface DemoTrip {
   id: string;
   title: string;
@@ -29,16 +40,7 @@ export interface DemoTrip {
 }
 
 interface LocalFlightFixture {
-  routes: Array<DemoRoute & {
-    segmentId: number;
-    tripId: number;
-    tripTitle?: string | null;
-    depTime?: string | null;
-    arrTime?: string | null;
-    airline?: string | null;
-    flightNumber?: string | null;
-    distanceKm?: number | null;
-  }>;
+  routes: FlightRoute[];
   airports: RoutePoint[];
 }
 
@@ -94,7 +96,7 @@ export const cityLights: RoutePoint[] = [
   { code: 'LIM', city: 'Lima', lat: -12.0219, lon: -77.1143 },
 ];
 
-export const flightRoutes: DemoRoute[] = localFlightFixture.routes.length > 0
+export const flightRoutes: FlightRoute[] = localFlightFixture.routes.length > 0
   ? localFlightFixture.routes
   : demoRoutes;
 

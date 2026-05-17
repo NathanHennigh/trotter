@@ -1,4 +1,5 @@
 <resources>
-  <string name="app_name">Trotter V2</string>
+  <string name="app_name">Trotter</string>
+  <string name="share_to_dreams">Save to Trotter Dreams</string>
   <string name="expo_system_ui_user_interface_style" translatable="false">dark</string>
 </resources>

@@ -1,0 +1,26 @@
+{
+  "message_id": "synthetic-delta-eboarding-pass",
+  "fixture_version": 1,
+  "frozen_at": "2026-05-07T00:00:00+00:00",
+  "parser_version_when_frozen": 14,
+  "failure_type": "parser_miss",
+  "sender_domain": "delta.com",
+  "subject": "Delta E-Boarding Pass",
+  "received_at": "Sat, 21 Dec 2019 12:00:00 +0000",
+  "html": "",
+  "plain_text": "Delta E-Boarding Pass [code], JFK TO AMS, 6:00PM Sun, Dec 22, 2019. Open link to view boarding pass. [url] [code], JFK TO AMS, 6:00PM Sun, Dec 22, 2019. Open link to view boarding pass. [url]",
+  "attachment_filenames": [],
+  "expectations": {
+    "must_complete_within_seconds": 2.0,
+    "expected_flights": [
+      {"flight_number": null, "dep_airport": "JFK", "arr_airport": "AMS"}
+    ],
+    "notes": "Delta E-Boarding Pass body. No flight number anywhere; only route + departure time. v5 _v5_boarding_route_lines rule extracts route + dep_time, sets arr_time = dep + 1h placeholder."
+  },
+  "source_failure_summary": {
+    "ai_label": "boarding_pass",
+    "ai_confidence": 0.95,
+    "parse_miss_score": 14,
+    "discovery_tiers": ["initial_broad_recent"]
+  }
+}

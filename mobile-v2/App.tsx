@@ -3,18 +3,23 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts, Outfit_400Regular, Outfit_500Medium, Outfit_600SemiBold, Outfit_700Bold } from '@expo-google-fonts/outfit';
 import { Asset } from 'expo-asset';
-import { Platform, StyleSheet, View, ViewStyle } from 'react-native';
+import { Linking, Platform, StyleSheet, View, ViewStyle } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { CountryStampCollectionScreen } from './src/screens/CountryStampCollectionScreen';
+import { DreamsScreen } from './src/screens/DreamsScreen';
 import { HomeGlobeScreen } from './src/screens/HomeGlobeScreen';
 import { PassportStatsScreen } from './src/screens/PassportStatsScreen';
+import { TripDetailScreen } from './src/screens/TripDetailScreen';
 import { TripsListScreen } from './src/screens/TripsListScreen';
 import { BottomNavTab } from './src/data/trotterMock';
+import { DreamsProvider, parseIncomingDreamShare, useDreams } from './src/services/dreams';
+import { TravelTripsProvider, useTravelTrips } from './src/services/travelTrips';
 import { colors } from './src/theme/trotterTheme';
 
 const tabs: BottomNavTab[] = ['globe', 'trips', 'passport', 'dreams', 'profile'];
 const globeAssets = [
   require('./assets/globe/blue-marble-day-2048.jpg'),
+  require('./assets/globe/blue-marble-day-4096.jpg'),
   require('./assets/globe/black-marble-2016-3600.jpg'),
 ];
 
@@ -25,7 +30,6 @@ function getInitialTab(): BottomNavTab {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = React.useState<BottomNavTab>(getInitialTab);
   const [fontsLoaded] = useFonts({
     Outfit_400Regular,
     Outfit_500Medium,
@@ -41,28 +45,82 @@ export default function App() {
     return <View style={{ flex: 1, backgroundColor: colors.appBackground }} />;
   }
 
-  const renderOverlayScreen = () => {
-    if (activeTab === 'trips') return <TripsListScreen active={activeTab} onChange={setActiveTab} />;
-    if (activeTab === 'passport') return <PassportStatsScreen active={activeTab} onChange={setActiveTab} />;
-    // Temporary: Countries is parked behind Profile until the final v2 nav IA adds a dedicated collection route.
-    if (activeTab === 'profile') return <CountryStampCollectionScreen active={activeTab} onChange={setActiveTab} />;
-    return null;
-  };
-
   return (
     <GestureHandlerRootView style={[styles.gestureRoot, styles.webViewportRoot]}>
       <SafeAreaProvider>
-        <StatusBar style="light" translucent />
-        <View style={styles.shell}>
-          <HomeGlobeScreen active={activeTab} onChange={setActiveTab} />
-          {activeTab !== 'globe' ? (
-            <View style={styles.overlayScreen}>
-              {renderOverlayScreen()}
-            </View>
-          ) : null}
-        </View>
+        <TravelTripsProvider>
+          <DreamsProvider>
+            <AppShell />
+          </DreamsProvider>
+        </TravelTripsProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+function AppShell() {
+  const [activeTab, setActiveTab] = React.useState<BottomNavTab>(getInitialTab);
+  const [selectedTripId, setSelectedTripId] = React.useState<string | null>(null);
+  const { trips } = useTravelTrips();
+  const { shareInstagramLink } = useDreams();
+  const shareInstagramLinkRef = React.useRef(shareInstagramLink);
+  const handledShareUrlsRef = React.useRef(new Set<string>());
+  const selectedTrip = selectedTripId ? trips.find((trip) => trip.id === selectedTripId) ?? null : null;
+
+  React.useEffect(() => {
+    shareInstagramLinkRef.current = shareInstagramLink;
+  }, [shareInstagramLink]);
+
+  const changeTab = (tab: BottomNavTab) => {
+    setActiveTab(tab);
+    if (tab !== 'trips') setSelectedTripId(null);
+  };
+
+  const renderOverlayScreen = () => {
+    if (activeTab === 'trips' && selectedTrip) {
+      return <TripDetailScreen trip={selectedTrip} active={activeTab} onBack={() => setSelectedTripId(null)} onChange={changeTab} />;
+    }
+    if (activeTab === 'trips') return <TripsListScreen active={activeTab} onChange={changeTab} onOpenTrip={(trip) => setSelectedTripId(trip.id)} />;
+    if (activeTab === 'passport') return <PassportStatsScreen active={activeTab} onChange={changeTab} />;
+    if (activeTab === 'dreams') return <DreamsScreen active={activeTab} onChange={changeTab} />;
+    // Temporary: Countries is parked behind Profile until the final v2 nav IA adds a dedicated collection route.
+    if (activeTab === 'profile') return <CountryStampCollectionScreen active={activeTab} onChange={changeTab} />;
+    return null;
+  };
+
+  React.useEffect(() => {
+    const handleUrl = ({ url }: { url: string }) => {
+      const incomingShare = parseIncomingDreamShare(url);
+      if (!incomingShare) return;
+      const shareKey = `${incomingShare.sourceUrl}|${incomingShare.sharedText ?? ''}`;
+      if (handledShareUrlsRef.current.has(shareKey)) return;
+      handledShareUrlsRef.current.add(shareKey);
+      shareInstagramLinkRef.current(incomingShare.sourceUrl, incomingShare.sharedText);
+      setSelectedTripId(null);
+      setActiveTab('dreams');
+    };
+
+    const subscription = Linking.addEventListener('url', handleUrl);
+    Linking.getInitialURL()
+      .then((url) => {
+        if (url) handleUrl({ url });
+      })
+      .catch(() => undefined);
+    return () => subscription.remove();
+  }, []);
+
+  return (
+    <>
+      <StatusBar style="light" translucent />
+      <View style={styles.shell}>
+        <HomeGlobeScreen active={activeTab} onChange={changeTab} />
+        {activeTab !== 'globe' ? (
+          <View style={styles.overlayScreen}>
+            {renderOverlayScreen()}
+          </View>
+        ) : null}
+      </View>
+    </>
   );
 }
 

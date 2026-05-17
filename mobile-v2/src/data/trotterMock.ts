@@ -40,6 +40,7 @@ export type StampData = {
 
 export type TripSummary = {
   id: string;
+  backendId?: number;
   title: string;
   country: string;
   countryCode?: string;
@@ -52,6 +53,9 @@ export type TripSummary = {
   miles: number;
   flightCount: number;
   airlineCount: number;
+  airlines?: string[];
+  airports?: string[];
+  segments?: TripSegmentSummary[];
   accent: TrotterAccent;
   destinationImage?: ImageSourcePropType;
   stamp: {
@@ -63,6 +67,31 @@ export type TripSummary = {
     airportCode?: string;
     date: string;
     footer?: string;
+  };
+};
+
+export type TripSegmentSummary = {
+  id: string;
+  mode: 'flight';
+  depAirport: string;
+  arrAirport: string;
+  depTime: string;
+  arrTime: string;
+  airline?: string;
+  flightNumber?: string;
+  distanceMiles?: number;
+  confidence?: number;
+  depPoint?: {
+    code: string;
+    city: string;
+    lat: number;
+    lon: number;
+  };
+  arrPoint?: {
+    code: string;
+    city: string;
+    lat: number;
+    lon: number;
   };
 };
 

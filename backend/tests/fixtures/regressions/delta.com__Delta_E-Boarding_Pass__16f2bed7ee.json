@@ -1,0 +1,27 @@
+{
+  "attachment_filenames": [],
+  "expectations": {
+    "expected_flights": null,
+    "must_complete_within_seconds": 5.0,
+    "notes": "boarding_pass"
+  },
+  "failure_type": "parser_miss",
+  "fixture_version": 1,
+  "frozen_at": "2026-05-07T23:09:51+00:00",
+  "html": "",
+  "message_id": "16f2bed7eecc9951",
+  "parser_version_when_frozen": 15,
+  "plain_text": "DL9357, JFK TO AMS, 6:00PM Sun, Dec 22, 2019. Open link to view boarding pass.\r\n\r\n[url]\r\n",
+  "received_at": "Sun, 22 Dec 2019 04:46:21 +0000 (UTC)",
+  "sender_domain": "delta.com",
+  "source_failure_summary": {
+    "ai_confidence": 0.95,
+    "ai_label": "boarding_pass",
+    "discovery_tiers": [
+      "incremental_precise",
+      "incremental_precise"
+    ],
+    "parse_miss_score": 14
+  },
+  "subject": "Delta E-Boarding Pass"
+}

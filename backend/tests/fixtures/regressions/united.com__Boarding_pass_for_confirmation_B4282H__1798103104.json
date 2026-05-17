@@ -1,0 +1,33 @@
+{
+  "attachment_filenames": [],
+  "expectations": {
+    "expected_flights": [
+      {
+        "arr_airport": "EWR",
+        "dep_airport": "DFW",
+        "flight_number": "UA1612"
+      }
+    ],
+    "must_complete_within_seconds": 5.0,
+    "notes": "boarding_pass"
+  },
+  "failure_type": "parser_miss",
+  "fixture_version": 1,
+  "frozen_at": "2026-05-07T23:09:52+00:00",
+  "html": "<table cellpadding=\"0\" cellspacing=\"0\" style=\"font-family:Arial;font-size:10pt;\"><tr><td></td></tr><tr><td>Boarding documents for the following traveler(s) are included with this email:</td></tr><tr><td><table cellpadding=\"0\" cellspacing=\"0\" style=\"font-family:Arial;font-size:10pt;\" border=\"0\"><tr height=\"25\"><td width=\"75\">&nbsp;</td><td valign=\"middle\">NATHANCHARLES HENNIGH</td></tr></table></td></tr><tr><td>&nbsp;</td></tr><tr><td>Please use one of the following options to retrieve your boarding documents:<br>&nbsp;</td></tr><tr><td><table cellpadding=\"0\" cellspacing=\"0\" style=\"font-family:Arial;font-size:10pt;\" border=\"0\"><tr><td valign=\"top\" style=\"font-weight:bold;\">Option 1: Display your boarding passes on your mobile device</td></tr><tr><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td><b>Flight UA1612</b><br/>Dallas-Ft. Worth (DFW) to Newark-Liberty Intl (EWR) <br/><br/><a href=\"[url] boarding passes</a><br/></td></tr><tr><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td valign=\"top\" style=\"font-weight:bold;\">Option 2: Print the attached boarding passes</td></tr><tr><td valign=\"top\">The attachments are designed to be printed and cannot be displayed on your mobile device.</td></tr><tr><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td valign=\"top\" style=\"font-weight:bold;\">Option 3: Print your boarding documents from united.com or at an airport kiosk<br/></td></tr></table></td></tr><tr><td>&nbsp;</td></tr><tr><td>Dallas/Fort Worth TSA PreCheck information<br><br>TSA PreCheck in Terminal E is now located near entrance E16. If you have TSA PreCheck, please allow additional time to walk to your gate. </td></tr><tr><td>&nbsp;</td></tr><tr><td>To change your seat assignment, switch flights and more, you can use the United app or return to the check-in page [url] Enter your confirmation number to get started.</td></tr><tr><td><br/>If your travel plans change, please go to united.com or the United app, use an airport kiosk, speak to a United representative at the airport or call 1-800-UNITED-[phone]) for assistance.<br/><br/>Please note: Minimum required check-in and boarding times vary by airport. If you are not in the immediate boarding area at the required minimum time before departure, your reservations are subject to cancellation and you may not be eligible for denied boarding compensation. Review minimum required check-in and boarding times at [url]",
+  "message_id": "1798103104914773",
+  "parser_version_when_frozen": 15,
+  "plain_text": "",
+  "received_at": "18 May 2021 15:45:29 -0400",
+  "sender_domain": "united.com",
+  "source_failure_summary": {
+    "ai_confidence": 0.95,
+    "ai_label": "boarding_pass",
+    "discovery_tiers": [
+      "incremental_precise",
+      "incremental_precise"
+    ],
+    "parse_miss_score": 10
+  },
+  "subject": "Boarding pass for confirmation B4282H"
+}

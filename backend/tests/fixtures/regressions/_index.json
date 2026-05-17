@@ -1,0 +1,189 @@
+{
+  "fixtures": {
+    "165b56d8ea2324f6": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:50+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "gmail.com__Fwd_Your_United_reservation_for_New_York__165b56d8ea.json",
+      "sender_domain": "gmail.com",
+      "subject": "Fwd: Your United reservation for New York/Newark, NJ, US (EWR - Liberty) is processing"
+    },
+    "166df42f8db49508": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:50+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "aa.com__American_Airlines_Boarding_Pass_es_.__166df42f8d.json",
+      "sender_domain": "aa.com",
+      "subject": "American Airlines Boarding Pass(es)."
+    },
+    "16b8ebd28c47610d": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:51+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "e.allegiant.com__Your_upcoming_trip_is_only_28_days_away__16b8ebd28c.json",
+      "sender_domain": "e.allegiant.com",
+      "subject": "Your upcoming trip is only 28 days away"
+    },
+    "16bd6da55366347f": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:51+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "e.allegiant.com__Your_upcoming_trip_is_only_14_days_away__16bd6da553.json",
+      "sender_domain": "e.allegiant.com",
+      "subject": "Your upcoming trip is only 14 days away"
+    },
+    "16c1a696071a704d": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:51+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "t.allegiant.com__It_s_time_to_check_in_for_your_flight__16c1a69607.json",
+      "sender_domain": "t.allegiant.com",
+      "subject": "It's time to check in for your flight"
+    },
+    "16c57756940098aa": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:51+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "t.allegiant.com__It_s_time_to_check_in_for_your_flight__16c5775694.json",
+      "sender_domain": "t.allegiant.com",
+      "subject": "It's time to check in for your flight"
+    },
+    "16f2bed7eecc9951": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:51+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "delta.com__Delta_E-Boarding_Pass__16f2bed7ee.json",
+      "sender_domain": "delta.com",
+      "subject": "Delta E-Boarding Pass"
+    },
+    "16f2bed7f4cfd5b1": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:51+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "delta.com__Delta_E-Boarding_Pass__16f2bed7f4.json",
+      "sender_domain": "delta.com",
+      "subject": "Delta E-Boarding Pass"
+    },
+    "176e6a1ed4f90665": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:51+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "gmail.com__Fwd_Important_Information_Regarding_Your__176e6a1ed4.json",
+      "sender_domain": "gmail.com",
+      "subject": "Fwd: Important Information Regarding Your Travel to Nairobi"
+    },
+    "177b8b8aa83ab522": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:52+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "united.com__Boarding_pass_and_receipt_for_confirmati__177b8b8aa8.json",
+      "sender_domain": "united.com",
+      "subject": "Boarding pass and receipt for confirmation BC55B2"
+    },
+    "177caa94553bf28e": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:52+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "united.com__Boarding_pass_and_receipt_for_confirmati__177caa9455.json",
+      "sender_domain": "united.com",
+      "subject": "Boarding pass and receipt for confirmation BC55B2"
+    },
+    "1798103104914773": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:52+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "united.com__Boarding_pass_for_confirmation_B4282H__1798103104.json",
+      "sender_domain": "united.com",
+      "subject": "Boarding pass for confirmation B4282H"
+    },
+    "17aff0df7632a6b7": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:52+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "united.com__Boarding_pass_for_confirmation_B4282H__17aff0df76.json",
+      "sender_domain": "united.com",
+      "subject": "Boarding pass for confirmation B4282H"
+    },
+    "1804e63915ed3d56": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:52+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "google.com__Confirmation_for_Iberia_booking_MEQQ0__1804e63915.json",
+      "sender_domain": "google.com",
+      "subject": "Confirmation for Iberia booking MEQQ0"
+    },
+    "18151ec4885e4b73": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:52+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "comunicaciones.iberia.com__Puerta_de_embarque_asignada_para_tu_vuel__18151ec488.json",
+      "sender_domain": "comunicaciones.iberia.com",
+      "subject": "Puerta de embarque asignada para tu vuelo IB6251"
+    },
+    "1831e7c1c0aa8af4": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-17T05:18:49+00:00",
+      "parser_version_when_frozen": 18,
+      "path": "info.email.aa.com__Your_trip_confirmation_AUS_-_RDU__1831e7c1c0.json",
+      "sender_domain": "info.email.aa.com",
+      "subject": "Your trip confirmation (AUS - RDU)"
+    },
+    "184ce98bce4085b9": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:53+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "justfly.com__Your_trip_confirmation_and_receipt__184ce98bce.json",
+      "sender_domain": "justfly.com",
+      "subject": "Your trip confirmation and receipt"
+    },
+    "184d182779945316": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:53+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "gmail.com__Re_Your_trip_confirmation_and_receipt__184d182779.json",
+      "sender_domain": "gmail.com",
+      "subject": "Re: Your trip confirmation and receipt"
+    },
+    "195ea1f0bce58837": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:53+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "booking.airasia.com__Elisha_Faith_Magno_CONFIRMED_Booking_No___195ea1f0bc.json",
+      "sender_domain": "booking.airasia.com",
+      "subject": "Elisha Faith Magno (CONFIRMED) Booking No: MDHIYD 28/04/2025 MNL \u2708 MPH"
+    },
+    "195ea1f448f42be3": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:53+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "booking.airasia.com__Elisha_Faith_Magno_CONFIRMED_Booking_No___195ea1f448.json",
+      "sender_domain": "booking.airasia.com",
+      "subject": "Elisha Faith Magno (CONFIRMED) Booking No: FHJFQR 03/05/2025 KLO \u2708 MNL"
+    },
+    "19677cdf7704af83": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:53+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "booking.airasia.com__Elisha_Faith_Magno_CONFIRMED_Booking_No___19677cdf77.json",
+      "sender_domain": "booking.airasia.com",
+      "subject": "Elisha Faith Magno (CONFIRMED) Booking No: MDHIYD 28/04/2025 MNL \u2708 MPH"
+    },
+    "1968f7f7fea833b1": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:53+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "booking.airasia.com__Elisha_Faith_Magno_CONFIRMED_Booking_No___1968f7f7fe.json",
+      "sender_domain": "booking.airasia.com",
+      "subject": "Elisha Faith Magno (CONFIRMED) Booking No: FHJFQR 03/05/2025 KLO \u2708 MNL"
+    },
+    "19d01a8dd671134e": {
+      "failure_type": "parser_miss",
+      "frozen_at": "2026-05-07T23:09:53+00:00",
+      "parser_version_when_frozen": 15,
+      "path": "alaskaair.com__Confirmation_Letter_-_LGCOFH_03_24_-_fro__19d01a8dd6.json",
+      "sender_domain": "alaskaair.com",
+      "subject": "Confirmation Letter - LGCOFH 03/24 - from Alaska Airlines"
+    }
+  },
+  "updated_at": "2026-05-17T05:18:49+00:00"
+}

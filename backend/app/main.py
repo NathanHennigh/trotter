@@ -21,11 +21,13 @@ def create_app() -> FastAPI:
 	from .routers.auth import router as auth_router
 	from .routers.ingest import router as ingest_router
 	from .routers.trips import router as trips_router
+	from .routers.dreams import router as dreams_router
 
 	app.include_router(health_router)
 	app.include_router(auth_router)
 	app.include_router(ingest_router)
 	app.include_router(trips_router)
+	app.include_router(dreams_router)
 
 	return app
 

@@ -1,0 +1,26 @@
+{
+  "message_id": "synthetic-google-iberia-bullet",
+  "fixture_version": 1,
+  "frozen_at": "2026-05-07T00:00:00+00:00",
+  "parser_version_when_frozen": 14,
+  "failure_type": "parser_miss",
+  "sender_domain": "google.com",
+  "subject": "Confirmation for Iberia booking MEQQ0",
+  "received_at": "Mon, 06 Jun 2022 12:00:00 +0000",
+  "html": "",
+  "plain_text": "Confirmation for Iberia booking MEQQ0 Hello, Thanks for booking with Iberia on Google your reservation is confirmed. Your confirmation code MEQQ0 One way to Palma 188.96 EUR Tue, Jun 7 · Tangier to Palma 12:25 PM–2:50 PM · 1h 25m TNG (Tangier) PMI (Palma)",
+  "attachment_filenames": [],
+  "expectations": {
+    "must_complete_within_seconds": 2.0,
+    "expected_flights": [
+      {"flight_number": null, "dep_airport": "TNG", "arr_airport": "PMI"}
+    ],
+    "notes": "Google's aggregator confirmation template. Bullet-separated layout: 'DOW, Mon Day · city to city dep_time–arr_time · duration IATA (...) IATA (...)'. Date often lacks a year so we fall back to received_at via _parse_partial_date_time."
+  },
+  "source_failure_summary": {
+    "ai_label": "flight_confirmation",
+    "ai_confidence": 0.95,
+    "parse_miss_score": 14,
+    "discovery_tiers": ["initial_broad_recent"]
+  }
+}

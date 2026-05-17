@@ -4,6 +4,7 @@ import {
   ImageBackground,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomNav, IconGlyph } from '../components/trotter/TrotterKit';
 import { TripCard } from '../components/trotter/TripCard';
-import { BottomNavTab } from '../data/trotterMock';
+import { BottomNavTab, TripSummary } from '../data/trotterMock';
 import { useTravelTrips } from '../services/travelTrips';
 import { colors, fonts, layout, shadows, spacing } from '../theme/trotterTheme';
 
@@ -25,17 +26,45 @@ const SCREEN_PADDING = 24;
 const MAX_CONTENT_WIDTH = 430;
 const CARD_GAP = 8;
 
-export function TripsListScreen({ active, onChange }: { active: BottomNavTab; onChange: (tab: BottomNavTab) => void }) {
+export function TripsListScreen({
+  active,
+  onChange,
+  onOpenTrip,
+}: {
+  active: BottomNavTab;
+  onChange: (tab: BottomNavTab) => void;
+  onOpenTrip?: (trip: TripSummary) => void;
+}) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { trips, profile } = useTravelTrips();
+  const { trips, profile, source, status, error, accountEmail, refresh } = useTravelTrips();
   const visualWidth = Platform.OS === 'web'
     ? Math.min(getViewportWidth(width), 393)
     : Math.min(width, MAX_CONTENT_WIDTH);
   const screenPadding = SCREEN_PADDING;
   const contentWidth = visualWidth - screenPadding * 2;
   const currentYear = new Date().getFullYear();
+  const [activeTab, setActiveTab] = React.useState<'all' | 'year' | 'favorites'>('all');
+  const [favorites, setFavorites] = React.useState<Set<string>>(new Set());
+
+  const toggleFavorite = (id: string) => setFavorites(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
   const currentYearTrips = trips.filter((trip) => trip.startDate.startsWith(String(currentYear))).length;
+
+  const today = new Date().toISOString().split('T')[0];
+
+  const filteredTrips = trips.filter(trip => {
+    if (activeTab === 'year') return trip.startDate.startsWith(String(currentYear));
+    if (activeTab === 'favorites') return favorites.has(trip.id);
+    return true;
+  });
+
+  const upcomingTrips = filteredTrips.filter(trip => trip.startDate >= today);
+  const pastTrips = filteredTrips.filter(trip => trip.startDate < today);
 
   return (
     <View style={styles.screen}>
@@ -51,6 +80,7 @@ export function TripsListScreen({ active, onChange }: { active: BottomNavTab; on
         ) : null}
         <ScrollView
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={status === 'loading' || status === 'refreshing' || status === 'syncing'} onRefresh={refresh} tintColor={colors.red} />}
           contentContainerStyle={{
             paddingTop: insets.top + 6,
             paddingBottom: insets.bottom + layout.bottomNavHeight + 28,
@@ -58,13 +88,41 @@ export function TripsListScreen({ active, onChange }: { active: BottomNavTab; on
           }}
         >
           <TripsHeader screenPadding={screenPadding} contentWidth={contentWidth} />
-          <TripTabs screenPadding={screenPadding} totalTrips={trips.length} currentYearTrips={currentYearTrips} />
-          <SortRow screenPadding={screenPadding} />
+          <TripTabs
+            screenPadding={screenPadding}
+            totalTrips={trips.length}
+            currentYearTrips={currentYearTrips}
+            favoritesCount={favorites.size}
+            activeTab={activeTab}
+            onChangeTab={setActiveTab}
+          />
+          <SyncLine screenPadding={screenPadding} source={source} status={status} error={error} accountEmail={accountEmail} onRefresh={refresh} />
 
-          <View style={[styles.list, { paddingHorizontal: screenPadding }]}>
-            {trips.map((trip, index) => (
-              <TripCard key={trip.id} trip={trip} width={contentWidth} favorite={index === 0} />
-            ))}
+          <View style={[styles.list, { paddingHorizontal: screenPadding, marginTop: 16 }]}>
+            {upcomingTrips.length > 0 && (
+              <>
+                <View style={styles.sectionHeader}>
+                  <Text allowFontScaling={false} style={styles.sectionLabel}>UPCOMING</Text>
+                  <View style={styles.sectionLine} />
+                  <Text allowFontScaling={false} style={styles.sectionCount}>{upcomingTrips.length}</Text>
+                </View>
+                {upcomingTrips.map((trip) => (
+                  <TripCard key={trip.id} trip={trip} width={contentWidth} favorite={favorites.has(trip.id)} upcoming onFavorite={() => toggleFavorite(trip.id)} onPress={() => onOpenTrip?.(trip)} />
+                ))}
+              </>
+            )}
+            {pastTrips.length > 0 && (
+              <>
+                <View style={[styles.sectionHeader, upcomingTrips.length > 0 && { marginTop: 16 }]}>
+                  <Text allowFontScaling={false} style={styles.sectionLabel}>PAST TRIPS</Text>
+                  <View style={styles.sectionLine} />
+                  <Text allowFontScaling={false} style={styles.sectionCount}>{pastTrips.length}</Text>
+                </View>
+                {pastTrips.map((trip, index) => (
+                  <TripCard key={trip.id} trip={trip} width={contentWidth} favorite={favorites.has(trip.id)} onFavorite={() => toggleFavorite(trip.id)} onPress={() => onOpenTrip?.(trip)} />
+                ))}
+              </>
+            )}
           </View>
 
           <View style={[styles.summaryRow, { marginHorizontal: screenPadding }]}>
@@ -81,6 +139,40 @@ export function TripsListScreen({ active, onChange }: { active: BottomNavTab; on
         <BottomNav active={active} onChange={onChange} />
       </ImageBackground>
     </View>
+  );
+}
+
+function SyncLine({
+  screenPadding,
+  source,
+  status,
+  error,
+  accountEmail,
+  onRefresh,
+}: {
+  screenPadding: number;
+  source: 'snapshot' | 'api';
+  status: 'idle' | 'loading' | 'refreshing' | 'syncing' | 'error';
+  error?: string;
+  accountEmail?: string;
+  onRefresh: () => void;
+}) {
+  const label = status === 'loading'
+    ? 'Connecting to live trips'
+    : status === 'refreshing'
+      ? 'Refreshing live trips'
+      : status === 'syncing'
+        ? 'Syncing Gmail into live trips'
+      : source === 'api'
+        ? `Live trips for ${accountEmail ?? 'signed-in account'}`
+        : 'Showing local snapshot. Sign in again to load live trips';
+  return (
+    <Pressable onPress={onRefresh} style={[styles.syncLine, { marginHorizontal: screenPadding }]}>
+      <View style={[styles.syncDot, source === 'api' ? styles.syncDotLive : styles.syncDotLocal]} />
+      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.syncLineText}>
+        {error ? `${label} - ${error}` : label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -107,14 +199,13 @@ function TripsHeader({ screenPadding, contentWidth }: { screenPadding: number; c
         style={[
           styles.headerActions,
           {
-            left: screenPadding + contentWidth - (compact ? 108 : 116),
-            width: compact ? 108 : 116,
+            left: screenPadding + contentWidth - (compact ? 48 : 48),
+            width: compact ? 48 : 48,
           },
           compact && styles.headerActionsCompact,
         ]}
       >
         <DarkSquareButton icon="search" />
-        <DarkSquareButton icon="sliders" />
       </View>
     </View>
   );
@@ -139,21 +230,27 @@ function TripTabs({
   screenPadding,
   totalTrips,
   currentYearTrips,
+  favoritesCount,
+  activeTab,
+  onChangeTab,
 }: {
   screenPadding: number;
   totalTrips: number;
   currentYearTrips: number;
+  favoritesCount: number;
+  activeTab: 'all' | 'year' | 'favorites';
+  onChangeTab: (tab: 'all' | 'year' | 'favorites') => void;
 }) {
   const tabs = [
-    ['ALL TRIPS', String(totalTrips), true],
-    ['THIS YEAR', String(currentYearTrips), false],
-    ['FAVORITES', '0', false],
+    ['ALL TRIPS', String(totalTrips), activeTab === 'all', 'all'],
+    ['THIS YEAR', String(currentYearTrips), activeTab === 'year', 'year'],
+    ['FAVORITES', String(favoritesCount), activeTab === 'favorites', 'favorites'],
   ] as const;
 
   return (
     <View style={[styles.tabsShell, { marginHorizontal: screenPadding }]}>
-      {tabs.map(([label, count, active]) => (
-        <Pressable key={label} style={[styles.tab, active ? styles.tabActive : styles.tabInactive]}>
+      {tabs.map(([label, count, active, key]) => (
+        <Pressable key={label} onPress={() => onChangeTab(key)} style={[styles.tab, active ? styles.tabActive : styles.tabInactive]}>
           <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.74} style={[styles.tabText, active ? styles.tabTextActive : styles.tabTextInactive]}>
             {label}
           </Text>
@@ -164,19 +261,7 @@ function TripTabs({
   );
 }
 
-function SortRow({ screenPadding }: { screenPadding: number }) {
-  return (
-    <View style={[styles.sortRow, { paddingHorizontal: screenPadding }]}>
-      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.sortText}>
-        SORT BY: <Text style={styles.sortValue}>Most Recent v</Text>
-      </Text>
-      <Pressable style={styles.mapView}>
-        <IconGlyph name="globe" color={colors.tealDeep} size={20} />
-        <Text allowFontScaling={false} numberOfLines={1} style={styles.mapText}>MAP VIEW</Text>
-      </Pressable>
-    </View>
-  );
-}
+
 
 const styles = StyleSheet.create({
   screen: {
@@ -277,22 +362,22 @@ const styles = StyleSheet.create({
     ...shadows.darkPanel,
   },
   searchIcon: {
-    width: 32,
-    height: 32,
+    width: 24,
+    height: 24,
   },
   searchCircle: {
-    width: 23,
-    height: 23,
-    borderRadius: 12,
-    borderWidth: 3,
+    width: 17,
+    height: 17,
+    borderRadius: 8.5,
+    borderWidth: 2.5,
     borderColor: colors.creamText,
   },
   searchHandle: {
     position: 'absolute',
-    right: 3,
-    bottom: 4,
-    width: 13,
-    height: 3,
+    right: 2,
+    bottom: 3,
+    width: 10,
+    height: 2.5,
     borderRadius: 2,
     backgroundColor: colors.creamText,
     transform: [{ rotate: '45deg' }],
@@ -305,6 +390,31 @@ const styles = StyleSheet.create({
     borderColor: colors.paperBorder,
     backgroundColor: colors.paperDeep,
     marginTop: 10,
+  },
+  syncLine: {
+    minHeight: 32,
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  syncDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  syncDotLive: {
+    backgroundColor: colors.green,
+  },
+  syncDotLocal: {
+    backgroundColor: colors.mustard,
+  },
+  syncLineText: {
+    flex: 1,
+    minWidth: 0,
+    color: colors.mutedInk,
+    fontFamily: fonts.sansSemi,
+    fontSize: 11.5,
   },
   tab: {
     flex: 1,
@@ -372,6 +482,28 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: CARD_GAP,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  sectionLabel: {
+    color: colors.mutedInk,
+    fontFamily: fonts.sansBold,
+    fontSize: 10,
+    letterSpacing: 1.4,
+  },
+  sectionLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.paperBorder,
+  },
+  sectionCount: {
+    color: colors.mutedInk,
+    fontFamily: fonts.mono,
+    fontSize: 10,
   },
   summaryRow: {
     minHeight: 58,

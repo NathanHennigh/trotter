@@ -96,6 +96,7 @@ class TestIngestAuthGuard:
 
 
 class TestStartImport:
+    @patch.dict("os.environ", {"DEV_MODE": "false", "CELERY_TASK_ALWAYS_EAGER": "false"})
     @patch("app.routers.ingest.run_gmail_import")
     def test_creates_sync_job_and_returns_job_id(self, mock_task, client, test_user, test_db):
         """POST /ingest/gmail/import should create a SyncJob row and return its ID."""
@@ -115,6 +116,7 @@ class TestStartImport:
         assert job.state == "pending"
         assert job.scanned_count == 0
 
+    @patch.dict("os.environ", {"DEV_MODE": "false", "CELERY_TASK_ALWAYS_EAGER": "false"})
     @patch("app.routers.ingest.run_gmail_import")
     def test_dispatches_celery_task(self, mock_task, client, test_user, test_db):
         """POST /ingest/gmail/import must enqueue the run_gmail_import task."""
@@ -127,7 +129,23 @@ class TestStartImport:
         kwargs = mock_task.delay.call_args.kwargs
         assert kwargs["job_id"] == response.json()["job_id"]
         assert kwargs["user_id"] == test_user.id
+        assert kwargs["limit"] is None
 
+    @patch.dict("os.environ", {"DEV_MODE": "true", "CELERY_TASK_ALWAYS_EAGER": "false"})
+    @patch("app.routers.ingest.run_gmail_import")
+    def test_dev_mode_dispatches_background_task(self, mock_task, client, test_user, test_db):
+        mock_task.run = MagicMock()
+
+        response = client.post("/ingest/gmail/import?limit=25")
+        assert response.status_code == 200
+
+        mock_task.run.assert_called_once()
+        kwargs = mock_task.run.call_args.kwargs
+        assert kwargs["job_id"] == response.json()["job_id"]
+        assert kwargs["user_id"] == test_user.id
+        assert kwargs["limit"] == 25
+
+    @patch.dict("os.environ", {"DEV_MODE": "false", "CELERY_TASK_ALWAYS_EAGER": "false"})
     @patch("app.routers.ingest.run_gmail_import")
     def test_multiple_imports_create_separate_jobs(self, mock_task, client, test_user, test_db):
         """Each POST should create an independent SyncJob with a unique ID."""

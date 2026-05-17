@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from datetime import timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import func
@@ -106,6 +107,15 @@ _EXTRA_DESTINATION_STOPOVER = timedelta(hours=36)
 _NEARBY_INTERNATIONAL_CITY_KM = 2500.0
 
 
+@dataclass
+class BuildSegmentsResult:
+    inserted: int = 0
+    updated: int = 0
+    skipped: int = 0
+    deduped: int = 0
+    trips: int = 0
+
+
 # ──────────────────────────── geometry helpers ───────────────────────────────
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -160,21 +170,64 @@ def build_segments_and_trips(
     db: Session, user_id: int, flights: "list[ParsedFlight]"
 ) -> int:
     """Upsert Trips and Segments for a list of parsed flights. Returns new segment count."""
+    return build_segments_and_trips_detailed(db, user_id, flights).inserted
+
+
+def build_segments_and_trips_detailed(
+    db: Session, user_id: int, flights: "list[ParsedFlight]"
+) -> BuildSegmentsResult:
+    """Upsert Trips and Segments for parsed flights and return insert/update counts."""
+    result = BuildSegmentsResult()
     if not flights:
-        return 0
+        return result
 
     sorted_flights = sorted(flights, key=lambda f: f.dep_time)
     trip_groups = _group_into_trips(sorted_flights)
 
-    new_segments = 0
     for group in trip_groups:
         trip = _find_or_create_trip(db, user_id, group)
         for flight in group:
-            if _upsert_segment(db, trip.id, user_id, flight):
-                new_segments += 1
+            action = _upsert_segment(db, trip.id, user_id, flight)
+            if action == "inserted":
+                result.inserted += 1
+            elif action == "updated":
+                result.updated += 1
+            else:
+                result.skipped += 1
 
-    rebuild_user_trips(db, user_id)
-    return new_segments
+    result.trips = rebuild_user_trips(db, user_id)
+    return result
+
+
+def cancel_segments_for_pnr(db: Session, user_id: int, pnr: str, *, received_at=None) -> int:
+    """Remove stored flight segments for a canceled booking code.
+
+    When the cancellation has a source timestamp, preserve segments backed by a
+    newer same-PNR confirmation so an old cancellation cannot erase a rebooking.
+    """
+    pnr = _normalize_pnr(pnr)
+    if not pnr:
+        return 0
+    cancellation_time = _db_datetime(received_at)
+    segments = (
+        db.query(Segment)
+        .join(Trip)
+        .filter(Trip.user_id == user_id, Segment.pnr == pnr)
+        .all()
+    )
+    removable = []
+    for segment in segments:
+        source_time = _segment_source_received_at(segment)
+        if cancellation_time and source_time and source_time > cancellation_time:
+            continue
+        removable.append(segment)
+    count = len(removable)
+    for segment in removable:
+        db.delete(segment)
+    if count:
+        db.flush()
+        rebuild_user_trips(db, user_id)
+    return count
 
 
 def rebuild_user_trips(db: Session, user_id: int) -> int:
@@ -235,12 +288,13 @@ def _cluster_saved_segments(segments: list[Segment], home_airport: Optional[str]
         return []
 
     ordered = sorted(segments, key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
+    home_airports = _infer_home_airports(segments)
     clusters: list[list[Segment]] = [[ordered[0]]]
     for segment in ordered[1:]:
         current = clusters[-1]
         previous = current[-1]
         gap = segment.dep_time - previous.arr_time
-        if _belongs_to_current_trip(current, segment, gap, home_airport):
+        if _belongs_to_current_trip(current, segment, gap, home_airport, home_airports):
             current.append(segment)
         else:
             clusters.append([segment])
@@ -267,7 +321,7 @@ def _prune_duplicate_segments(db: Session, segments: list[Segment]) -> list[Segm
     exact_groups: dict[tuple[str, str, object, Optional[str]], list[Segment]] = {}
     for segment in segments:
         exact_groups.setdefault(
-            (segment.dep_airport, segment.arr_airport, segment.dep_time, segment.flight_number),
+            (segment.dep_airport, segment.arr_airport, segment.dep_time, _normalize_flight_number(segment.flight_number)),
             [],
         ).append(segment)
     mark_duplicates(exact_groups)
@@ -281,12 +335,34 @@ def _prune_duplicate_segments(db: Session, segments: list[Segment]) -> list[Segm
                 segment.dep_airport,
                 segment.arr_airport,
                 segment.airline or "",
-                segment.flight_number,
+                _normalize_flight_number(segment.flight_number) or "",
                 segment.pnr,
             ),
             [],
         ).append(segment)
     mark_duplicates(same_flight_groups)
+
+    route_day_groups: dict[tuple[str, str, object], list[Segment]] = {}
+    for segment in segments:
+        route_day_groups.setdefault(
+            (segment.dep_airport, segment.arr_airport, segment.dep_time.date()),
+            [],
+        ).append(segment)
+    for key, group in route_day_groups.items():
+        active = [segment for segment in group if segment.id not in delete_ids]
+        if len(active) <= 1:
+            continue
+        ordered_active = sorted(active, key=lambda item: item.dep_time)
+        compatible: list[Segment] = [ordered_active[0]]
+        for segment in ordered_active[1:]:
+            if (
+                _is_low_information_segment(segment)
+                or any(_is_low_information_segment(other) for other in compatible)
+                or any(_segments_can_dedupe(segment, other) for other in compatible)
+            ):
+                compatible.append(segment)
+        if len(compatible) > 1:
+            mark_duplicates({key: compatible})
 
     same_day_groups: dict[tuple[str, str, str, object], list[Segment]] = {}
     for segment in segments:
@@ -329,6 +405,7 @@ def _best_duplicate_segment(duplicates: list[Segment], all_segments: list[Segmen
     return max(
         duplicates,
         key=lambda segment: (
+            _segment_quality_score(segment),
             _same_pnr_neighbor_count(segment, all_segments),
             bool(segment.meta_json and (segment.meta_json or {}).get("enrichment")),
             bool(segment.pnr),
@@ -336,6 +413,63 @@ def _best_duplicate_segment(duplicates: list[Segment], all_segments: list[Segmen
             segment.id,
         ),
     )
+
+
+def _segment_quality_score(segment: Segment) -> int:
+    meta = segment.meta_json or {}
+    score = 0
+    if segment.arr_time and segment.dep_time and segment.arr_time > segment.dep_time:
+        score += 8
+    if meta.get("source") != "subject":
+        score += 4
+    if segment.flight_number:
+        score += 3
+        if any(ch.isalpha() for ch in segment.flight_number):
+            score += 1
+    if segment.airline:
+        score += 2
+    if segment.pnr:
+        score += 2
+    if meta.get("confidence"):
+        score += min(3, int(meta["confidence"]) if isinstance(meta["confidence"], int) else 1)
+    return score
+
+
+def _is_low_information_segment(segment: Segment) -> bool:
+    meta = segment.meta_json or {}
+    return (
+        meta.get("source") == "subject"
+        or not segment.flight_number
+        or not segment.airline
+        or segment.arr_time <= segment.dep_time
+    )
+
+
+def _segments_can_dedupe(a: Segment, b: Segment) -> bool:
+    a_number = _normalize_flight_number(a.flight_number)
+    b_number = _normalize_flight_number(b.flight_number)
+    if a_number and b_number and not _flight_numbers_compatible(a_number, b_number):
+        return False
+    if a.airline and b.airline and a.airline != b.airline and not _flight_numbers_compatible(a_number, b_number):
+        return False
+    if abs(a.dep_time - b.dep_time) > timedelta(hours=24):
+        return False
+    return True
+
+
+def _flight_numbers_compatible(a: Optional[str], b: Optional[str]) -> bool:
+    if not a or not b:
+        return True
+    if a == b:
+        return True
+    return _flight_number_numeric_part(a) == _flight_number_numeric_part(b)
+
+
+def _flight_number_numeric_part(value: str) -> str:
+    normalized = _normalize_flight_number(value) or value
+    if len(normalized) >= 3 and normalized[:2].isalnum() and normalized[2:].isdigit():
+        return normalized[2:].lstrip("0") or "0"
+    return "".join(ch for ch in normalized if ch.isdigit()).lstrip("0") or normalized
 
 
 def _same_pnr_neighbor_count(segment: Segment, all_segments: list[Segment]) -> int:
@@ -353,6 +487,19 @@ def _same_pnr_neighbor_count(segment: Segment, all_segments: list[Segment]) -> i
 def _merge_duplicate_segment(keep: Segment, duplicate: Segment) -> None:
     if duplicate.pnr and not keep.pnr:
         keep.pnr = duplicate.pnr
+    if duplicate.airline and not keep.airline:
+        keep.airline = duplicate.airline
+    if duplicate.flight_number and (
+        not keep.flight_number
+        or (
+            _flight_numbers_compatible(
+                _normalize_flight_number(keep.flight_number),
+                _normalize_flight_number(duplicate.flight_number),
+            )
+            and len(duplicate.flight_number) > len(keep.flight_number)
+        )
+    ):
+        keep.flight_number = _normalize_flight_number(duplicate.flight_number)
     if duplicate.distance_km and not keep.distance_km:
         keep.distance_km = duplicate.distance_km
     if duplicate.geom and not keep.geom:
@@ -371,31 +518,64 @@ def _belongs_to_current_trip(
     segment: Segment,
     gap,
     home_airport: Optional[str],
+    home_airports: set[str],
 ) -> bool:
-    if gap < timedelta(hours=-6):
-        return False
     previous = current[-1]
+    same_booking = bool(segment.pnr and segment.pnr in {item.pnr for item in current if item.pnr})
     ended_at_home = bool(home_airport and previous.arr_airport == home_airport)
     starts_from_home = bool(home_airport and segment.dep_airport == home_airport)
-    if ended_at_home and starts_from_home and gap > timedelta(hours=48):
-        return False
+    ended_at_anchor = previous.arr_airport in home_airports
+    starts_from_anchor = segment.dep_airport in home_airports or any(
+        _airports_are_near(segment.dep_airport, anchor) for anchor in home_airports
+    )
 
-    same_booking = bool(segment.pnr and segment.pnr in {item.pnr for item in current if item.pnr})
-    if same_booking and gap <= timedelta(days=90):
-        return True
+    if gap < timedelta():
+        return same_booking and _segments_can_overlap_in_same_booking(current, segment)
+
+    if ended_at_home and starts_from_home:
+        return same_booking and gap <= timedelta(hours=48)
+    if ended_at_anchor and starts_from_anchor and gap > timedelta(hours=6):
+        return same_booking and gap <= timedelta(hours=48)
+
     if previous.arr_airport == segment.dep_airport and gap <= _EXTRA_DESTINATION_STOPOVER:
         return True
+    if previous.arr_airport == segment.dep_airport and gap <= timedelta(days=45):
+        return True
     if _airports_are_near(previous.arr_airport, segment.dep_airport) and gap <= timedelta(days=21):
+        return True
+    if same_booking and gap <= timedelta(days=21) and not ended_at_home:
         return True
     if gap <= timedelta(hours=36):
         return True
 
-    if len(current) > 1 and not ended_at_home and gap <= timedelta(days=21):
-        return True
     return False
 
 
+def _cluster_is_away_from_home(current: list[Segment], home_airport: Optional[str]) -> bool:
+    if not current or not home_airport:
+        return False
+    return current[-1].arr_airport != home_airport and any(
+        segment.dep_airport == home_airport or segment.arr_airport == home_airport for segment in current
+    )
+
+
+def _segments_can_overlap_in_same_booking(current: list[Segment], segment: Segment) -> bool:
+    # Same-PNR emails can include old and new versions of the same trip. Keep
+    # route/date overlaps out of one itinerary unless they are alternate copies
+    # of essentially the same segment.
+    return any(
+        existing.dep_airport == segment.dep_airport
+        and existing.arr_airport == segment.arr_airport
+        and existing.dep_time.date() == segment.dep_time.date()
+        for existing in current
+    )
+
+
 def _infer_home_airport(segments: list[Segment]) -> Optional[str]:
+    if segments:
+        ordered = sorted(segments, key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
+        if ordered[0].dep_airport == ordered[-1].arr_airport:
+            return ordered[0].dep_airport
     counts: Counter[str] = Counter()
     for segment in segments:
         counts[segment.dep_airport] += 1
@@ -403,6 +583,18 @@ def _infer_home_airport(segments: list[Segment]) -> Optional[str]:
     if not counts:
         return None
     return counts.most_common(1)[0][0]
+
+
+def _infer_home_airports(segments: list[Segment]) -> set[str]:
+    counts: Counter[str] = Counter()
+    for segment in segments:
+        counts[segment.dep_airport] += 1
+        counts[segment.arr_airport] += 1
+    if not counts:
+        return set()
+    top_count = counts.most_common(1)[0][1]
+    threshold = max(6, math.ceil(top_count * 0.6))
+    return {airport for airport, count in counts.items() if count >= threshold}
 
 
 def _select_reusable_trip_id(cluster: list[Segment], used_trip_ids: set[int]) -> Optional[int]:
@@ -421,7 +613,7 @@ def _trip_title_for_segments(segments: list[Segment], home_airport: Optional[str
     title = _smart_trip_title(ordered, origin, final, home_airport=home_airport)
     if title:
         return title
-    destination = _main_destination(segments, origin, final)
+    destination = _main_destination(segments, origin, final, home_airport=home_airport)
     if destination:
         return _airport_title(destination)
     if final and final != origin:
@@ -471,7 +663,7 @@ def _meaningful_destination_airports(
     final: str,
     home_airport: Optional[str] = None,
 ) -> list[str]:
-    main_destination = _main_destination(segments, origin, final)
+    main_destination = _main_destination(segments, origin, final, home_airport=home_airport)
     meaningful: list[str] = []
     ordered = sorted(segments, key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
 
@@ -592,6 +784,7 @@ def _main_destination(
     segments: list[Segment],
     origin: str,
     final: str,
+    home_airport: Optional[str] = None,
 ) -> Optional[str]:
     longest_stop_code: Optional[str] = None
     longest_stop = timedelta()
@@ -604,6 +797,9 @@ def _main_destination(
     if longest_stop_code and longest_stop >= timedelta(hours=12):
         return longest_stop_code
 
+    if final and final != origin and final != home_airport:
+        return final
+
     origin_coords = _AIRPORT_COORDS.get(origin)
     best_code: Optional[str] = None
     best_distance = -1.0
@@ -613,7 +809,7 @@ def _main_destination(
 
     if origin_coords:
         for code in endpoint_codes:
-            if code == origin:
+            if code == origin or (home_airport and code == home_airport):
                 continue
             coords = _AIRPORT_COORDS.get(code)
             if not coords:
@@ -622,7 +818,7 @@ def _main_destination(
             if distance > best_distance:
                 best_code = code
                 best_distance = distance
-    if best_code and (origin == final or best_code != final):
+    if best_code:
         return best_code
 
     for code in endpoint_codes[1:-1]:
@@ -647,8 +843,9 @@ def _group_into_trips(flights: list) -> list[list]:
     no_pnr: list = []
 
     for f in flights:
-        if f.pnr:
-            pnr_groups.setdefault(f.pnr, []).append(f)
+        pnr = _normalize_pnr(f.pnr)
+        if pnr:
+            pnr_groups.setdefault(pnr, []).append(f)
         else:
             no_pnr.append(f)
 
@@ -692,11 +889,25 @@ def _find_or_create_trip(db: Session, user_id: int, flights: list) -> Trip:
     return trip
 
 
-def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> bool:
-    """Insert a Segment if one with the same key doesn't already exist for this user. Returns True if inserted."""
+def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
+    """Insert/update a Segment and return inserted, updated, or skipped."""
     from app.models import Trip
     dep_time = _db_datetime(flight.dep_time)
     arr_time = _db_datetime(flight.arr_time)
+    flight_number = _normalize_flight_number(flight.flight_number)
+    airline = _normalize_airline(flight.airline, flight_number)
+    pnr = _normalize_pnr(flight.pnr)
+
+    if arr_time and dep_time and arr_time <= dep_time:
+        return "skipped"
+
+    existing = _find_supersedable_segment(db, user_id, flight)
+    if existing:
+        allow_overwrite = _incoming_is_newer_or_equal(existing, flight)
+        if allow_overwrite and _incoming_is_contained_partial_segment(existing, flight):
+            allow_overwrite = False
+        _refresh_existing_segment(db, existing, flight, allow_overwrite=allow_overwrite)
+        return "updated"
 
     q = db.query(Segment).join(Trip).filter(
         Trip.user_id == user_id,
@@ -704,42 +915,21 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> bool:
         Segment.dep_airport == flight.dep_airport,
         Segment.arr_airport == flight.arr_airport,
     )
-    if flight.airline is not None:
-        q = q.filter(Segment.airline == flight.airline)
+    if airline is not None:
+        q = q.filter(Segment.airline == airline)
     else:
         q = q.filter(Segment.airline.is_(None))
-    if flight.flight_number is not None:
-        q = q.filter(Segment.flight_number == flight.flight_number)
+    if flight_number is not None:
+        q = q.filter(Segment.flight_number == flight_number)
     else:
         q = q.filter(Segment.flight_number.is_(None))
 
     existing = q.first()
     if existing:
-        _refresh_existing_segment(existing, flight)
-        return False
+        _refresh_existing_segment(db, existing, flight)
+        return "updated"
 
-    # Compute geometry and distance when coordinates are available
-    distance_km: Optional[float] = None
-    geom = None
-    dep_c = _AIRPORT_COORDS.get(flight.dep_airport)
-    arr_c = _AIRPORT_COORDS.get(flight.arr_airport)
-    
-    if not dep_c:
-        import logging
-        logging.getLogger(__name__).warning("Missing backend coordinates for departure airport: %s", flight.dep_airport)
-    if not arr_c:
-        import logging
-        logging.getLogger(__name__).warning("Missing backend coordinates for arrival airport: %s", flight.arr_airport)
-    if dep_c and arr_c:
-        distance_km = _haversine_km(dep_c[0], dep_c[1], arr_c[0], arr_c[1])
-        wkt = _densified_linestring(dep_c[0], dep_c[1], arr_c[0], arr_c[1])
-        geom = wkt
-        if getattr(db.bind, 'dialect', None) and db.bind.dialect.name == 'postgresql':
-            try:
-                from geoalchemy2.elements import WKTElement
-                geom = WKTElement(wkt, srid=4326)
-            except Exception:
-                pass
+    distance_km, geom = _segment_geometry(db, flight.dep_airport, flight.arr_airport)
 
     seg = Segment(
         trip_id=trip_id,
@@ -748,9 +938,9 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> bool:
         arr_airport=flight.arr_airport,
         dep_time=dep_time,
         arr_time=arr_time,
-        airline=flight.airline,
-        flight_number=flight.flight_number,
-        pnr=flight.pnr,
+        airline=airline,
+        flight_number=flight_number,
+        pnr=pnr,
         distance_km=distance_km,
         geom=geom,
         meta_json=_segment_meta(flight),
@@ -758,24 +948,129 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> bool:
     enrich_segment(seg, include_weather=False)
     db.add(seg)
     db.flush()
-    return True
+    return "inserted"
 
 
-def _refresh_existing_segment(segment: Segment, flight) -> None:
-    if flight.pnr and not segment.pnr:
-        segment.pnr = flight.pnr
+def _find_supersedable_segment(db: Session, user_id: int, flight) -> Optional[Segment]:
+    pnr = _normalize_pnr(flight.pnr)
+    if not pnr:
+        return None
+    from app.models import Trip
+
+    q = db.query(Segment).join(Trip).filter(Trip.user_id == user_id, Segment.pnr == pnr)
+    candidates = q.all()
+    if not candidates:
+        return None
+
+    flight_number = _normalize_flight_number(flight.flight_number)
+    if flight_number:
+        for segment in candidates:
+            if _normalize_flight_number(segment.flight_number) == flight_number:
+                return segment
+
+    route_matches = [
+        segment
+        for segment in candidates
+        if segment.dep_airport == flight.dep_airport and segment.arr_airport == flight.arr_airport
+    ]
+    if route_matches:
+        return min(route_matches, key=lambda segment: abs(segment.dep_time - _db_datetime(flight.dep_time)))
+
+    return None
+
+
+def _incoming_is_newer_or_equal(segment: Segment, flight) -> bool:
+    incoming = _db_datetime(getattr(flight, "source_received_at", None))
+    current = _segment_source_received_at(segment)
+    if not incoming or not current:
+        return True
+    return incoming >= current
+
+
+def _incoming_is_contained_partial_segment(segment: Segment, flight) -> bool:
+    """Preserve a richer through-flight when a newer email only shows a stopover leg."""
+    if _normalize_flight_number(segment.flight_number) != _normalize_flight_number(flight.flight_number):
+        return False
+    if _normalize_pnr(segment.pnr) != _normalize_pnr(flight.pnr):
+        return False
+
+    incoming_dep = _db_datetime(flight.dep_time)
+    incoming_arr = _db_datetime(flight.arr_time)
+    if not incoming_dep or not incoming_arr:
+        return False
+    existing_duration = segment.arr_time - segment.dep_time
+    incoming_duration = incoming_arr - incoming_dep
+    if incoming_duration >= existing_duration:
+        return False
+
+    shares_arrival = segment.arr_airport == flight.arr_airport
+    shares_departure = segment.dep_airport == flight.dep_airport
+    route_changed = (
+        segment.dep_airport != flight.dep_airport
+        or segment.arr_airport != flight.arr_airport
+    )
+    if not route_changed or not (shares_arrival or shares_departure):
+        return False
+
+    if incoming_dep >= segment.dep_time and incoming_arr <= segment.arr_time:
+        return True
+    if shares_arrival and incoming_dep > segment.dep_time + timedelta(hours=2):
+        return True
+    if shares_departure and incoming_arr < segment.arr_time - timedelta(hours=2):
+        return True
+    return False
+
+
+def _segment_source_received_at(segment: Segment):
+    value = (segment.meta_json or {}).get("source_received_at")
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _refresh_existing_segment(db: Session, segment: Segment, flight, *, allow_overwrite: bool = False) -> None:
+    incoming_pnr = _normalize_pnr(flight.pnr)
+    if incoming_pnr and not segment.pnr:
+        segment.pnr = incoming_pnr
+    incoming_flight_number = _normalize_flight_number(flight.flight_number)
+    incoming_airline = _normalize_airline(flight.airline, incoming_flight_number)
+    dep_time = _db_datetime(flight.dep_time)
     arr_time = _db_datetime(flight.arr_time)
-    if arr_time and arr_time != segment.arr_time:
+    route_changed = False
+    if allow_overwrite and flight.dep_airport and flight.dep_airport != segment.dep_airport:
+        segment.dep_airport = flight.dep_airport
+        route_changed = True
+    if allow_overwrite and flight.arr_airport and flight.arr_airport != segment.arr_airport:
+        segment.arr_airport = flight.arr_airport
+        route_changed = True
+    if allow_overwrite and dep_time and dep_time != segment.dep_time:
+        segment.dep_time = dep_time
+    if (
+        arr_time
+        and arr_time != segment.arr_time
+        and (
+            allow_overwrite
+            or not segment.arr_time
+            or (segment.arr_time <= segment.dep_time and arr_time > dep_time)
+        )
+    ):
         segment.arr_time = arr_time
-    if flight.airline and not segment.airline:
-        segment.airline = flight.airline
-    if flight.flight_number and not segment.flight_number:
-        segment.flight_number = flight.flight_number
+    if incoming_airline and (allow_overwrite or not segment.airline):
+        segment.airline = incoming_airline
+    if incoming_flight_number and (allow_overwrite or not segment.flight_number):
+        segment.flight_number = incoming_flight_number
+    if route_changed:
+        segment.distance_km, segment.geom = _segment_geometry(db, segment.dep_airport, segment.arr_airport)
     meta = dict(segment.meta_json or {})
     if flight.source:
         meta["source"] = flight.source
     if getattr(flight, "confidence", None) is not None:
         meta["confidence"] = flight.confidence
+    if getattr(flight, "source_received_at", None) is not None:
+        meta["source_received_at"] = flight.source_received_at.isoformat()
     segment.meta_json = meta
     enrich_segment(segment, include_weather=False)
 
@@ -786,6 +1081,87 @@ def _db_datetime(value):
     return value
 
 
+def _normalize_flight_number(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = "".join(str(value).upper().split())
+    if len(normalized) < 3:
+        return normalized
+    prefix = normalized[:2]
+    suffix = normalized[2:]
+    if prefix.isalpha() and suffix:
+        trimmed = suffix.lstrip("0") or "0"
+        return f"{prefix}{trimmed}"
+    return normalized
+
+
+_INVALID_PNR_VALUES = {
+    "ABOUT",
+    "AGENT",
+    "BOARDING",
+    "BOOKING",
+    "CHECKIN",
+    "DETAILS",
+    "FLIGHT",
+    "FORYOUR",
+    "MANAGED",
+    "ONLINE",
+    "PASSENGER",
+    "PRINT",
+    "RECEIPT",
+    "RESERVATION",
+    "TICKET",
+    "TRAVEL",
+    "WITHIN",
+}
+
+
+def _normalize_pnr(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = "".join(str(value).upper().split())
+    if normalized in _INVALID_PNR_VALUES:
+        return None
+    if not (5 <= len(normalized) <= 8):
+        return None
+    if normalized.isalpha() and len(normalized) > 6:
+        return None
+    return normalized
+
+
+def _normalize_airline(value: Optional[str], flight_number: Optional[str] = None) -> Optional[str]:
+    if value:
+        return str(value).upper().strip()
+    if flight_number and len(flight_number) >= 2 and flight_number[:2].isalpha():
+        return flight_number[:2]
+    return None
+
+
+def _segment_geometry(db: Optional[Session], dep_airport: str, arr_airport: str) -> tuple[Optional[float], object]:
+    distance_km: Optional[float] = None
+    geom = None
+    dep_c = _AIRPORT_COORDS.get(dep_airport)
+    arr_c = _AIRPORT_COORDS.get(arr_airport)
+
+    if not dep_c:
+        import logging
+        logging.getLogger(__name__).warning("Missing backend coordinates for departure airport: %s", dep_airport)
+    if not arr_c:
+        import logging
+        logging.getLogger(__name__).warning("Missing backend coordinates for arrival airport: %s", arr_airport)
+    if dep_c and arr_c:
+        distance_km = _haversine_km(dep_c[0], dep_c[1], arr_c[0], arr_c[1])
+        wkt = _densified_linestring(dep_c[0], dep_c[1], arr_c[0], arr_c[1])
+        geom = wkt
+        if db is not None and getattr(db.bind, 'dialect', None) and db.bind.dialect.name == 'postgresql':
+            try:
+                from geoalchemy2.elements import WKTElement
+                geom = WKTElement(wkt, srid=4326)
+            except Exception:
+                pass
+    return distance_km, geom
+
+
 def _segment_meta(flight) -> dict:
     meta = {"source": flight.source}
     if getattr(flight, "confidence", None) is not None:
@@ -793,4 +1169,6 @@ def _segment_meta(flight) -> dict:
     aircraft = getattr(flight, "aircraft", None)
     if aircraft:
         meta["enrichment"] = {"aircraft": aircraft}
+    if getattr(flight, "source_received_at", None) is not None:
+        meta["source_received_at"] = flight.source_received_at.isoformat()
     return meta

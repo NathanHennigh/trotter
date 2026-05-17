@@ -8,10 +8,13 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "stamp-editor": "node tools/stamp-editor/server.js",
+    "stamp-audit": "node scripts/auditStampLayout.js"
   },
   "dependencies": {
     "@expo-google-fonts/outfit": "^0.2.3",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "^54.0.33",
     "expo-asset": "~12.0.12",
     "expo-dev-client": "~6.0.21",

@@ -19,10 +19,10 @@ def get_jwt_secret() -> str:
     return secret
 
 
-def create_app_jwt(user_id: int, email: str, expires_hours: int = 24) -> str:
+def create_app_jwt(user_id: int, email: str, expires_hours: int = 24 * 30) -> str:
     """
     Create a JWT for app authentication.
-    Default expiry: 24 hours (long-lived for convenience in Phase 0).
+    Default expiry: 30 days for local/mobile dev sessions.
     """
     now = datetime.utcnow()
     payload = {

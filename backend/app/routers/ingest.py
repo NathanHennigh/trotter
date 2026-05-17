@@ -54,6 +54,8 @@ class UnparsedCandidateListResponse(BaseModel):
 @router.post("/gmail/import", response_model=StartImportResponse, status_code=200)
 def start_gmail_import(
     background_tasks: BackgroundTasks,
+    limit: Optional[int] = None,
+    mode: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StartImportResponse:
@@ -70,13 +72,20 @@ def start_gmail_import(
     db.add(job)
     db.commit()
 
-    eager_mode = os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower() in ("1", "true", "yes")
+    eager_mode = (
+        os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower() in ("1", "true", "yes")
+        or os.getenv("DEV_MODE", "").lower() in ("1", "true", "yes")
+    )
+    task_limit = 0 if (mode or "").lower() == "full" else limit
+    if task_limit is not None and task_limit != 0:
+        task_limit = max(1, min(int(task_limit), 50000))
+
     if eager_mode:
         # In local single-terminal mode, running Celery eagerly inside this
         # request blocks the app from polling until the sync is already done.
-        background_tasks.add_task(run_gmail_import.run, job_id=job_id, user_id=current_user.id)
+        background_tasks.add_task(run_gmail_import.run, job_id=job_id, user_id=current_user.id, limit=task_limit)
     else:
-        run_gmail_import.delay(job_id=job_id, user_id=current_user.id)
+        run_gmail_import.delay(job_id=job_id, user_id=current_user.id, limit=task_limit)
 
     return StartImportResponse(job_id=job_id)
 

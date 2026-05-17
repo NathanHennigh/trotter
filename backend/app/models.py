@@ -37,6 +37,8 @@ class User(Base):
     sync_jobs = relationship("SyncJob", back_populates="user", cascade="all, delete-orphan")
     gmail_discovery_states = relationship("GmailDiscoveryState", back_populates="user", cascade="all, delete-orphan")
     gmail_discovery_signals = relationship("GmailDiscoverySignal", back_populates="user", cascade="all, delete-orphan")
+    dreams = relationship("Dream", back_populates="user", cascade="all, delete-orphan")
+    dream_items = relationship("DreamItem", back_populates="user", cascade="all, delete-orphan")
 
 
 class Account(Base):
@@ -163,3 +165,56 @@ class Segment(Base):
     
     # Relationships
     trip = relationship("Trip", back_populates="segments")
+
+
+class Dream(Base):
+    __tablename__ = "dreams"
+    __table_args__ = (
+        UniqueConstraint("user_id", "title", "country", "city", "region", name="uq_dream_user_location"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, 'sqlite'), primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255), nullable=False)
+    country = Column(String(128), nullable=True)
+    city = Column(String(128), nullable=True)
+    region = Column(String(128), nullable=True)
+    status = Column(String(32), nullable=False, default="active")
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="dreams")
+    items = relationship("DreamItem", back_populates="dream", cascade="all, delete-orphan")
+
+
+class DreamItem(Base):
+    __tablename__ = "dream_items"
+    __table_args__ = (
+        UniqueConstraint("user_id", "source_url", name="uq_dream_item_user_source_url"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, 'sqlite'), primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    dream_id = Column(BigInteger, ForeignKey("dreams.id", ondelete="CASCADE"), nullable=False)
+    source_platform = Column(String(32), nullable=False, default="instagram")
+    source_url = Column(Text, nullable=False)
+    caption = Column(Text, nullable=True)
+    raw_metadata_json = Column(JSON, nullable=True)
+    category = Column(String(32), nullable=False, default="unknown")
+    place_name = Column(String(255), nullable=True)
+    city = Column(String(128), nullable=True)
+    country = Column(String(128), nullable=True)
+    region_or_neighborhood = Column(String(128), nullable=True)
+    summary = Column(Text, nullable=False, default="Saved from Instagram")
+    tags_json = Column(JSON, nullable=True)
+    confidence = Column(Float, nullable=True)
+    needs_review = Column(Boolean, nullable=False, default=True)
+    needs_google_places_lookup = Column(Boolean, nullable=False, default=False)
+    google_place_id = Column(String(255), nullable=True)
+    google_maps_url = Column(Text, nullable=True)
+    status = Column(String(32), nullable=False, default="needs_review")
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="dream_items")
+    dream = relationship("Dream", back_populates="items")

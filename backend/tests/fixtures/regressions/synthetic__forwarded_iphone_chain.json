@@ -1,0 +1,26 @@
+{
+  "message_id": "synthetic-forwarded-iphone-chain",
+  "fixture_version": 1,
+  "frozen_at": "2026-05-07T00:00:00+00:00",
+  "parser_version_when_frozen": 14,
+  "failure_type": "parser_miss",
+  "sender_domain": "gmail.com",
+  "subject": "Fwd: Check in now for Emirates Airlines Flight 720 from NBO to DXB, Confirmation NPDTXW",
+  "received_at": "Thu, 09 Jan 2020 12:00:00 +0000",
+  "html": "",
+  "plain_text": "Sent from my iPhone\nBegin forwarded message:\nFrom: \"Priceline.com\" <[email]>\nDate: January 9, 2020 at 5:41:02 PM GMT\nTo: <[email]>\nSubject: Check in now for Emirates Airlines Flight 720 from NBO to DXB, Confirmation NPDTXW\n\nEmirates Airlines Flight 720 Departs: Jomo Kenyatta Intl Airport (NBO) Friday, January 10 2020 at 4:50 PM Arrives: Dubai Intl Airport (DXB) Friday, January 10 2020 at 10:50 PM Terminal: 1B",
+  "attachment_filenames": [],
+  "expectations": {
+    "must_complete_within_seconds": 2.0,
+    "expected_flights": [
+      {"flight_number": "EK720", "dep_airport": "NBO", "arr_airport": "DXB"}
+    ],
+    "notes": "Forwarded iPhone email containing a Priceline check-in notice. The improved _unwrap_forwarded strips the 'Sent from my iPhone' / 'Begin forwarded message:' prelude AND the From:/Date:/To:/Subject: header block, leaving the body intact for the existing extractors to match."
+  },
+  "source_failure_summary": {
+    "ai_label": "flight_confirmation",
+    "ai_confidence": 0.95,
+    "parse_miss_score": 12,
+    "discovery_tiers": ["initial_broad_recent"]
+  }
+}
