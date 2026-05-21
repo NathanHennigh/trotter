@@ -1,0 +1,2139 @@
+{
+  "items": {
+    "155e32051c3a2997": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:28:02Z"
+    },
+    "155e35b3d088a1fe": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:43Z"
+    },
+    "155e35bac019b2c9": {
+      "category": "reminder",
+      "note": "reminder or change",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:52Z"
+    },
+    "155e461f9cd2bbd2": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "158c437675d09632": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:25:12Z"
+    },
+    "1594c8cc524dd7d7": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1602c26a9f15a000": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1627abc020ba71a2": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1628993187017979": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "163a2d455469a69b": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1654d4f72a69ac4e": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:25Z"
+    },
+    "1654d4fce7a7c1a4": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "165a9d5f97c0ee30": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a train ticket",
+      "source": "markdown_import",
+      "suggested_category": "train",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "165aaec7f1515fcd": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a bus ticket",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "165b56d8ea2324f6": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:34:54Z"
+    },
+    "165c8e10e52496c2": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:27:17Z"
+    },
+    "1667efacb8e60198": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1668b8e3352b4be5": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a cancellation of a flight",
+      "source": "markdown_import",
+      "suggested_category": "cancellation",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "166cbeab130f8b1c": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "166dba04e9a4a002": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "166df42f8db49508": {
+      "category": "reminder",
+      "note": "its a boarding pass",
+      "prior_note": "yes all are flights",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:30:54Z"
+    },
+    "16775045ebbd77d0": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:33:58Z"
+    },
+    "1679df7e97c58fd9": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "167a7eea41cb6d26": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:29:14Z"
+    },
+    "167ebce5abc2c19c": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "167ec2f0219410c8": {
+      "category": "reminder",
+      "note": "its a boarding pass",
+      "prior_note": "yes this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:30:38Z"
+    },
+    "168050e5f3f25992": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16838e9f378cd13f": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:33:25Z"
+    },
+    "168ca0951f8e9bc6": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:28:10Z"
+    },
+    "169080d852e2944c": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a flight",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "169553cdd9ad02cf": {
+      "category": "",
+      "note": "",
+      "prior_note": "all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "169df1b4a8035dab": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes all are flights",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "169df2b5b7404652": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a cancellation of a flight",
+      "source": "markdown_import",
+      "suggested_category": "cancellation",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16af99c97bf98a19": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16b47dd79e3104e6": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:28:05Z"
+    },
+    "16b47df4fffd9497": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a flight",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16b7817c0cdeb95b": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes all are flights",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16b8ebd28c47610d": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes all are flights",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:33:20Z"
+    },
+    "16bd6da55366347f": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes all are flights",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:33:16Z"
+    },
+    "16c1a696071a704d": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes all are flights",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:35:13Z"
+    },
+    "16c43cdf7304bf08": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16c57756940098aa": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes all are flights",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:35:16Z"
+    },
+    "16c9ba76ce9a22ec": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:29:20Z"
+    },
+    "16c9ce7002884a25": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16c9ce7036baf411": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16d7120a3cdd5030": {
+      "category": "",
+      "note": "",
+      "prior_note": "all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16e0ac74bb9aa5d0": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16e26b18b226d6c6": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes these are my fligts, someone else booked them for me",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16e26bee24153a21": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes these are my fligts, someone else booked them for me",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16e280b4f39ef4bc": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16ea44202f92dc99": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:27:01Z"
+    },
+    "16ec21bc56511de2": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:27:05Z"
+    },
+    "16f15541252393b9": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16f1556cad472c49": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16f2be7b198d9bc5": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16f2be7fbdc4fa9a": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:30:05Z"
+    },
+    "16f2bed7eecc9951": {
+      "category": "reminder",
+      "note": "boarding pass",
+      "prior_note": "yes all fligts",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:33:04Z"
+    },
+    "16f2bed7f4cfd5b1": {
+      "category": "reminder",
+      "note": "boarding pass",
+      "prior_note": "yes all fligts",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:33:13Z"
+    },
+    "16f76e3419fcd404": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16f76e4c7b17bbfb": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16f811ae9f4f6c7a": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16f889252b3cb96a": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16f8ad2ac0168e51": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16f8ad2f5fb56569": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:30:02Z"
+    },
+    "16f8ae7755386039": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16f90b813d47f919": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16fb1c41a0fcbb81": {
+      "category": "",
+      "note": "",
+      "prior_note": "all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16fc1a421af0bfce": {
+      "category": "",
+      "note": "",
+      "prior_note": "all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "16fe02f9c2823e84": {
+      "category": "",
+      "note": "",
+      "prior_note": "all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17049ca82c7d85f0": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1704a59cff04b596": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:30:08Z"
+    },
+    "1704a5a830de8d74": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1704f158248fe074": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17072ae68acba1c4": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17073096c64f776b": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "170732ef47542131": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes all fligts",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "170ade663fc63dab": {
+      "category": "",
+      "note": "",
+      "prior_note": "all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "170c583f39ecdaf2": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "170c6ceb85ff0fcf": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17108fecdc2aeec3": {
+      "category": "change",
+      "note": "",
+      "updated_at": "2026-05-07T03:56:21Z"
+    },
+    "171739b7c7016654": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:27:09Z"
+    },
+    "1717a120526fa823": {
+      "category": "cancellation",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:27:13Z"
+    },
+    "171ad31ec9189b47": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "171ccd03ab8cf79a": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a cancellation of a flight",
+      "source": "markdown_import",
+      "suggested_category": "cancellation",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "171cd298ed20b2d2": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a cancellation of a flight",
+      "source": "markdown_import",
+      "suggested_category": "cancellation",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "171ce771c86d6479": {
+      "category": "cancellation",
+      "note": "",
+      "prior_note": "this is a cancellation of a flight",
+      "source": "ui",
+      "suggested_category": "cancellation",
+      "updated_at": "2026-05-07T17:27:39Z"
+    },
+    "171e0ef8b717b1f3": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:30:16Z"
+    },
+    "171e118d02028201": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a cancellation of a flight",
+      "source": "markdown_import",
+      "suggested_category": "cancellation",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17200010651c0fa9": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a cancellation of a flight",
+      "source": "markdown_import",
+      "suggested_category": "cancellation",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1720f486797b9279": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:30:20Z"
+    },
+    "174c14d7dec38669": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "175f853f1fdaaa95": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "175f853fc55aa9a4": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "175f859a5f33c80d": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17607ae48c64cd67": {
+      "category": "airbnb",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "ui",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T17:24:33Z"
+    },
+    "17607c7908661f9a": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a hotel / yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "176479b23fa0b89f": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1764ff26482f1719": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "176e696f53faff7c": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "176e6a07de8f9764": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "176e6a1ed4f90665": {
+      "category": "yes_flight",
+      "note": "pretty sure this is the original flight confirmation, might be a reminder, either way its import to ingest and inspect",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:34:47Z"
+    },
+    "176e826486e3de70": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:30Z"
+    },
+    "177b8b8aa83ab522": {
+      "category": "yes_flight",
+      "note": "a flight or a reminder, either way its important and the parser needs to ingest and inspect it",
+      "prior_note": "this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:36:44Z"
+    },
+    "177caa94553bf28e": {
+      "category": "yes_flight",
+      "note": "a flight or a reminder, either way its important and the parser needs to ingest and inspect it",
+      "prior_note": "this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:36:41Z"
+    },
+    "1798103104914773": {
+      "category": "yes_flight",
+      "note": "a flight or a reminder, either way its important and the parser needs to ingest and inspect it",
+      "prior_note": "this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:36:40Z"
+    },
+    "17a36e0e4aa4476b": {
+      "category": "",
+      "note": "",
+      "prior_note": "all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17a4f9e5e05d5ca4": {
+      "category": "",
+      "note": "",
+      "prior_note": "all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17a8349c3f2db139": {
+      "category": "",
+      "note": "",
+      "prior_note": "all bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17aff0df7632a6b7": {
+      "category": "yes_flight",
+      "note": "a flight or a reminder, either way its important and the parser needs to ingest and inspect it",
+      "prior_note": "this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:36:37Z"
+    },
+    "17cc36a3550d40c1": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17d3987174ad4e09": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17d42d3be56bf281": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17d6d07f465898ae": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17dce9bfb5e73803": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:58Z"
+    },
+    "17e513b4d98aa709": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is an airbnb / yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17f106b3a94ed60e": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17f106fe4f903da6": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes all are flights",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:33:50Z"
+    },
+    "17f51d342f1626fd": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "17f77a655b2975af": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:28:21Z"
+    },
+    "18029f93dd42f4ba": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1804e63808ba89ec": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1804e63915ed3d56": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:35:02Z"
+    },
+    "1805ec39dd4d7b2b": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18082c7a500709ab": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a flight info email about covid, not relevant",
+      "source": "markdown_import",
+      "suggested_category": "not_relevant",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "180d78c2d6dce522": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "180e37ad281405c7": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:29:16Z"
+    },
+    "180e79c6d6649531": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:28:18Z"
+    },
+    "180e95251b297b75": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:27:53Z"
+    },
+    "1810adcfaafb4cda": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1810ff6382a94c90": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:30:43Z"
+    },
+    "1813adfa44271a19": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:35:08Z"
+    },
+    "1814da2c6a6d615e": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:30:46Z"
+    },
+    "18151ec4885e4b73": {
+      "category": "reminder",
+      "note": "gate reminder",
+      "prior_note": "yes this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:32:22Z"
+    },
+    "1815a8419bf2636c": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a cancellation of a flight",
+      "source": "markdown_import",
+      "suggested_category": "cancellation",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "181833a7c2896a09": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "181a77d1642c5da8": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "181ef6ac1027f9a3": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a cancellation of a flight",
+      "source": "markdown_import",
+      "suggested_category": "cancellation",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "181fe11f2d3ba6cd": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1820e7ccc4ed69bc": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18216ff393df8b53": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18222c1c7613767c": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:28:29Z"
+    },
+    "1826021c91a959ae": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18288cdc387d8755": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:27:32Z"
+    },
+    "183235bfc829956a": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1836143d4bcde751": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes all are flights",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:33:55Z"
+    },
+    "183614502b65de3c": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "183749e03b4fd503": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "184033ff14c5c64f": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:25:18Z"
+    },
+    "1845ac6b9ef1ace6": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:25:35Z"
+    },
+    "184651fd38018cc9": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:01Z"
+    },
+    "1846f6a38cf3e304": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:25:24Z"
+    },
+    "184ce98bce4085b9": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:35:11Z"
+    },
+    "184d182779945316": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:34:57Z"
+    },
+    "184d9b3112fff050": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "184ddf9166d0926c": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "184ddfddc921cdc7": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18516f61b5c04d81": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:25:42Z"
+    },
+    "18521448ef72cc1b": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:04Z"
+    },
+    "1852ba457de9e71e": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:25:32Z"
+    },
+    "185a5c5680f31234": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "185ac4e87d48a68f": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight or reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "185b3ec19897f3ab": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:25:21Z"
+    },
+    "1866f23beb2a272d": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:23:43Z"
+    },
+    "186a7ca27dcf222b": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:21Z"
+    },
+    "188b158fc4029807": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a bus ticket",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "188d142f4c2c69fb": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "188da337cccfb2a5": {
+      "category": "cancellation",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:27:24Z"
+    },
+    "188da35a909be3cd": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18945a029c6fb432": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "189e4d7ca02f4bd3": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "189e66f57ac298a5": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are bus tickets",
+      "source": "markdown_import",
+      "suggested_category": "bus",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18aa9990490653ce": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes all are flights",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:33:38Z"
+    },
+    "18b223a2e2df9ad8": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18b223aa1b05350c": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18b412622754caf1": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes all are flights",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:33:44Z"
+    },
+    "18b59ec8465d9098": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18e170518b945a92": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:15Z"
+    },
+    "18e1bfd99af4580e": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18e2a210ea7bc97f": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:28:25Z"
+    },
+    "18e2e1abd3702d6c": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:27:50Z"
+    },
+    "18e9798ff3eda9bb": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18f12696a53fb051": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18f1269dda11956c": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18f40655320b5b8f": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18f5f1294e36042e": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18f679ad27138a54": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18f68f580a3678cd": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18fae67532650c49": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are all hotels",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18fb41f9fb3325f5": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are hotel reservations",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18fb67998d04ec14": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are hotel reservations",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18fbbb38a8dbbc5d": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals",
+      "source": "markdown_import",
+      "suggested_category": "car",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "18fbfd837f9dd694": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals",
+      "source": "markdown_import",
+      "suggested_category": "car",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "190091001623313b": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are all hotels",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19012a29de5d070c": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19012aa4cd779291": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "190cf5d86b98b320": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are all hotels",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19118c070ff25bb5": {
+      "category": "not_mine",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:27:21Z"
+    },
+    "19118c0746885dc7": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change, my name appears in them all even though there are additional passengers",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1931318e9aadc5e5": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a flight",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19313193d0a479ca": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "193132784a9d382f": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a flight",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1931327ccd22a782": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a flight",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1931346486b6b189": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a flight",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1931346a6f42d53b": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19337fefc3cfdea4": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals",
+      "source": "markdown_import",
+      "suggested_category": "car",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19337ffa8bd86ae3": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals",
+      "source": "markdown_import",
+      "suggested_category": "car",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19344c8707e573da": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals",
+      "source": "markdown_import",
+      "suggested_category": "car",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1935ba1339b12816": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are all hotel reservations",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1938df21a6362f29": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1938df293b21f23c": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1938fbcd6a65fe30": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "193b8546298a119b": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are all hotel reservations",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "193d2054bd4ba907": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "194237445caffd41": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are car rentals",
+      "source": "markdown_import",
+      "suggested_category": "car",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19429aece2d1324e": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19429b0d7d3baf3f": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19462ede4b87489b": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19462ee57cc2a3f7": {
+      "category": "",
+      "note": "",
+      "prior_note": "all airbnb rentals",
+      "source": "markdown_import",
+      "suggested_category": "airbnb",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19462fd991c22de4": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19470e02475ddd5c": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19470e30968155b8": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19470e337b2fe67a": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19470e4331b263aa": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19470f9d33413a37": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19494dc1f13f2747": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "194aefd8c3c9f2e8": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "194af07f6ec69533": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "194b201cc962978f": {
+      "category": "",
+      "note": "",
+      "prior_note": "not relevant, this is a hotel reimbursement for a work trip",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "194b2a92dc2ce2e0": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19507113d2c52283": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are all hotel reservations",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1951ef2b433bd82b": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1952400166ae577f": {
+      "category": "",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "markdown_import",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1952fe47b521eabf": {
+      "category": "reminder",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:29:23Z"
+    },
+    "1952ffd679e00e8a": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:13Z"
+    },
+    "195353a172c267cc": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:26:09Z"
+    },
+    "1954b99881d620a0": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1955ccd450ac108b": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a hotel reservation",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19577e6799b40031": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "195ea1f0bce58837": {
+      "category": "yes_flight",
+      "note": "name is the subject is not me, but i am listed under guest details, so this is still one of my flights, i just also booked it for another passenger as well",
+      "prior_note": "yes, my name appears in the email under guest details",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:32:41Z"
+    },
+    "195ea1f448f42be3": {
+      "category": "yes_flight",
+      "note": "name is the subject is not me, but i am listed under guest details, so this is still one of my flights, i just also booked it for another passenger as well",
+      "prior_note": "yes, my name appears in the email under guest details",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:32:35Z"
+    },
+    "195ea1f725204f1e": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "195ea1f7609b1313": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "195ea1f9816ed3bd": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "195ea1fb4a8a3ffe": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1960238e819a2cf3": {
+      "category": "yes_flight",
+      "note": "",
+      "prior_note": "yes this is a flight",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:32:52Z"
+    },
+    "19677cdf7704af83": {
+      "category": "yes_flight",
+      "note": "name is the subject is not me, but i am listed under guest details, so this is still one of my flights, i just also booked it for another passenger as well",
+      "prior_note": "yes, my name appears in the email under guest details",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:32:44Z"
+    },
+    "196782c89294a8f4": {
+      "category": "change",
+      "note": "",
+      "prior_note": "yes this is a flight reminder, should still be checked in case the parser missed the original or if theres a change",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:24:54Z"
+    },
+    "1968f7f7fea833b1": {
+      "category": "yes_flight",
+      "note": "name is the subject is not me, but i am listed under guest details, so this is still one of my flights, i just also booked it for another passenger as well",
+      "prior_note": "yes, my name appears in the email under guest details",
+      "source": "ui",
+      "suggested_category": "yes_flight",
+      "updated_at": "2026-05-07T17:32:38Z"
+    },
+    "1970aacf95183f3c": {
+      "category": "change",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "ui",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T17:24:39Z"
+    },
+    "1970ab1917884118": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a hotel stay",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19731d4fd4080237": {
+      "category": "",
+      "note": "",
+      "prior_note": "these are car rentals",
+      "source": "markdown_import",
+      "suggested_category": "car",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "197f08dbf6eea7f3": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a hotel stay",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "197f0a0852132ce9": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "198240b56e1cc70a": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1982a2be70118801": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a hotel stay",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1982a51ce948f910": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1982a51ec2ba22a4": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1982efd6c0111105": {
+      "category": "",
+      "note": "",
+      "prior_note": "this is a hotel stay",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19982679073899c4": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "1998267bb27f367d": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "199829f9aea836e2": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19ac8c5084ae3272": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19b0ef85c2343021": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19d97b70df767b3d": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19d97b8fdf709d23": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19dad44af317ffe2": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    },
+    "19dad44d14e3c282": {
+      "category": "",
+      "note": "",
+      "prior_note": "all car rentals or hotels, should be easy to figure that out",
+      "source": "markdown_import",
+      "suggested_category": "hotel",
+      "updated_at": "2026-05-07T03:55:36Z"
+    }
+  },
+  "source": "markdown_import",
+  "updated_at": "2026-05-07T17:36:44Z"
+}
