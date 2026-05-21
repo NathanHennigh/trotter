@@ -21,16 +21,6 @@ venv/
 *.sqlite
 *.sqlite3
 .cache/
-backend/scripts/flight_ai_audit_results.json
-backend/scripts/flight_ai_audit_report.csv
-backend/scripts/flight_ai_audit_report.md
-backend/scripts/flight_ai_audit_review_queue.md
-backend/scripts/flight_ai_audit_feedback.json
-backend/scripts/flight_ai_audit_results.*.json
-backend/scripts/flight_ai_audit_report.*.csv
-backend/scripts/flight_ai_audit_report.*.md
-backend/scripts/flight_ai_audit_review_queue.*.md
-backend/scripts/flight_parser_failures.jsonl
 backend/scripts/instagram_batch_results.json
 backend/scripts/instagram_batch_links.txt
 backend/scripts/rebuild_flight_segments_backup_*.json
