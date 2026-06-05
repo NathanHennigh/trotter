@@ -13,21 +13,11 @@ import {
 } from '../components/trotter/TrotterKit';
 import { PngStamp, StampShapeKey } from '../components/trotter/stamps/PngStamp';
 import { CountryIconAssetKey } from '../assets/generated/stampAssetManifest';
-import { BottomNavTab } from '../data/trotterMock';
+import { BottomNavTab, TripSegmentSummary, TripSummary } from '../data/trotterMock';
 import { useTravelTrips } from '../services/travelTrips';
 import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
 
 const STAMP_TEST_BASE_WIDTH = 204.75;
-
-const japanPreviewStamp = {
-  shape: 'archedCountryCanonical' as const,
-  icon: 'japan_mount_fuji',
-  color: '#B6543F',
-  country: 'JAPAN',
-  city: 'Tokyo',
-  airportCode: 'HND',
-  date: '12 MAY 2025',
-};
 
 const COUNTRY_ROSTER: Array<{ country: string; icon: CountryIconAssetKey }> = [
   { country: 'United States', icon: 'united_states_golden_gate_bridge' },
@@ -131,6 +121,90 @@ const COUNTRY_ABBREVIATIONS: Record<string, string> = {
   'United Kingdom': 'U.K.',
 };
 
+const COUNTRY_CONTINENTS: Record<string, string> = {
+  Argentina: 'South America',
+  Armenia: 'Asia',
+  Australia: 'Oceania',
+  Austria: 'Europe',
+  Belgium: 'Europe',
+  Brazil: 'South America',
+  Bulgaria: 'Europe',
+  Cambodia: 'Asia',
+  Canada: 'North America',
+  Chile: 'South America',
+  China: 'Asia',
+  Colombia: 'South America',
+  'Costa Rica': 'North America',
+  Croatia: 'Europe',
+  Cuba: 'North America',
+  'Czech Republic': 'Europe',
+  Denmark: 'Europe',
+  'Dominican Republic': 'North America',
+  Egypt: 'Africa',
+  Ethiopia: 'Africa',
+  Fiji: 'Oceania',
+  Finland: 'Europe',
+  France: 'Europe',
+  'French Polynesia': 'Oceania',
+  Georgia: 'Asia',
+  Germany: 'Europe',
+  Greece: 'Europe',
+  'Hong Kong': 'Asia',
+  Hungary: 'Europe',
+  Iceland: 'Europe',
+  India: 'Asia',
+  Indonesia: 'Asia',
+  Iran: 'Asia',
+  Iraq: 'Asia',
+  Ireland: 'Europe',
+  Israel: 'Asia',
+  Italy: 'Europe',
+  Jamaica: 'North America',
+  Japan: 'Asia',
+  Jordan: 'Asia',
+  Kazakhstan: 'Asia',
+  Kenya: 'Africa',
+  Lebanon: 'Asia',
+  Malaysia: 'Asia',
+  Maldives: 'Asia',
+  Mexico: 'North America',
+  Mongolia: 'Asia',
+  Morocco: 'Africa',
+  Nepal: 'Asia',
+  Netherlands: 'Europe',
+  'New Zealand': 'Oceania',
+  Nicaragua: 'North America',
+  Norway: 'Europe',
+  Oman: 'Asia',
+  Panama: 'North America',
+  Peru: 'South America',
+  Philippines: 'Asia',
+  Poland: 'Europe',
+  Portugal: 'Europe',
+  Qatar: 'Asia',
+  Romania: 'Europe',
+  Russia: 'Europe',
+  'Saudi Arabia': 'Asia',
+  Serbia: 'Europe',
+  Singapore: 'Asia',
+  Slovenia: 'Europe',
+  'South Africa': 'Africa',
+  'South Korea': 'Asia',
+  Spain: 'Europe',
+  'Sri Lanka': 'Asia',
+  Sweden: 'Europe',
+  Switzerland: 'Europe',
+  Taiwan: 'Asia',
+  Tanzania: 'Africa',
+  Thailand: 'Asia',
+  Turkey: 'Asia',
+  Ukraine: 'Europe',
+  'United Arab Emirates': 'Asia',
+  'United Kingdom': 'Europe',
+  'United States': 'North America',
+  Vietnam: 'Asia',
+};
+
 function hashString(value: string) {
   let h = 0;
   for (let i = 0; i < value.length; i++) {
@@ -148,7 +222,10 @@ function buildStampDate(country: string) {
 }
 
 function buildVisitedCountryStampPreviews() {
-  return COUNTRY_ROSTER.map((entry, index) => {
+  return COUNTRY_ROSTER.map((entry, index) => buildCountryStampPreview(entry, index));
+}
+
+function buildCountryStampPreview(entry: { country: string; icon: CountryIconAssetKey }, index: number, date?: string) {
     const h = hashString(entry.country);
     const display = COUNTRY_ABBREVIATIONS[entry.country] ?? entry.country;
     return {
@@ -158,14 +235,13 @@ function buildVisitedCountryStampPreviews() {
       country: display,
       city: undefined as string | undefined,
       airportCode: undefined as string | undefined,
-      date: buildStampDate(entry.country),
+      date: date ?? buildStampDate(entry.country),
       footer: undefined as string | undefined,
       rotate: index % 2 === 0 ? -3 : 3,
     };
-  });
 }
 
-const visitedCountryStampPreviews = buildVisitedCountryStampPreviews();
+const rosterCountryStampPreviews = buildVisitedCountryStampPreviews();
 
 export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab; onChange: (tab: BottomNavTab) => void }) {
   const insets = useSafeAreaInsets();
@@ -173,7 +249,10 @@ export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab
   const screenPadding = width < 390 ? 16 : layout.screenPadding;
   const contentWidth = width - screenPadding * 2;
   const cardWidth = (contentWidth - layout.cardGap) / 2;
-  const { profile, status, refresh } = useTravelTrips();
+  const { trips, profile, status, refresh } = useTravelTrips();
+  const passportStats = React.useMemo(() => buildPassportStats(trips), [trips]);
+  const countryStampPreviews = React.useMemo(() => buildTripCountryStampPreviews(trips), [trips]);
+  const countryCollectionPreview = countryStampPreviews[0];
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
@@ -211,12 +290,33 @@ export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab
 
         <View style={[styles.grid, { paddingHorizontal: screenPadding, gap: layout.cardGap }]}>
           <StatCard width={cardWidth} label="TOTAL MILES" value={profile.miles.toLocaleString()} sublabel="lifetime distance" icon="plane" />
-          <StatCard width={cardWidth} label="TIME IN AIR" value={`${profile.hoursInAir}h`} sublabel="logged cabin time" icon="crosshair" />
+          <StatCard width={cardWidth} label="TRIPS LOGGED" value={`${trips.length}`} sublabel={`${passportStats.upcomingTrips} upcoming`} icon="suitcase" />
           <StatCard width={cardWidth} label="COUNTRIES VISITED" value={`${profile.countries} / 195`} sublabel="visited from flight history" icon="globe" />
           <StatCard width={cardWidth} label="AIRLINES FLOWN" value={`${profile.airlines}`} sublabel="carriers flown" icon="tag" />
-          <StatCard width={cardWidth} label="FURTHEST FLIGHT" value="7,238 mi" sublabel="DFW to HND" icon="plane" />
-          <StatCard width={cardWidth} label="LONGEST TRIP" value="9 days" sublabel="Tokyo, Japan" icon="passport" />
+          <StatCard width={cardWidth} label="FURTHEST FLIGHT" value={passportStats.longestFlight.value} sublabel={passportStats.longestFlight.label} icon="plane" />
+          <StatCard width={cardWidth} label="LONGEST TRIP" value={passportStats.longestTrip.value} sublabel={passportStats.longestTrip.label} icon="passport" />
         </View>
+
+        <PaperSurface radius={14} padding={spacing.md} style={[styles.recordsPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
+          <View style={styles.recordsHeader}>
+            <Text allowFontScaling={false} style={styles.recordsTitle}>TRAVEL RECORDS</Text>
+            <Text allowFontScaling={false} style={styles.recordsCount}>{passportStats.activeYears} active years</Text>
+          </View>
+          <RecordRow icon="crosshair" label="Most visited airport" value={passportStats.topAirport.value} detail={passportStats.topAirport.label} />
+          <RecordRow icon="plane" label="Most common route" value={passportStats.topRoute.value} detail={passportStats.topRoute.label} />
+          <RecordRow icon="globe" label="Top destination country" value={passportStats.topCountry.value} detail={passportStats.topCountry.label} />
+          <RecordRow icon="tag" label="Busiest travel year" value={passportStats.busiestYear.value} detail={passportStats.busiestYear.label} />
+        </PaperSurface>
+
+        <PaperSurface radius={14} padding={spacing.md} style={[styles.yearPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
+          <View style={styles.recordsHeader}>
+            <Text allowFontScaling={false} style={styles.recordsTitle}>FLIGHTS BY YEAR</Text>
+            <Text allowFontScaling={false} style={styles.recordsCount}>{passportStats.yearRows.length} years</Text>
+          </View>
+          {passportStats.yearRows.map((year) => (
+            <YearRow key={year.year} year={year.year} flights={year.flights} miles={year.miles} maxFlights={passportStats.maxYearFlights} />
+          ))}
+        </PaperSurface>
 
         <Text style={[styles.sectionTitle, { marginHorizontal: screenPadding }]}>COLLECTIONS</Text>
         <View style={[styles.collectionRow, { paddingHorizontal: screenPadding, gap: layout.cardGap }]}>
@@ -225,20 +325,20 @@ export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab
             title="COUNTRIES"
             value={`${profile.countries} / 195`}
             onPress={() => onChange('profile')}
-            preview={<PngStamp {...japanPreviewStamp} size="md" variant="collection" rotate={-4} scale={0.7} />}
+            preview={<PngStamp {...countryCollectionPreview} size="md" variant="collection" rotate={countryCollectionPreview.rotate} scale={0.7} />}
           />
-          <CollectionCard width={cardWidth} title="CONTINENTS" value="4 / 7" preview={<Image source={require('../../assets/objects/globe.png')} style={{ width: 110, height: 110, resizeMode: 'contain' }} />} />
+          <CollectionCard width={cardWidth} title="CONTINENTS" value={`${passportStats.continents} / 7`} preview={<Image source={require('../../assets/objects/globe.png')} style={{ width: 110, height: 110, resizeMode: 'contain' }} />} />
           <CollectionCard width={cardWidth} title="AIRPORTS" value={`${profile.airports}`} preview={<Image source={require('../../assets/objects/airport.png')} style={{ width: 150, height: 150, resizeMode: 'contain' }} />} />
           <CollectionCard width={cardWidth} title="AIRLINES" value={`${profile.airlines}`} preview={<Image source={require('../../assets/objects/airline.png')} style={{ width: 150, height: 150, resizeMode: 'contain' }} />} />
         </View>
 
         <PaperSurface radius={14} padding={spacing.md} style={[styles.countryPreviewPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
           <View style={styles.countryPreviewHeader}>
-            <Text allowFontScaling={false} style={styles.countryPreviewTitle}>COUNTRY STAMP TEST</Text>
-            <Text allowFontScaling={false} style={styles.countryPreviewCount}>{visitedCountryStampPreviews.length} stamps</Text>
+            <Text allowFontScaling={false} style={styles.countryPreviewTitle}>VISITED COUNTRY STAMPS</Text>
+            <Text allowFontScaling={false} style={styles.countryPreviewCount}>{countryStampPreviews.length} stamps</Text>
           </View>
           <View style={styles.countryPreviewGrid}>
-            {visitedCountryStampPreviews.map((stamp) => {
+            {countryStampPreviews.map((stamp) => {
               const cellWidth = (contentWidth - spacing.md * 2 - spacing.sm) / 2;
               const stampScale = Math.max(0.5, Math.min(1, (cellWidth - 12) / STAMP_TEST_BASE_WIDTH));
               return (
@@ -315,6 +415,170 @@ function StatCard({ label, value, sublabel, icon, width }: { label: string; valu
       <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.statSub}>{sublabel}</Text>
     </PaperSurface>
   );
+}
+
+function RecordRow({ icon, label, value, detail }: { icon: string; label: string; value: string; detail: string }) {
+  return (
+    <View style={styles.recordRow}>
+      <View style={styles.recordIcon}>
+        <IconGlyph name={icon} color={colors.creamText} size={17} />
+      </View>
+      <View style={styles.recordCopy}>
+        <Text allowFontScaling={false} numberOfLines={1} style={styles.recordLabel}>{label}</Text>
+        <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.recordValue}>{value}</Text>
+      </View>
+      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.recordDetail}>{detail}</Text>
+    </View>
+  );
+}
+
+function YearRow({ year, flights, miles, maxFlights }: { year: string; flights: number; miles: number; maxFlights: number }) {
+  const fill: `${number}%` = maxFlights > 0 ? `${Math.max(8, Math.round((flights / maxFlights) * 100))}%` : '8%';
+  return (
+    <View style={styles.yearRow}>
+      <Text allowFontScaling={false} style={styles.yearLabel}>{year}</Text>
+      <View style={styles.yearTrack}>
+        <View style={[styles.yearFill, { width: fill }]} />
+      </View>
+      <Text allowFontScaling={false} numberOfLines={1} style={styles.yearValue}>{flights} fl / {formatCompactMiles(miles)}</Text>
+    </View>
+  );
+}
+
+function buildPassportStats(trips: TripSummary[]) {
+  const today = new Date().toISOString().split('T')[0];
+  const upcomingTrips = trips.filter((trip) => trip.startDate >= today).length;
+  const tripCountries = trips.map((trip) => trip.country).filter(Boolean);
+  const countries = rankValues(tripCountries);
+  const continents = new Set(tripCountries.map((country) => COUNTRY_CONTINENTS[country]).filter(Boolean)).size;
+  const airportCounts = new Map<string, number>();
+  const routeCounts = new Map<string, number>();
+  const yearStats = new Map<string, { flights: number; miles: number }>();
+  let longestTrip = { label: 'No trips yet', value: '0 days' };
+  let longestFlight = { label: 'No flights yet', value: '0 mi' };
+  let longestFlightMiles = 0;
+
+  for (const trip of trips) {
+    const duration = tripDurationDays(trip);
+    if (duration > Number.parseInt(longestTrip.value, 10)) {
+      longestTrip = { value: `${duration} day${duration === 1 ? '' : 's'}`, label: trip.title };
+    }
+
+    const year = trip.startDate.slice(0, 4) || 'Unknown';
+    const currentYear = yearStats.get(year) ?? { flights: 0, miles: 0 };
+    currentYear.flights += trip.flightCount;
+    currentYear.miles += trip.miles;
+    yearStats.set(year, currentYear);
+
+    const airportList = trip.airports?.length ? trip.airports : routeAirports(trip.routeLabel);
+    for (const airport of airportList) {
+      airportCounts.set(airport, (airportCounts.get(airport) ?? 0) + 1);
+    }
+
+    const route = normalizedRouteLabel(trip);
+    if (route) routeCounts.set(route, (routeCounts.get(route) ?? 0) + 1);
+
+    for (const segment of trip.segments ?? []) {
+      const miles = segment.distanceMiles ?? 0;
+      if (miles > longestFlightMiles) {
+        longestFlightMiles = miles;
+        longestFlight = { value: `${miles.toLocaleString()} mi`, label: segmentRouteLabel(segment) };
+      }
+    }
+
+    if (!trip.segments || trip.segments.length === 0) {
+      const estimated = Math.round(trip.miles / Math.max(1, trip.flightCount));
+      if (estimated > longestFlightMiles) {
+        longestFlightMiles = estimated;
+        longestFlight = { value: `${estimated.toLocaleString()} mi`, label: trip.routeLabel };
+      }
+    }
+  }
+
+  const yearRows = Array.from(yearStats.entries())
+    .map(([year, stats]) => ({ year, ...stats }))
+    .sort((a, b) => Number(b.year) - Number(a.year));
+  const maxYearFlights = Math.max(1, ...yearRows.map((year) => year.flights));
+  const busiestYear = yearRows.reduce(
+    (best, row) => row.flights > best.flights ? row : best,
+    { year: 'None', flights: 0, miles: 0 }
+  );
+
+  return {
+    upcomingTrips,
+    continents,
+    longestTrip,
+    longestFlight,
+    activeYears: yearRows.length,
+    yearRows,
+    maxYearFlights,
+    topAirport: topEntry(airportCounts, 'No airport', 'visit', '0 visits'),
+    topRoute: topEntry(routeCounts, 'No route', 'flight', '0 flights'),
+    topCountry: countries[0]
+      ? { value: countries[0].value, label: `${countries[0].count} trip${countries[0].count === 1 ? '' : 's'}` }
+      : { value: 'No country', label: '0 trips' },
+    busiestYear: {
+      value: busiestYear.year,
+      label: `${busiestYear.flights} flights / ${formatCompactMiles(busiestYear.miles)}`,
+    },
+  };
+}
+
+function buildTripCountryStampPreviews(trips: TripSummary[]) {
+  const firstVisitByCountry = new Map<string, string>();
+  for (const trip of trips) {
+    const existing = firstVisitByCountry.get(trip.country);
+    const visitDate = trip.firstCountryEntryDate ?? trip.startDate;
+    if (!existing || visitDate < existing) firstVisitByCountry.set(trip.country, visitDate);
+  }
+
+  const stamps = COUNTRY_ROSTER
+    .filter((entry) => firstVisitByCountry.has(entry.country))
+    .map((entry, index) => buildCountryStampPreview(entry, index, firstVisitByCountry.get(entry.country)));
+
+  if (stamps.length > 0) return stamps;
+  return rosterCountryStampPreviews.slice(0, 1);
+}
+
+function rankValues(values: string[]) {
+  const counts = new Map<string, number>();
+  values.forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
+  return Array.from(counts.entries())
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+function topEntry(counts: Map<string, number>, emptyValue: string, noun: string, emptyLabel: string) {
+  const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  if (!top) return { value: emptyValue, label: emptyLabel };
+  return { value: top[0], label: `${top[1]} ${noun}${top[1] === 1 ? '' : 's'}` };
+}
+
+function tripDurationDays(trip: TripSummary) {
+  const start = new Date(`${trip.startDate}T00:00:00`).getTime();
+  const end = new Date(`${trip.endDate || trip.startDate}T00:00:00`).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end)) return 1;
+  return Math.max(1, Math.round((end - start) / 86400000) + 1);
+}
+
+function routeAirports(routeLabel: string) {
+  return routeLabel.split('->').map((part) => part.trim()).filter(Boolean);
+}
+
+function normalizedRouteLabel(trip: TripSummary) {
+  const airports = routeAirports(trip.routeLabel);
+  if (airports.length >= 2) return `${airports[0]} -> ${airports[airports.length - 1]}`;
+  if (trip.airportCode) return `${trip.airportCode}`;
+  return trip.routeLabel;
+}
+
+function segmentRouteLabel(segment: TripSegmentSummary) {
+  return `${segment.depAirport} -> ${segment.arrAirport}`;
+}
+
+function formatCompactMiles(miles: number) {
+  if (miles >= 1000) return `${Math.round(miles / 1000)}k mi`;
+  return `${miles} mi`;
 }
 
 const styles = StyleSheet.create({
@@ -426,6 +690,100 @@ const styles = StyleSheet.create({
     color: colors.mutedInk,
     fontFamily: fonts.sansRegular,
     fontSize: 11,
+  },
+  recordsPanel: {
+    marginTop: spacing.lg,
+  },
+  yearPanel: {
+    marginTop: spacing.md,
+  },
+  recordsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  recordsTitle: {
+    color: colors.red,
+    fontFamily: fonts.sansBold,
+    fontSize: 12,
+    letterSpacing: 0.8,
+  },
+  recordsCount: {
+    color: colors.mutedInk,
+    fontFamily: fonts.mono,
+    fontSize: 11,
+  },
+  recordRow: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: colors.paperBorder,
+    paddingVertical: 9,
+    gap: spacing.sm,
+  },
+  recordIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.ink,
+  },
+  recordCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  recordLabel: {
+    color: colors.mutedInk,
+    fontFamily: fonts.sansBold,
+    fontSize: 10,
+    textTransform: 'uppercase',
+  },
+  recordValue: {
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: 22,
+    marginTop: 1,
+  },
+  recordDetail: {
+    width: 136,
+    color: colors.mutedInk,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    textAlign: 'right',
+  },
+  yearRow: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  yearLabel: {
+    width: 42,
+    color: colors.ink,
+    fontFamily: fonts.sansBold,
+    fontSize: 12,
+  },
+  yearTrack: {
+    flex: 1,
+    height: 10,
+    borderRadius: 5,
+    overflow: 'hidden',
+    backgroundColor: '#D8CBB4',
+  },
+  yearFill: {
+    height: '100%',
+    borderRadius: 5,
+    backgroundColor: colors.red,
+  },
+  yearValue: {
+    width: 82,
+    color: colors.mutedInk,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    textAlign: 'right',
   },
   sectionTitle: {
     color: colors.ink,

@@ -4,19 +4,94 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
+import csv
+import os
+from pathlib import Path
 from typing import Iterable, Optional
 
 from sqlalchemy.orm import Session
 
 from ..models import GmailDiscoverySignal, GmailDiscoveryState
+from .flight_query import (
+    HIGH_CONFIDENCE_FLIGHT_SENDERS,
+    NOISY_TRAVEL_SENDERS,
+    OTA_FLIGHT_SENDERS,
+    SENDER_DOMAINS,
+)
 from .flight_query_v2 import build_gmail_queries as build_broad_queries
 from .flight_query_v3 import DEFAULT_LOOKBACK_START, build_gmail_queries as build_precise_queries
-from .parser import PARSER_VERSION
 
-RECENT_BROAD_DAYS = 548
+INITIAL_QUICK_DAYS = int(os.getenv("TROTTER_INITIAL_QUICK_DAYS", "180"))
+RECENT_BROAD_DAYS = int(os.getenv("TROTTER_RECENT_BROAD_DAYS", "548"))
 INCREMENTAL_OVERLAP_DAYS = 2
 BACKFILL_WINDOW_DAYS = 31
 MAX_BACKFILL_WINDOWS_PER_SYNC = 1
+ENABLE_AUTOMATIC_BACKFILL = os.getenv("TROTTER_ENABLE_AUTOMATIC_BACKFILL", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+ENABLE_RECALL_DISCOVERY_TIERS = os.getenv("TROTTER_ENABLE_RECALL_DISCOVERY_TIERS", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+PROMOTIONS_EXCLUSION = "-category:promotions"
+STRONG_FLIGHT_KEYWORDS = [
+    "boarding pass",
+    "mobile boarding pass",
+    "record locator",
+    "confirmation #",
+    "confirmation code",
+    "confirmation number",
+    "flight confirmation",
+    "flight receipt",
+    "e-ticket",
+    "eticket",
+    "check in for your flight",
+    "check in online for your flight",
+    "check-in for your flight",
+    "check-in online for your flight",
+    "schedule change",
+    "flight update",
+    "your trip",
+    "itinerary",
+]
+BROAD_BACKSCAN_KEYWORDS = sorted(
+    set(
+        STRONG_FLIGHT_KEYWORDS
+        + [
+            "booking reference",
+            "confirmation code",
+            "confirmation number",
+            "reservation code",
+            "your flight",
+            "your upcoming trip",
+            "trip confirmation",
+            "travel itinerary",
+            "ticket number",
+            "passenger receipt",
+            "download your boarding pass",
+            "time to check in",
+        ]
+    )
+)
+EXCLUDED_FAST_SENDER_DOMAINS = {
+    "airbnb.com",
+    "barclaycardus.com",
+    "barclays.com",
+    "biltrewards.com",
+    "capitalone.com",
+    "citi.com",
+    "citicards.com",
+    "discover.com",
+    "email-marriott.com",
+    "marriott.com",
+    "prioritypass.com",
+    "uber.com",
+    "venture.capitalone.com",
+    "wellsfargo.com",
+}
 
 
 @dataclass(frozen=True)
@@ -67,39 +142,38 @@ def build_discovery_plan(
     now = _ensure_utc(now)
     plan: list[DiscoveryQuery] = []
     has_completed_sync = bool(state.last_incremental_scan_at)
-    needs_parser_repair = (getattr(state, "parser_version", 0) or 0) < PARSER_VERSION
-
     incremental_start = _incremental_start(state, now)
+
+    # Sender-first discovery remains useful as additive coverage for known
+    # transactional domains and user-learned senders. It must not replace the
+    # committed v3 precise path until baseline recall proves that is safe.
     plan.extend(
-        DiscoveryQuery(tier="incremental_precise", query=query, prefilter=True)
-        for query in build_precise_queries(since=_gmail_after_date(incremental_start))
+        DiscoveryQuery(tier="fast_known_senders", query=query, prefilter=True)
+        for query in build_fast_known_sender_queries(
+            since=_gmail_after_date(incremental_start),
+            learned_sender_domains=learned_sender_domains or [],
+        )
     )
 
-    if has_completed_sync:
-        learned_queries = _build_learned_sender_queries(
-            learned_sender_domains or [],
-            since=_gmail_after_date(incremental_start),
-        )
+    plan.extend(
+        DiscoveryQuery(tier="fast_strong_keywords", query=query, prefilter=True)
+        for query in build_fast_strong_keyword_queries(since=_gmail_after_date(incremental_start))
+    )
+
+    if ENABLE_RECALL_DISCOVERY_TIERS:
         plan.extend(
-            DiscoveryQuery(tier="incremental_learned_senders", query=query, prefilter=True)
-            for query in learned_queries
+            DiscoveryQuery(tier="incremental_precise", query=query, prefilter=True)
+            for query in build_precise_queries(since=_gmail_after_date(incremental_start))
         )
 
-    if has_completed_sync and needs_parser_repair:
-        repair_start = max(_earliest_supported_datetime(), now - timedelta(days=RECENT_BROAD_DAYS))
-        plan.extend(
-            DiscoveryQuery(tier="parser_upgrade_recent_repair", query=query, prefilter=True)
-            for query in build_broad_queries(since=_gmail_after_date(repair_start))
-        )
-
-    if not has_completed_sync:
+    if ENABLE_RECALL_DISCOVERY_TIERS and not has_completed_sync:
         broad_start = max(incremental_start, now - timedelta(days=RECENT_BROAD_DAYS))
         plan.extend(
             DiscoveryQuery(tier="initial_broad_recent", query=query, prefilter=True)
             for query in build_broad_queries(since=_gmail_after_date(broad_start))
         )
 
-    if not state.backfill_complete:
+    if ENABLE_AUTOMATIC_BACKFILL and not state.backfill_complete:
         plan.extend(_build_backfill_windows(state, now, max_backfill_windows=max_backfill_windows))
 
     return plan
@@ -182,6 +256,11 @@ def mark_discovery_plan_success(
 ) -> None:
     """Persist successful incremental and backfill progress."""
     state.last_incremental_scan_at = _ensure_utc(scan_started_at)
+    if not ENABLE_AUTOMATIC_BACKFILL:
+        state.backfill_complete = True
+        state.backfill_cursor_before = _ensure_utc(scan_started_at)
+        state.updated_at = datetime.now(timezone.utc)
+        return
     backfill_items = [item for item in plan if item.tier == "exhaustive_backfill"]
     if backfill_items:
         oldest_start = min(item.window_start for item in backfill_items if item.window_start)
@@ -191,8 +270,6 @@ def mark_discovery_plan_success(
             state.backfill_cursor_before = earliest
         else:
             state.backfill_cursor_before = oldest_start
-    if any(item.tier == "parser_upgrade_recent_repair" for item in plan):
-        state.parser_version = PARSER_VERSION
     state.updated_at = datetime.now(timezone.utc)
 
 
@@ -232,25 +309,155 @@ def _build_backfill_windows(
     return windows
 
 
-def _build_learned_sender_queries(sender_domains: list[str], *, since: str) -> list[str]:
-    terms = [f"from:{domain}" for domain in sorted(set(sender_domains)) if domain]
-    return _chunk_terms(terms, since=since, max_query_length=1400)
+def build_fast_known_sender_queries(
+    *,
+    since: str,
+    learned_sender_domains: Optional[list[str]] = None,
+) -> list[str]:
+    domains = sorted(
+        _expand_sender_domain_terms(
+            set(load_fast_known_sender_domains())
+            | set(_normal_sender_domains(learned_sender_domains or []))
+        )
+    )
+    terms = [f"from:{domain}" for domain in domains]
+    return _chunk_terms(terms, since=since, max_query_length=1400, suffix=PROMOTIONS_EXCLUSION)
 
 
-def _chunk_terms(terms: list[str], *, since: str, max_query_length: int) -> list[str]:
+def build_fast_strong_keyword_queries(*, since: str) -> list[str]:
+    terms = [f'"{keyword}"' for keyword in STRONG_FLIGHT_KEYWORDS]
+    return _chunk_terms(terms, since=since, max_query_length=1400, suffix=PROMOTIONS_EXCLUSION)
+
+
+def build_background_backscan_queries(window_start: datetime, window_end: datetime) -> list[str]:
+    since = _gmail_after_date(window_start)
+    before = _gmail_date(window_end)
+    safe_domains = sorted(
+        _expand_sender_domain_terms(
+            set(load_fast_known_sender_domains())
+            | set(OTA_FLIGHT_SENDERS)
+            | (set(SENDER_DOMAINS) - set(NOISY_TRAVEL_SENDERS))
+        )
+    )
+    terms = [f"from:{domain}" for domain in safe_domains]
+    terms.extend(f'"{keyword}"' for keyword in BROAD_BACKSCAN_KEYWORDS)
+    return _chunk_terms(
+        terms,
+        since=since,
+        max_query_length=1400,
+        suffix=f"before:{before}",
+    )
+
+
+def load_fast_known_sender_domains(csv_path: Optional[Path] = None) -> list[str]:
+    """Return built-in + optional root domains.csv sender domains."""
+    domains = set(HIGH_CONFIDENCE_FLIGHT_SENDERS)
+    path = csv_path or _default_domains_csv_path()
+    if path.exists():
+        with path.open(newline="", encoding="utf-8-sig") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                domains.update(_normal_sender_domains([row.get("domain") or ""]))
+    return sorted(domain for domain in domains if not _is_excluded_fast_sender_domain(domain))
+
+
+def _chunk_terms(terms: list[str], *, since: str, max_query_length: int, suffix: str = "") -> list[str]:
     queries: list[str] = []
     current: list[str] = []
+    extra = f" {suffix}" if suffix else ""
     for term in terms:
         candidate = current + [term]
-        rendered = f"after:{since} (" + " OR ".join(candidate) + ")"
+        rendered = f"after:{since} (" + " OR ".join(candidate) + f"){extra}"
         if current and len(rendered) > max_query_length:
-            queries.append(f"after:{since} (" + " OR ".join(current) + ")")
+            queries.append(f"after:{since} (" + " OR ".join(current) + f"){extra}")
             current = [term]
         else:
             current = candidate
     if current:
-        queries.append(f"after:{since} (" + " OR ".join(current) + ")")
+        queries.append(f"after:{since} (" + " OR ".join(current) + f"){extra}")
     return queries
+
+
+def _normal_sender_domains(domains: list[str]) -> list[str]:
+    results: list[str] = []
+    for value in domains:
+        domain = (value or "").strip().lower()
+        if not domain:
+            continue
+        if "@" in domain:
+            domain = domain.split("@")[-1].rstrip(">").strip()
+        if domain:
+            results.append(domain)
+    return results
+
+
+def _expand_sender_domain_terms(domains: set[str]) -> set[str]:
+    """Include exact domains plus root-domain wildcard terms.
+
+    Gmail search does not support a literal ``from:*.example.com`` operator.
+    In practice, querying ``from:example.com`` is the wildcard-style term we
+    need because subdomain senders still contain the registrable root in the
+    From address, e.g. ``receipt@t.delta.com`` contains ``delta.com``.
+    Keep exact subdomains too so named transactional domains remain explicit.
+    """
+    expanded: set[str] = set()
+    for domain in domains:
+        normalized = _normal_sender_domains([domain])
+        if not normalized:
+            continue
+        value = normalized[0]
+        if not _is_excluded_fast_sender_domain(value):
+            expanded.add(value)
+        root = _registrable_domain(value)
+        if root and not _is_excluded_fast_sender_domain(root):
+            expanded.add(root)
+    return expanded
+
+
+def _is_excluded_fast_sender_domain(domain: str) -> bool:
+    value = (domain or "").strip().lower()
+    if not value:
+        return True
+    root = _registrable_domain(value)
+    return value in EXCLUDED_FAST_SENDER_DOMAINS or root in EXCLUDED_FAST_SENDER_DOMAINS
+
+
+_SECOND_LEVEL_TLDS = {
+    "co.id",
+    "co.uk",
+    "co.kr",
+    "co.za",
+    "com.au",
+    "com.br",
+    "com.np",
+    "com.mx",
+    "com.tr",
+    "co.jp",
+    "co.nz",
+    "co.in",
+    "com.ph",
+    "com.sg",
+    "com.my",
+    "com.cn",
+    "com.hk",
+    "com.tw",
+    "com.ar",
+    "com.co",
+}
+
+
+def _registrable_domain(domain: str) -> str:
+    parts = [part for part in domain.lower().split(".") if part]
+    if len(parts) <= 2:
+        return domain.lower()
+    suffix = ".".join(parts[-2:])
+    if suffix in _SECOND_LEVEL_TLDS and len(parts) >= 3:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+
+def _default_domains_csv_path() -> Path:
+    return Path(__file__).resolve().parents[3] / "domains.csv"
 
 
 def _extract_sender_domain(sender: str) -> Optional[str]:

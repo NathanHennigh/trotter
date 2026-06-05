@@ -644,7 +644,7 @@ class TestAirportExtraction:
 
         flights = extract_heuristic_flights(text)
 
-        assert [flight.flight_number for flight in flights] == ["WN1074", "WN0822", "WN1304"]
+        assert [flight.flight_number for flight in flights] == ["WN1074", "WN822", "WN1304"]
         assert [(flight.dep_airport, flight.arr_airport) for flight in flights] == [
             ("HOU", "PUJ"),
             ("PUJ", "BWI"),

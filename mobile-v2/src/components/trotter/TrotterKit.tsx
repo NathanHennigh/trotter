@@ -216,10 +216,10 @@ export function SyncStatusPill({ lastSyncedLabel, sourceLabel = 'Gmail' }: { las
   );
 }
 
-export function TrotterHeaderTag({ width }: { width?: number }) {
+export function TrotterHeaderTag({ width, year = new Date().getFullYear() }: { width?: number; year?: number | string }) {
   return (
     <PaperSurface radius={radii.sm} padding={spacing.md} style={[styles.headerTag, width ? { width } : null]}>
-      <Text allowFontScaling={false} style={styles.headerYear}>2025</Text>
+      <Text allowFontScaling={false} style={styles.headerYear}>{year}</Text>
       <View style={styles.headerCopy}>
         <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.wordmark}>TROTTER</Text>
         <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.tagline}>YOUR TRAVEL, RECORDED.</Text>

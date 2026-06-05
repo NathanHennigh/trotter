@@ -62,14 +62,17 @@ class UserInfo(BaseModel):
 
 async def _exchange_code(code: str, redirect_uri: str) -> dict:
     client_id, client_secret, _ = _get_google_config()
-    async with httpx.AsyncClient() as client:
-        r = await client.post("https://oauth2.googleapis.com/token", data={
-            "client_id":     client_id,
-            "client_secret": client_secret,
-            "code":          code,
-            "grant_type":    "authorization_code",
-            "redirect_uri":  redirect_uri,
-        })
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            r = client.post("https://oauth2.googleapis.com/token", data={
+                "client_id":     client_id,
+                "client_secret": client_secret,
+                "code":          code,
+                "grant_type":    "authorization_code",
+                "redirect_uri":  redirect_uri,
+            })
+    except httpx.RequestError as exc:
+        raise HTTPException(502, f"Google token exchange request failed: {exc}") from exc
     if r.status_code != 200:
         raise HTTPException(400, f"Google token exchange failed: {r.text}")
     return r.json()

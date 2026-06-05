@@ -17,7 +17,7 @@ class TestJWTAuth:
 
     def test_create_and_verify_jwt(self, monkeypatch):
         """Test JWT creation and verification roundtrip."""
-        monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+        monkeypatch.setenv("JWT_SECRET", "test-secret-key")
         
         user_id = 123
         email = "test@example.com"
@@ -38,7 +38,7 @@ class TestJWTAuth:
 
     def test_jwt_expiry(self, monkeypatch):
         """Test JWT expiry configuration."""
-        monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+        monkeypatch.setenv("JWT_SECRET", "test-secret-key")
         
         # Create JWT with short expiry
         token = create_app_jwt(123, "test@example.com", expires_hours=1)
@@ -53,7 +53,7 @@ class TestJWTAuth:
 
     def test_verify_invalid_jwt_raises_error(self, monkeypatch):
         """Test that invalid JWT raises error."""
-        monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+        monkeypatch.setenv("JWT_SECRET", "test-secret-key")
         
         with pytest.raises(InvalidTokenError):
             verify_app_jwt("invalid.jwt.token")
@@ -63,18 +63,18 @@ class TestJWTAuth:
 
     def test_verify_jwt_wrong_secret(self, monkeypatch):
         """Test that JWT with wrong secret fails verification."""
-        monkeypatch.setenv("SECRET_KEY", "secret1")
+        monkeypatch.setenv("JWT_SECRET", "secret1")
         token = create_app_jwt(123, "test@example.com")
         
         # Change secret
-        monkeypatch.setenv("SECRET_KEY", "secret2")
+        monkeypatch.setenv("JWT_SECRET", "secret2")
         
         with pytest.raises(InvalidTokenError):
             verify_app_jwt(token)
 
     def test_verify_jwt_wrong_audience(self, monkeypatch):
         """Test that JWT with wrong audience fails verification."""
-        monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+        monkeypatch.setenv("JWT_SECRET", "test-secret-key")
         
         # Create JWT with different audience
         payload = {
@@ -92,7 +92,7 @@ class TestJWTAuth:
 
     def test_get_user_from_jwt_success(self, monkeypatch):
         """Test extracting user info from valid JWT."""
-        monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+        monkeypatch.setenv("JWT_SECRET", "test-secret-key")
         
         user_id = 456
         email = "user@example.com"
@@ -105,14 +105,14 @@ class TestJWTAuth:
 
     def test_get_user_from_jwt_invalid_token(self, monkeypatch):
         """Test that invalid JWT returns None."""
-        monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+        monkeypatch.setenv("JWT_SECRET", "test-secret-key")
         
         assert get_user_from_jwt("invalid.jwt.token") is None
         assert get_user_from_jwt("") is None
 
     def test_get_user_from_jwt_malformed_payload(self, monkeypatch):
         """Test that JWT with missing fields returns None."""
-        monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+        monkeypatch.setenv("JWT_SECRET", "test-secret-key")
         
         # Create JWT missing required fields
         payload = {
@@ -126,15 +126,15 @@ class TestJWTAuth:
         assert get_user_from_jwt(token) is None
 
     def test_get_jwt_secret_missing_raises_error(self, monkeypatch):
-        """Test that missing SECRET_KEY raises error."""
-        monkeypatch.delenv("SECRET_KEY", raising=False)
+        """Test that missing JWT_SECRET raises error."""
+        monkeypatch.delenv("JWT_SECRET", raising=False)
         
-        with pytest.raises(ValueError, match="SECRET_KEY environment variable is required"):
+        with pytest.raises(ValueError, match="JWT_SECRET environment variable is required"):
             get_jwt_secret()
 
     def test_jwt_default_expiry(self, monkeypatch):
-        """Test that default JWT expiry is 24 hours."""
-        monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+        """Test that the default mobile development session lasts 30 days."""
+        monkeypatch.setenv("JWT_SECRET", "test-secret-key")
         
         token = create_app_jwt(123, "test@example.com")
         payload = verify_app_jwt(token)
@@ -142,6 +142,6 @@ class TestJWTAuth:
         exp_time = datetime.utcfromtimestamp(payload["exp"])
         iat_time = datetime.utcfromtimestamp(payload["iat"])
         
-        # Should be approximately 24 hours
+        # Should be approximately 30 days.
         duration = exp_time - iat_time
-        assert abs(duration.total_seconds() - 24 * 3600) < 60  # Within 1 minute
+        assert abs(duration.total_seconds() - 30 * 24 * 3600) < 60

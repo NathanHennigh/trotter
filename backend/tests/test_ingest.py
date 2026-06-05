@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,6 +16,15 @@ from app.db import get_db
 from app.main import app
 from app.models import Message, MessageStatus, SyncJob, User
 from app.routers.auth import get_current_user
+from app.tasks.import_tasks import (
+    DEFAULT_TARGETED_REPARSE_MESSAGE_IDS,
+    _fast_metadata_looks_like_flight,
+    _get_or_create_message,
+    _message_skip_reason,
+    _select_stale_reparse_messages,
+    _should_skip_expensive_parse,
+)
+from app.services.flight_evidence import assess_flight_evidence
 
 
 # ────────────────────────── shared fixtures ───────────────────────────────────
@@ -216,6 +226,59 @@ class TestJobStatus:
 
 
 class TestUnparsedCandidates:
+    def test_fast_metadata_gate_keeps_flight_itinerary_snippets(self):
+        assert _fast_metadata_looks_like_flight(
+            subject="Your trip itinerary is ready",
+            sender="Delta <t.delta.com>",
+            snippet="Record locator ABC123 for your flight to Seattle.",
+        )
+
+    def test_fast_metadata_gate_rejects_generic_sender_matches(self):
+        assert not _fast_metadata_looks_like_flight(
+            subject="Your monthly rewards statement",
+            sender="Travel Rewards <offers@example.com>",
+            snippet="See new card benefits and earn more points this month.",
+        )
+
+    def test_get_or_create_message_reuses_existing_provider_message(self, test_user, test_db):
+        first = _get_or_create_message(
+            test_db,
+            test_user.id,
+            "gmail-duplicate",
+            subject="First",
+            status=MessageStatus.REVIEW_REQUIRED,
+            parse_version=18,
+        )
+        test_db.commit()
+
+        second = _get_or_create_message(
+            test_db,
+            test_user.id,
+            "gmail-duplicate",
+            subject="Second",
+            status=MessageStatus.ACCEPTED,
+            parse_version=18,
+        )
+
+        assert second.id == first.id
+        assert test_db.query(Message).filter(Message.provider_msg_id == "gmail-duplicate").count() == 1
+
+    def test_message_status_enum_persists_lowercase_values(self, test_user, test_db):
+        msg = Message(
+            user_id=test_user.id,
+            provider_msg_id="gmail-review-required",
+            subject="Needs review",
+            status=MessageStatus.REVIEW_REQUIRED,
+            parse_version=18,
+        )
+        test_db.add(msg)
+        test_db.commit()
+
+        row = test_db.execute(Message.__table__.select().where(Message.provider_msg_id == "gmail-review-required")).first()
+
+        assert row is not None
+        assert row._mapping["status"] == MessageStatus.REVIEW_REQUIRED
+
     def test_lists_review_required_parse_misses(self, client, test_user, test_db):
         msg = Message(
             user_id=test_user.id,
@@ -244,3 +307,223 @@ class TestUnparsedCandidates:
         assert data["total"] == 1
         assert data["candidates"][0]["provider_msg_id"] == "gmail-1"
         assert data["candidates"][0]["parse_evidence"]["score"] == 9
+
+    def test_review_required_current_version_does_not_skip(self, test_user):
+        msg = Message(
+            user_id=test_user.id,
+            provider_msg_id="gmail-review",
+            status=MessageStatus.REVIEW_REQUIRED,
+            parse_version=18,
+            parse_error="strong_flight_evidence_but_no_segments",
+        )
+
+        assert _message_skip_reason(msg, 18) is None
+
+    def test_resolved_parse_evidence_skips(self, test_user):
+        msg = Message(
+            user_id=test_user.id,
+            provider_msg_id="gmail-resolved",
+            status=MessageStatus.ACCEPTED,
+            parse_version=18,
+            parse_evidence={"resolved": True, "reason": "parsed_flights", "flight_count": 2},
+        )
+
+        assert _message_skip_reason(msg, 18) == "parsed_flights"
+
+    def test_stale_reparse_prioritizes_targeted_ids(self, test_user, test_db):
+        targeted_id = next(iter(DEFAULT_TARGETED_REPARSE_MESSAGE_IDS))
+        targeted = Message(
+            user_id=test_user.id,
+            provider_msg_id=targeted_id,
+            subject="Known miss",
+            status=MessageStatus.REVIEW_REQUIRED,
+            parse_version=18,
+        )
+        newer = Message(
+            user_id=test_user.id,
+            provider_msg_id="newer-review",
+            subject="Newer miss",
+            status=MessageStatus.REVIEW_REQUIRED,
+            parse_error="strong_flight_evidence_but_no_segments",
+            parse_version=18,
+        )
+        test_db.add_all([newer, targeted])
+        test_db.commit()
+
+        selected = _select_stale_reparse_messages(
+            test_db,
+            user_id=test_user.id,
+            parser_version=19,
+            limit=1,
+            targeted_ids={targeted_id},
+        )
+
+        assert [row.provider_msg_id for row in selected] == [targeted_id]
+
+    def test_expensive_parse_gate_skips_newsletter_backfill(self):
+        evidence = assess_flight_evidence(
+            subject="Leaving The Peacock's Nest",
+            sender="The Pour Over <news@mail.thepourover.org>",
+            body="JFK LAX AA100 flight delays in a newsletter.",
+        )
+
+        assert _should_skip_expensive_parse(
+            tier="exhaustive_backfill",
+            prefilter=False,
+            evidence=evidence,
+        )
+
+    def test_prefilter_gate_parses_transactional_anchor_despite_promo_footer(self):
+        evidence = assess_flight_evidence(
+            subject="Check in online for your flight EK208 on 31 December",
+            sender="Emirates <do-not-reply@emirates.email>",
+            body=(
+                "Confirmation # NT24IF. Flight EK208 and EK721. "
+                "Check in for your flight. Save up to 30% on hotels."
+            ),
+        )
+
+        assert "promo_noise" in evidence.signals
+        assert not _should_skip_expensive_parse(
+            tier="fast_known_senders",
+            prefilter=True,
+            evidence=evidence,
+        )
+
+    def test_prefilter_gate_parses_forwarded_confirmation_hash(self):
+        evidence = assess_flight_evidence(
+            subject="Fwd: Your 01/16 trip to Tampa is all set.",
+            sender="David Hennigh <david@example.com>",
+            body=(
+                "January 16 PNS -> TPA. Confirmation # 3WVTUA. "
+                "Complete your trip and save up to 30%."
+            ),
+        )
+
+        assert not _should_skip_expensive_parse(
+            tier="fast_strong_keywords",
+            prefilter=True,
+            evidence=evidence,
+        )
+
+    def test_stale_reparse_skips_any_skip_verdict(self):
+        evidence = assess_flight_evidence(
+            subject="Generic class action notice",
+            sender="Notice <notice@example.com>",
+            body="This message contains no flight itinerary.",
+        )
+
+        assert evidence.verdict == "skip"
+        assert _should_skip_expensive_parse(
+            tier="stale_reparse",
+            prefilter=True,
+            evidence=evidence,
+        )
+
+    def test_stale_reparse_skips_weak_review_without_flight_anchor(self):
+        evidence = SimpleNamespace(
+            verdict="review",
+            signals=("flight_language", "date_or_time"),
+        )
+
+        assert _should_skip_expensive_parse(
+            tier="stale_reparse",
+            prefilter=True,
+            evidence=evidence,
+        )
+
+    def test_stale_reparse_keeps_review_with_booking_route_anchor(self):
+        evidence = SimpleNamespace(
+            verdict="review",
+            signals=("booking_identifier", "route_airport_pair", "flight_language"),
+        )
+
+        assert not _should_skip_expensive_parse(
+            tier="stale_reparse",
+            prefilter=True,
+            evidence=evidence,
+        )
+
+    def test_stale_reparse_skips_noisy_parse_without_transactional_anchor(self):
+        evidence = SimpleNamespace(
+            verdict="parse",
+            signals=("noisy_sender", "promo_noise", "route_airport_pair", "flight_number", "date_or_time"),
+        )
+
+        assert _should_skip_expensive_parse(
+            tier="stale_reparse",
+            prefilter=True,
+            evidence=evidence,
+        )
+
+    def test_stale_reparse_skips_structural_noise_without_flight_language(self):
+        evidence = SimpleNamespace(
+            verdict="parse",
+            signals=("route_airport_pair", "flight_number", "date_or_time"),
+        )
+
+        assert _should_skip_expensive_parse(
+            tier="stale_reparse",
+            prefilter=True,
+            evidence=evidence,
+        )
+
+    def test_stale_reparse_keeps_noisy_parse_with_transactional_anchor(self):
+        evidence = SimpleNamespace(
+            verdict="parse",
+            signals=("noisy_sender", "booking_identifier", "boarding_or_checkin", "flight_number"),
+        )
+
+        assert not _should_skip_expensive_parse(
+            tier="stale_reparse",
+            prefilter=True,
+            evidence=evidence,
+        )
+
+    def test_exhaustive_backfill_skips_weak_review_without_flight_anchor(self):
+        evidence = SimpleNamespace(
+            verdict="review",
+            signals=("flight_language", "date_or_time"),
+        )
+
+        assert _should_skip_expensive_parse(
+            tier="exhaustive_backfill",
+            prefilter=False,
+            evidence=evidence,
+        )
+
+    def test_exhaustive_backfill_keeps_transactional_booking_anchor(self):
+        evidence = SimpleNamespace(
+            verdict="review",
+            signals=("booking_identifier", "boarding_or_checkin", "flight_number"),
+        )
+
+        assert not _should_skip_expensive_parse(
+            tier="exhaustive_backfill",
+            prefilter=False,
+            evidence=evidence,
+        )
+
+    def test_incremental_precise_is_treated_as_heavy_for_weak_review_evidence(self):
+        evidence = SimpleNamespace(
+            verdict="review",
+            signals=("flight_language", "date_or_time"),
+        )
+
+        assert _should_skip_expensive_parse(
+            tier="incremental_precise",
+            prefilter=True,
+            evidence=evidence,
+        )
+
+    def test_initial_broad_recent_keeps_real_transactional_anchor(self):
+        evidence = SimpleNamespace(
+            verdict="parse",
+            signals=("booking_identifier", "route_airport_pair", "flight_number", "flight_language"),
+        )
+
+        assert not _should_skip_expensive_parse(
+            tier="initial_broad_recent",
+            prefilter=True,
+            evidence=evidence,
+        )

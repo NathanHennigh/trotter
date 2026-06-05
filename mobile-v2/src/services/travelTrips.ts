@@ -135,6 +135,15 @@ type TravelTripsContextValue = {
   syncFromGmail: () => Promise<void>;
 };
 
+type ImportJobStatus = {
+  state?: string;
+  scanned_count?: number;
+  parsed_count?: number;
+  segment_count?: number;
+  error_message?: string | null;
+  detail?: unknown;
+};
+
 const snapshotTrips = realTravelTrips.map(trip => ({
   ...trip,
   title: displayTitle(trip.title, trip.country, trip.countryCode, trip.city)
@@ -160,11 +169,11 @@ function useTravelTripsState(): TravelTripsContextValue {
   const [accountEmail, setAccountEmail] = React.useState<string | undefined>();
   const [lastSyncedAt, setLastSyncedAt] = React.useState<string | undefined>();
 
-  const loadTrips = React.useCallback(async (mode: 'loading' | 'refreshing' = 'refreshing') => {
-    setStatus(mode);
+  const loadTrips = React.useCallback(async (mode: 'loading' | 'refreshing' | 'silent' = 'refreshing') => {
+    if (mode !== 'silent') setStatus(mode);
     const token = getStoredToken() ?? await hydrateStoredToken();
     if (!token) {
-      setStatus('idle');
+      if (mode !== 'silent') setStatus('idle');
       setSource('snapshot');
       setAccountEmail(undefined);
       return;
@@ -194,11 +203,11 @@ function useTravelTripsState(): TravelTripsContextValue {
       setAccountEmail(me.email);
       setLastSyncedAt(new Date().toISOString());
       setError(undefined);
-      setStatus('idle');
+      if (mode !== 'silent') setStatus('idle');
     } catch (caught) {
       setSource((current) => current === 'api' ? 'api' : 'snapshot');
       setError(caught instanceof Error ? caught.message : String(caught));
-      setStatus('error');
+      if (mode !== 'silent') setStatus('error');
     }
   }, []);
 
@@ -273,7 +282,10 @@ function useTravelTripsState(): TravelTripsContextValue {
         if (!importResponse.ok || !importData.job_id) {
           throw new Error(readError(importData, `Import failed: ${importResponse.status}`));
         }
-        await waitForImport(importData.job_id, token);
+        await waitForImport(importData.job_id, token, async () => {
+          await loadTrips('silent');
+          setStatus('syncing');
+        });
         await loadTrips('refreshing');
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
@@ -354,15 +366,25 @@ async function authFetch(path: string, init: RequestInit | undefined, token: str
   });
 }
 
-async function waitForImport(jobId: string, token: string) {
+async function waitForImport(jobId: string, token: string, onProgress?: (status: ImportJobStatus) => Promise<void>) {
+  let lastObservedParsed = -1;
+  let lastObservedSegments = -1;
   for (let attempt = 0; attempt < 180; attempt += 1) {
     const response = await authFetch(`/ingest/jobs/${jobId}`, undefined, token);
     if (response.status === 401) {
       clearAuthToken();
       throw new Error('Session expired. Sign in with Google again.');
     }
-    const data = await readJson(response) as { state?: string; error_message?: string | null; detail?: unknown };
+    const data = await readJson(response) as ImportJobStatus;
     if (!response.ok) throw new Error(readError(data, `Job status failed: ${response.status}`));
+    const parsedCount = data.parsed_count ?? 0;
+    const segmentCount = data.segment_count ?? 0;
+    const discoveredMoreTrips = parsedCount > lastObservedParsed || segmentCount > lastObservedSegments;
+    lastObservedParsed = Math.max(lastObservedParsed, parsedCount);
+    lastObservedSegments = Math.max(lastObservedSegments, segmentCount);
+    if (discoveredMoreTrips && (parsedCount > 0 || segmentCount > 0)) {
+      await onProgress?.(data);
+    }
     if (data.state === 'done' || data.state === 'completed' || data.state === 'success') return;
     if (data.state === 'failed' || data.state === 'error') throw new Error(data.error_message || 'Gmail import failed.');
     await delay(2000);

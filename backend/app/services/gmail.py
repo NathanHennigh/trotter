@@ -6,6 +6,8 @@ import base64
 import logging
 import os
 import random
+import socket
+import ssl
 import time
 from typing import Iterator, Optional
 
@@ -37,23 +39,125 @@ def build_gmail_service(refresh_token_encrypted: bytes):
     return build("gmail", "v1", credentials=creds)
 
 
-def _with_backoff(fn, max_attempts: int = 5):
-    """Retry fn with exponential backoff on 429/5xx HTTP errors."""
+def _with_backoff(
+    fn,
+    max_attempts: int = 5,
+    *,
+    _network_deadline: Optional[float] = None,
+    _network_attempt: int = 0,
+):
+    """Retry fn on Gmail throttling and transient network outages.
+
+    Long imports should survive a flaky laptop/network. DNS drops and brief
+    connection failures pause here, then the original Gmail request is retried
+    from the same page/message instead of failing the whole sync job.
+    """
     from googleapiclient.errors import HttpError
 
+    network_deadline = _network_deadline
+    if network_deadline is None:
+        network_deadline = time.monotonic() + _network_retry_seconds()
+    network_attempt = _network_attempt
     for attempt in range(max_attempts):
         try:
             return fn()
-        except HttpError as exc:
-            if exc.resp.status in (429, 500, 502, 503, 504) and attempt < max_attempts - 1:
-                delay = (2**attempt) + random.uniform(0, 1)
-                logger.warning(
-                    "HTTP %s; retrying in %.1fs (attempt %d/%d)",
-                    exc.resp.status, delay, attempt + 1, max_attempts,
+        except Exception as exc:
+            if _is_retryable_network_error(exc) and time.monotonic() < network_deadline:
+                network_attempt += 1
+                _wait_for_google_network(exc, network_deadline, network_attempt)
+                return _with_backoff(
+                    fn,
+                    max_attempts=max_attempts,
+                    _network_deadline=network_deadline,
+                    _network_attempt=network_attempt,
                 )
-                time.sleep(delay)
-            else:
-                raise
+            if isinstance(exc, HttpError):
+                if exc.resp.status in (429, 500, 502, 503, 504) and attempt < max_attempts - 1:
+                    delay = (2**attempt) + random.uniform(0, 1)
+                    logger.warning(
+                        "HTTP %s; retrying in %.1fs (attempt %d/%d)",
+                        exc.resp.status, delay, attempt + 1, max_attempts,
+                    )
+                    time.sleep(delay)
+                    continue
+            raise
+
+
+def _network_retry_seconds() -> int:
+    try:
+        return max(0, int(os.getenv("TROTTER_GMAIL_NETWORK_RETRY_SECONDS", "1800")))
+    except ValueError:
+        return 1800
+
+
+def _is_retryable_network_error(exc: BaseException) -> bool:
+    if _is_non_retryable_auth_error(exc):
+        return False
+    retryable_types = (
+        ConnectionError,
+        TimeoutError,
+        socket.gaierror,
+        socket.timeout,
+        ssl.SSLError,
+    )
+    retryable_names = {
+        "TransportError",
+        "ServerNotFoundError",
+        "ConnectionError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "Timeout",
+    }
+    seen: set[int] = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if _is_non_retryable_auth_error(current):
+            return False
+        if isinstance(current, retryable_types):
+            return True
+        if type(current).__name__ in retryable_names:
+            return True
+        text = str(current).lower()
+        if (
+            "getaddrinfo failed" in text
+            or "unable to find the server" in text
+            or "temporary failure in name resolution" in text
+            or "name or service not known" in text
+            or "connection aborted" in text
+            or "connection reset" in text
+            or "timed out" in text
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _is_non_retryable_auth_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return (
+        "invalid_grant" in text
+        or "token has been expired or revoked" in text
+        or "invalid_request" in text and "reauth" in text
+    )
+
+
+def _wait_for_google_network(exc: BaseException, deadline: float, attempt: int) -> None:
+    max_sleep = max(1, int(os.getenv("TROTTER_GMAIL_NETWORK_RETRY_INTERVAL_SECONDS", "30")))
+    delay = min(max_sleep, 2 ** min(attempt, 5)) + random.uniform(0, 1)
+    remaining = max(0, deadline - time.monotonic())
+    delay = min(delay, remaining)
+    logger.warning(
+        "Google API network error (%s). Waiting %.1fs before retry; %.0fs retry budget remains.",
+        exc,
+        delay,
+        remaining,
+    )
+    print(
+        f"\nNetwork issue reaching Google APIs. Pausing {delay:.0f}s, then retrying "
+        f"from the same Gmail request..."
+    )
+    time.sleep(delay)
 
 
 def list_messages(
@@ -83,6 +187,94 @@ def get_message(service, msg_id: str) -> dict:
     return _with_backoff(lambda: service.users().messages().get(
         userId="me", id=msg_id, format="full"
     ).execute())
+
+
+def batch_get_messages(service, msg_ids: list[str]) -> tuple[dict[str, dict], dict[str, Exception]]:
+    """Fetch full message payloads in one Gmail batch request."""
+    return _batch_get_messages(service, msg_ids, format_name="full")
+
+
+def batch_get_message_metadata(service, msg_ids: list[str]) -> tuple[dict[str, dict], dict[str, Exception]]:
+    """Fetch message snippets and From/Subject headers without full bodies."""
+    return _batch_get_messages(
+        service,
+        msg_ids,
+        format_name="metadata",
+        metadata_headers=["From", "Subject", "Date"],
+    )
+
+
+def _batch_get_messages(
+    service,
+    msg_ids: list[str],
+    *,
+    format_name: str,
+    metadata_headers: Optional[list[str]] = None,
+) -> tuple[dict[str, dict], dict[str, Exception]]:
+    """Fetch Gmail payloads in one batch request.
+
+    Returns successful responses and per-message failures separately so a sync
+    can keep moving when one message fetch fails.
+    """
+    if not msg_ids:
+        return {}, {}
+    if not hasattr(service, "new_batch_http_request"):
+        results: dict[str, dict] = {}
+        errors: dict[str, Exception] = {}
+        for msg_id in msg_ids:
+            try:
+                if format_name == "full":
+                    results[msg_id] = get_message(service, msg_id)
+                else:
+                    params = {"userId": "me", "id": msg_id, "format": format_name}
+                    if metadata_headers:
+                        params["metadataHeaders"] = metadata_headers
+                    results[msg_id] = _with_backoff(lambda params=params: service.users().messages().get(**params).execute())
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                errors[msg_id] = exc
+        return results, errors
+
+    results: dict[str, dict] = {}
+    errors: dict[str, Exception] = {}
+
+    def _callback(request_id, response, exception):
+        if exception:
+            errors[str(request_id)] = exception
+            return
+        if response:
+            results[str(request_id)] = response
+
+    def _call():
+        batch = service.new_batch_http_request(callback=_callback)
+        for msg_id in msg_ids:
+            params = {"userId": "me", "id": msg_id, "format": format_name}
+            if metadata_headers:
+                params["metadataHeaders"] = metadata_headers
+            request = service.users().messages().get(**params)
+            batch.add(request, request_id=msg_id)
+        batch.execute()
+        return results
+
+    _with_backoff(_call)
+
+    retryable_ids = [
+        msg_id
+        for msg_id, exc in errors.items()
+        if getattr(getattr(exc, "resp", None), "status", None) in (429, 500, 502, 503, 504)
+    ]
+    for msg_id in retryable_ids:
+        try:
+            if format_name == "full":
+                results[msg_id] = get_message(service, msg_id)
+            else:
+                params = {"userId": "me", "id": msg_id, "format": format_name}
+                if metadata_headers:
+                    params["metadataHeaders"] = metadata_headers
+                results[msg_id] = _with_backoff(lambda params=params: service.users().messages().get(**params).execute())
+            errors.pop(msg_id, None)
+        except Exception as exc:
+            errors[msg_id] = exc
+    return results, errors
 
 
 def iter_all_messages(

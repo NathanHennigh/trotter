@@ -29,7 +29,12 @@ export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; on
   const statsWidth = contentWidth - headerTagWidth - headerGap;
   const globeHeight = Math.max(540, Math.min(650, height * 0.66));
   const { trips, profile, source, status, lastSyncedAt, syncFromGmail } = useTravelTrips();
-  const liveRoutes = React.useMemo(() => trips.flatMap((trip) =>
+  const isInitialLiveLoading = status === 'loading' && source !== 'api';
+  const displayedTrips = isInitialLiveLoading ? [] : trips;
+  const displayedProfile = isInitialLiveLoading
+    ? { ...profile, flights: 0, countries: 0, airports: 0, airlines: 0, miles: 0, hoursInAir: 0 }
+    : profile;
+  const liveRoutes = React.useMemo(() => displayedTrips.flatMap((trip) =>
     (trip.segments ?? []).flatMap((segment) => {
       if (!segment.depPoint || !segment.arrPoint) return [];
       return [{
@@ -44,7 +49,7 @@ export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; on
         distanceKm: segment.distanceMiles ? segment.distanceMiles / 0.621371 : undefined,
       } satisfies FlightRoute];
     })
-  ), [trips]);
+  ), [displayedTrips]);
   const livePoints = React.useMemo(() => {
     const points = new Map<string, RoutePoint>();
     liveRoutes.forEach((route) => {
@@ -53,6 +58,16 @@ export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; on
     });
     return Array.from(points.values());
   }, [liveRoutes]);
+  const travelYears = React.useMemo(() => {
+    const years = displayedTrips
+      .map((trip) => Number(trip.startDate.slice(0, 4)))
+      .filter((year) => Number.isFinite(year) && year > 1900)
+      .sort((a, b) => b - a);
+    return {
+      latest: years[0] ?? new Date().getFullYear(),
+      count: new Set(years).size,
+    };
+  }, [displayedTrips]);
   const [selectedRoute, setSelectedRoute] = React.useState<FlightRoute | null>(null);
   const syncLabel = source === 'api'
     ? `Synced ${formatSyncTime(lastSyncedAt)}`
@@ -66,16 +81,16 @@ export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; on
         contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24 }}
       >
         <View style={[styles.topRow, { paddingHorizontal: screenPadding, gap: headerGap }]}>
-          <TrotterHeaderTag width={headerTagWidth} />
+          <TrotterHeaderTag width={headerTagWidth} year={travelYears.latest} />
           <View style={[styles.statsWrap, { width: statsWidth }]}>
-            <SplitFlapStatsPanel width={statsWidth} compact flights={profile.flights} countries={profile.countries} airports={profile.airports} />
+            <SplitFlapStatsPanel width={statsWidth} compact flights={displayedProfile.flights} countries={displayedProfile.countries} airports={displayedProfile.airports} />
             <SyncStatusPill lastSyncedLabel={syncLabel} sourceLabel={source === 'api' ? 'Live DB' : 'Local'} />
           </View>
         </View>
 
         <View style={[styles.filterRow, { paddingHorizontal: screenPadding }]}>
           <DarkPanel padding={spacing.sm} radius={8} style={styles.yearChip}>
-            <Text allowFontScaling={false} style={styles.yearText}>2025</Text>
+            <Text allowFontScaling={false} style={styles.yearText}>{travelYears.latest}</Text>
             <Text allowFontScaling={false} style={styles.chevron}>v</Text>
           </DarkPanel>
           <View style={styles.controlStack}>
@@ -96,7 +111,7 @@ export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; on
               <IconGlyph name="plane" color={colors.creamText} size={20} />
               <Text allowFontScaling={false} style={styles.milesLabel}>YOU'VE FLOWN</Text>
             </View>
-            <SplitFlapNumber value={profile.miles} />
+            <SplitFlapNumber value={displayedProfile.miles} />
             <Text allowFontScaling={false} style={styles.milesUnit}>MILES</Text>
           </DarkPanel>
           <View style={[styles.passportButtonWrap, { right: screenPadding }]}>
@@ -115,9 +130,9 @@ export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; on
         </View>
         <View style={[styles.bannerWrap, { width: contentWidth, marginHorizontal: screenPadding }]}>
           <NewFlightsBanner
-            count={profile.flights}
-            eyebrow={source === 'api' ? 'LIVE FLIGHTS' : 'SYNC READY'}
-            title={status === 'syncing' ? 'Syncing Gmail trips' : 'Sync Gmail trips'}
+            count={displayedProfile.flights}
+            eyebrow={isInitialLiveLoading ? 'LOADING LIVE FLIGHTS' : source === 'api' ? 'LIVE FLIGHTS' : `${travelYears.count} YEARS LOGGED`}
+            title={isInitialLiveLoading ? 'Loading live trips' : status === 'syncing' ? 'Syncing Gmail trips' : 'Sync Gmail trips'}
             sourceLabel={source === 'api' ? 'live database' : 'Google'}
             actionLabel={status === 'syncing' ? 'SYNCING' : 'SYNC'}
             onReview={syncFromGmail}

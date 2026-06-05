@@ -76,16 +76,23 @@ def start_gmail_import(
         os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower() in ("1", "true", "yes")
         or os.getenv("DEV_MODE", "").lower() in ("1", "true", "yes")
     )
-    task_limit = 0 if (mode or "").lower() == "full" else limit
+    task_mode = (mode or "").lower() or None
+    task_limit = 0 if task_mode == "full" else limit
     if task_limit is not None and task_limit != 0:
         task_limit = max(1, min(int(task_limit), 50000))
 
     if eager_mode:
         # In local single-terminal mode, running Celery eagerly inside this
         # request blocks the app from polling until the sync is already done.
-        background_tasks.add_task(run_gmail_import.run, job_id=job_id, user_id=current_user.id, limit=task_limit)
+        background_tasks.add_task(
+            run_gmail_import.run,
+            job_id=job_id,
+            user_id=current_user.id,
+            limit=task_limit,
+            mode=task_mode,
+        )
     else:
-        run_gmail_import.delay(job_id=job_id, user_id=current_user.id, limit=task_limit)
+        run_gmail_import.delay(job_id=job_id, user_id=current_user.id, limit=task_limit, mode=task_mode)
 
     return StartImportResponse(job_id=job_id)
 

@@ -26,8 +26,14 @@ backend/scripts/instagram_batch_links.txt
 backend/scripts/rebuild_flight_segments_backup_*.json
 backend/scripts/recluster_backup_*.db
 backend/scripts/.flight_discovery_benchmark.json
+backend/scripts/.flight_shape_corpus/
+backend/scripts/flight_import_failed_sync_*.json
 backend/scripts/inbox_scan_results.json
 backend/scripts/compare_results.json
+backend/backups/
+backend/*.dump
+backend/ngrok.exe
+trotter-parser-test-data-*/
 mobile-v2/expo-trip-detail.log
 mobile-v2/assets/photo-candidates/
 trotter-photo-curation/

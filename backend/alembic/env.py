@@ -2,6 +2,7 @@ import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
+from sqlalchemy import text
 from alembic import context
 from dotenv import load_dotenv
 
@@ -41,6 +42,18 @@ def run_migrations_online() -> None:
 	)
 
 	with connectable.connect() as connection:
+		if connection.dialect.name == "postgresql":
+			has_alembic_version = connection.execute(
+				text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
+			).scalar()
+			if has_alembic_version:
+				connection.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)"))
+			else:
+				connection.execute(
+					text("CREATE TABLE alembic_version (version_num VARCHAR(128) NOT NULL PRIMARY KEY)")
+				)
+			connection.commit()
+
 		context.configure(connection=connection, target_metadata=target_metadata)
 
 		with context.begin_transaction():

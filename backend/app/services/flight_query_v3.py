@@ -7,7 +7,7 @@ Gmail iterator.
 
 from __future__ import annotations
 
-from .flight_query import SENDER_DOMAINS, SUBJECT_KEYWORDS
+from .flight_query import PRECISE_SUBJECT_KEYWORDS, SENDER_DOMAINS, SUBJECT_KEYWORDS
 
 DEFAULT_LOOKBACK_START = "2004/1/1"
 DEFAULT_MAX_QUERY_LENGTH = 1400
@@ -46,7 +46,7 @@ def build_gmail_queries(
     max_query_length: int = DEFAULT_MAX_QUERY_LENGTH,
 ) -> list[str]:
     """Return bounded production Gmail queries with v1-equivalent coverage."""
-    terms = [f'"{keyword}"' for keyword in SUBJECT_KEYWORDS]
+    terms = [f'"{keyword}"' for keyword in PRECISE_SUBJECT_KEYWORDS]
     terms.extend(f"from:{domain}" for domain in SENDER_DOMAINS)
     return _chunk_or_terms(terms, since=since, max_query_length=max_query_length)
 

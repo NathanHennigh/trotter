@@ -1,7 +1,20 @@
 {
   "attachment_filenames": [],
   "expectations": {
-    "expected_flights": null,
+    "expected_flights": [
+      {
+        "arr_airport": "VPS",
+        "dep_airport": "EWR",
+        "flight_number": null,
+        "pnr": "97BCD4"
+      },
+      {
+        "arr_airport": "EWR",
+        "dep_airport": "VPS",
+        "flight_number": null,
+        "pnr": "97BCD4"
+      }
+    ],
     "must_complete_within_seconds": 5.0,
     "notes": "flight_confirmation"
   },

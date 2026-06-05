@@ -111,14 +111,17 @@ def test_regression_fixture_parses_within_budget(fixture_name: str, fixture: dic
     )
 
     if expected_flights is not None:
-        actual = [
-            {
+        expected_keys = sorted({key for item in expected_flights for key in item})
+        actual = []
+        for flight in result.flights:
+            payload = {
                 "flight_number": flight.flight_number,
                 "dep_airport": flight.dep_airport,
                 "arr_airport": flight.arr_airport,
+                "pnr": flight.pnr,
+                "source": flight.source,
             }
-            for flight in result.flights
-        ]
+            actual.append({key: payload.get(key) for key in expected_keys})
         assert actual == expected_flights, (
             f"{fixture_name}: parsed flights do not match recorded expectations.\n"
             f"  expected: {expected_flights}\n"

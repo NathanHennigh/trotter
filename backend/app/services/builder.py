@@ -6,6 +6,7 @@ import math
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import func
@@ -181,7 +182,7 @@ def build_segments_and_trips_detailed(
     if not flights:
         return result
 
-    sorted_flights = sorted(flights, key=lambda f: f.dep_time)
+    sorted_flights = sorted(flights, key=lambda f: _db_datetime(f.dep_time))
     trip_groups = _group_into_trips(sorted_flights)
 
     for group in trip_groups:
@@ -196,6 +197,7 @@ def build_segments_and_trips_detailed(
                 result.skipped += 1
 
     result.trips = rebuild_user_trips(db, user_id)
+    resolve_booking_relationships(db, user_id)
     return result
 
 
@@ -216,18 +218,58 @@ def cancel_segments_for_pnr(db: Session, user_id: int, pnr: str, *, received_at=
         .all()
     )
     removable = []
+    affected = 0
     for segment in segments:
         source_time = _segment_source_received_at(segment)
         if cancellation_time and source_time and source_time > cancellation_time:
             continue
+        alias = _first_active_pnr_alias(segment, pnr)
+        if alias:
+            segment.pnr = alias
+            _add_pnr_alias(segment, pnr, reason="canceled_primary_pnr")
+            _add_booking_relationship(
+                segment,
+                {
+                    "type": "surviving_replacement_candidate",
+                    "replaces_pnr": pnr,
+                    "canceled_segment_id": segment.id,
+                    "cancellation_received_at": cancellation_time.isoformat() if cancellation_time else None,
+                },
+            )
+            affected += 1
+            continue
         removable.append(segment)
-    count = len(removable)
+    _mark_cancellation_replacements(db, user_id, pnr, removable, cancellation_time)
+    count = affected + len(removable)
     for segment in removable:
         db.delete(segment)
     if count:
         db.flush()
         rebuild_user_trips(db, user_id)
+        resolve_booking_relationships(db, user_id)
     return count
+
+
+def resolve_booking_relationships(db: Session, user_id: int) -> None:
+    """Annotate booking relationships without changing itinerary structure.
+
+    The parser extracts flight facts; this lightweight resolver preserves
+    evidence relationships that matter later: aliases, likely replacement
+    bookings, and reused/credit-linked PNRs that appear on unrelated trips.
+    """
+    segments = (
+        db.query(Segment)
+        .join(Trip)
+        .filter(Trip.user_id == user_id)
+        .order_by(Segment.dep_time, Segment.arr_time, Segment.id)
+        .all()
+    )
+    if not segments:
+        return
+    _mark_duplicate_route_aliases(segments)
+    _mark_near_duplicate_booking_replacements(segments)
+    _mark_reused_pnr_candidates(segments)
+    db.flush()
 
 
 def rebuild_user_trips(db: Session, user_id: int) -> int:
@@ -265,9 +307,9 @@ def rebuild_user_trips(db: Session, user_id: int) -> int:
             db.add(trip)
             db.flush()
         used_trip_ids.add(trip.id)
-        ordered = sorted(cluster, key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
-        trip.start_ts = min(segment.dep_time for segment in ordered)
-        trip.end_ts = max(segment.arr_time for segment in ordered)
+        ordered = sorted(cluster, key=_segment_sort_key)
+        trip.start_ts = min(_segment_dep_time(segment) for segment in ordered)
+        trip.end_ts = max(_segment_arr_time(segment) for segment in ordered)
         trip.title = _trip_title_for_segments(ordered, home_airport=home_airport)
         for segment in ordered:
             segment.trip_id = trip.id
@@ -283,17 +325,29 @@ def rebuild_user_trips(db: Session, user_id: int) -> int:
 
 # ──────────────────────────── internal helpers ───────────────────────────────
 
+def _segment_dep_time(segment: Segment) -> datetime:
+    return _db_datetime(segment.dep_time)
+
+
+def _segment_arr_time(segment: Segment) -> datetime:
+    return _db_datetime(segment.arr_time)
+
+
+def _segment_sort_key(segment: Segment) -> tuple[datetime, datetime, int]:
+    return (_segment_dep_time(segment), _segment_arr_time(segment), segment.id or 0)
+
+
 def _cluster_saved_segments(segments: list[Segment], home_airport: Optional[str]) -> list[list[Segment]]:
     if not segments:
         return []
 
-    ordered = sorted(segments, key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
+    ordered = sorted(segments, key=_segment_sort_key)
     home_airports = _infer_home_airports(segments)
     clusters: list[list[Segment]] = [[ordered[0]]]
     for segment in ordered[1:]:
         current = clusters[-1]
         previous = current[-1]
-        gap = segment.dep_time - previous.arr_time
+        gap = _segment_dep_time(segment) - _segment_arr_time(previous)
         if _belongs_to_current_trip(current, segment, gap, home_airport, home_airports):
             current.append(segment)
         else:
@@ -321,7 +375,7 @@ def _prune_duplicate_segments(db: Session, segments: list[Segment]) -> list[Segm
     exact_groups: dict[tuple[str, str, object, Optional[str]], list[Segment]] = {}
     for segment in segments:
         exact_groups.setdefault(
-            (segment.dep_airport, segment.arr_airport, segment.dep_time, _normalize_flight_number(segment.flight_number)),
+            (segment.dep_airport, segment.arr_airport, _segment_dep_time(segment), _normalize_flight_number(segment.flight_number)),
             [],
         ).append(segment)
     mark_duplicates(exact_groups)
@@ -345,14 +399,14 @@ def _prune_duplicate_segments(db: Session, segments: list[Segment]) -> list[Segm
     route_day_groups: dict[tuple[str, str, object], list[Segment]] = {}
     for segment in segments:
         route_day_groups.setdefault(
-            (segment.dep_airport, segment.arr_airport, segment.dep_time.date()),
+            (segment.dep_airport, segment.arr_airport, _segment_dep_time(segment).date()),
             [],
         ).append(segment)
     for key, group in route_day_groups.items():
         active = [segment for segment in group if segment.id not in delete_ids]
         if len(active) <= 1:
             continue
-        ordered_active = sorted(active, key=lambda item: item.dep_time)
+        ordered_active = sorted(active, key=_segment_sort_key)
         compatible: list[Segment] = [ordered_active[0]]
         for segment in ordered_active[1:]:
             if (
@@ -371,25 +425,40 @@ def _prune_duplicate_segments(db: Session, segments: list[Segment]) -> list[Segm
                 segment.dep_airport,
                 segment.arr_airport,
                 segment.airline or "",
-                segment.dep_time.date(),
+                _segment_dep_time(segment).date(),
             ),
             [],
         ).append(segment)
     for key, group in same_day_groups.items():
         ordered = sorted(
             [segment for segment in group if segment.id not in delete_ids],
-            key=lambda segment: segment.dep_time,
+            key=_segment_sort_key,
         )
         if len(ordered) <= 1:
             continue
         cluster: list[Segment] = [ordered[0]]
         for segment in ordered[1:]:
-            if segment.dep_time - cluster[-1].dep_time <= timedelta(hours=8):
+            if (
+                _segment_dep_time(segment) - _segment_dep_time(cluster[-1]) <= timedelta(hours=8)
+                and (
+                    _is_low_information_segment(segment)
+                    or _is_low_information_segment(cluster[-1])
+                    or _segments_can_dedupe(segment, cluster[-1])
+                )
+            ):
                 cluster.append(segment)
                 continue
             mark_duplicates({key: cluster})
             cluster = [segment]
         mark_duplicates({key: cluster})
+
+    _restore_superseded_layover_rewrites(segments, delete_ids)
+    _mark_newer_direct_segments_replacing_layover_chains(segments, delete_ids)
+    _rewrite_implied_layover_destinations(segments, delete_ids)
+    _mark_covered_through_segments(segments, delete_ids)
+    _mark_no_pnr_same_route_replacements(segments, delete_ids)
+    _mark_rebooked_same_route_replacements(segments, delete_ids)
+    _mark_same_trip_flight_key_collisions(segments, delete_ids)
 
     for segment in segments:
         if segment.id in delete_ids:
@@ -399,6 +468,545 @@ def _prune_duplicate_segments(db: Session, segments: list[Segment]) -> list[Segm
     if delete_ids:
         db.flush()
     return [segment for segment in segments if segment.id in keep_ids]
+
+
+def _rewrite_implied_layover_destinations(segments: list[Segment], delete_ids: set[int]) -> None:
+    """Correct an over-broad first leg when a following leg reveals the layover.
+
+    Some OTA emails render a through destination beside the first operating
+    flight, e.g. BR272 MNL -> IAH followed by BR52 TPE -> IAH. For globe arcs we
+    want the operating legs, so rewrite the first row to MNL -> TPE when the
+    following same-booking segment clearly starts at the implied layover.
+    """
+    active = [segment for segment in segments if segment.id not in delete_ids and segment.pnr]
+    for direct in sorted(active, key=_segment_sort_key):
+        if _segment_has_nonstop_evidence(direct):
+            continue
+        direct_pnrs = _segment_pnr_set(direct)
+        if not direct_pnrs:
+            continue
+        direct_dep = _segment_dep_time(direct)
+        direct_arr = _segment_arr_time(direct)
+        if not direct_dep or not direct_arr or direct_arr <= direct_dep:
+            continue
+        candidates = [
+            segment
+            for segment in active
+            if segment.id != direct.id
+            and segment.id not in delete_ids
+            and direct_pnrs & _segment_pnr_set(segment)
+            and segment.arr_airport == direct.arr_airport
+            and segment.dep_airport not in {direct.dep_airport, direct.arr_airport}
+            and direct_dep <= _segment_dep_time(segment) <= direct_arr + timedelta(hours=36)
+        ]
+        if not candidates:
+            continue
+        next_leg = min(candidates, key=lambda segment: abs((_segment_dep_time(segment) - direct_arr).total_seconds()))
+        layover_airport = next_leg.dep_airport
+        if len(layover_airport or "") != 3 or layover_airport == direct.dep_airport:
+            continue
+        if _has_same_pnr_route_sibling(
+            direct,
+            active,
+            dep_airport=direct.dep_airport,
+            arr_airport=layover_airport,
+        ):
+            continue
+        old_route = f"{direct.dep_airport}-{direct.arr_airport}"
+        old_arrival = direct.arr_time
+        direct.arr_airport = layover_airport
+        next_dep = _segment_dep_time(next_leg)
+        if next_dep and direct_arr >= next_dep:
+            direct.arr_time = next_dep - timedelta(minutes=45)
+        if not direct.arr_time or _segment_arr_time(direct) <= _segment_dep_time(direct):
+            direct.arr_time = direct.dep_time + timedelta(hours=2)
+        direct.distance_km = None
+        direct.geom = None
+        _add_booking_relationship(
+            direct,
+            {
+                "type": "implied_layover_destination_rewrite",
+                "old_route": old_route,
+                "new_route": f"{direct.dep_airport}-{direct.arr_airport}",
+                "following_route": f"{next_leg.dep_airport}-{next_leg.arr_airport}",
+                "old_arrival": old_arrival.isoformat() if old_arrival else None,
+                "reason": "following_leg_reveals_first_leg_layover",
+            },
+        )
+
+
+def _restore_superseded_layover_rewrites(segments: list[Segment], delete_ids: set[int]) -> None:
+    active = [segment for segment in segments if segment.id not in delete_ids and segment.pnr]
+    by_id = {segment.id: segment for segment in active}
+    for segment in sorted(active, key=_segment_sort_key):
+        rewrite = _latest_layover_rewrite(segment)
+        if not rewrite:
+            continue
+        old_route = rewrite.get("old_route")
+        following_route = rewrite.get("following_route")
+        old_dep, old_arr = _split_route(old_route)
+        following_dep, following_arr = _split_route(following_route)
+        if not old_dep or not old_arr or not following_dep or not following_arr:
+            continue
+        if segment.dep_airport != old_dep or segment.arr_airport != following_dep:
+            continue
+
+        same_route_sibling = _has_same_pnr_route_sibling(
+            segment,
+            active,
+            dep_airport=segment.dep_airport,
+            arr_airport=segment.arr_airport,
+        )
+        chain = _covering_layover_chain_for_route(
+            dep_airport=old_dep,
+            arr_airport=old_arr,
+            dep_time=_segment_dep_time(segment),
+            arr_time=_rewrite_old_arrival(segment, rewrite) or _segment_arr_time(segment),
+            candidates=[other for other in active if other.id != segment.id],
+            pnr_set=_segment_pnr_set(segment),
+        )
+        chain_is_older = bool(chain) and _segment_source_received_at(segment) and all(
+            (chain_time := _segment_source_received_at(leg)) and chain_time < _segment_source_received_at(segment)
+            for leg in chain
+        )
+        if not same_route_sibling and not chain_is_older:
+            continue
+
+        old_current_route = f"{segment.dep_airport}-{segment.arr_airport}"
+        segment.dep_airport = old_dep
+        segment.arr_airport = old_arr
+        old_arrival = _rewrite_old_arrival(segment, rewrite)
+        if old_arrival and old_arrival > _segment_dep_time(segment):
+            segment.arr_time = old_arrival
+        segment.distance_km = None
+        segment.geom = None
+        _add_booking_relationship(
+            segment,
+            {
+                "type": "implied_layover_destination_rewrite_restored",
+                "old_current_route": old_current_route,
+                "restored_route": old_route,
+                "reason": "newer_direct_or_specific_operating_leg_wins",
+            },
+        )
+
+
+def _mark_newer_direct_segments_replacing_layover_chains(segments: list[Segment], delete_ids: set[int]) -> None:
+    active = [segment for segment in segments if segment.id not in delete_ids and segment.pnr]
+    for direct in sorted(active, key=_segment_sort_key):
+        direct_time = _segment_source_received_at(direct)
+        if not direct_time:
+            continue
+        chain = _covering_layover_chain(direct, [segment for segment in active if segment.id != direct.id])
+        if len(chain) < 2:
+            continue
+        chain_times = [_segment_source_received_at(leg) for leg in chain]
+        if not all(time and time < direct_time for time in chain_times):
+            continue
+        for leg in chain:
+            if leg.id in delete_ids:
+                continue
+            _add_pnr_alias(direct, leg.pnr, reason="newer_direct_replaces_layover_chain")
+            _add_booking_relationship(
+                direct,
+                {
+                    "type": "older_layover_leg_removed",
+                    "removed_segment_id": leg.id,
+                    "removed_route": f"{leg.dep_airport}-{leg.arr_airport}",
+                    "removed_flight_number": _normalize_flight_number(leg.flight_number),
+                    "reason": "newer_change_email_replaced_layover_route",
+                },
+            )
+            delete_ids.add(leg.id)
+
+
+def _mark_covered_through_segments(segments: list[Segment], delete_ids: set[int]) -> None:
+    active = [segment for segment in segments if segment.id not in delete_ids and segment.pnr]
+    by_pnr: dict[str, list[Segment]] = {}
+    for segment in active:
+        normalized_pnr = _normalize_pnr(segment.pnr)
+        if normalized_pnr:
+            by_pnr.setdefault(normalized_pnr, []).append(segment)
+
+    for group in by_pnr.values():
+        ordered = sorted(group, key=_segment_sort_key)
+        for direct in ordered:
+            if direct.id in delete_ids or _segment_has_nonstop_evidence(direct):
+                continue
+            chain = _covering_layover_chain(direct, [segment for segment in ordered if segment.id != direct.id])
+            if len(chain) < 2:
+                continue
+            delete_ids.add(direct.id)
+            for leg in chain:
+                _add_booking_relationship(
+                    leg,
+                    {
+                        "type": "covered_through_segment_removed",
+                        "removed_route": f"{direct.dep_airport}-{direct.arr_airport}",
+                        "removed_flight_number": _normalize_flight_number(direct.flight_number),
+                        "reason": "layover_legs_cover_direct_segment",
+                    },
+                )
+
+
+def _mark_no_pnr_same_route_replacements(segments: list[Segment], delete_ids: set[int]) -> None:
+    active = [segment for segment in segments if segment.id not in delete_ids]
+    groups: dict[tuple[str, str, object, str], list[Segment]] = {}
+    for segment in active:
+        groups.setdefault(
+            (
+                segment.dep_airport,
+                segment.arr_airport,
+                _segment_dep_time(segment).date(),
+                segment.airline or "",
+            ),
+            [],
+        ).append(segment)
+
+    for group in groups.values():
+        if len(group) <= 1:
+            continue
+        for sparse in sorted(group, key=_segment_sort_key):
+            if sparse.id in delete_ids or sparse.pnr:
+                continue
+            sparse_time = _segment_source_received_at(sparse)
+            candidates = [
+                segment
+                for segment in group
+                if segment.id != sparse.id
+                and segment.id not in delete_ids
+                and segment.pnr
+                and abs(_segment_dep_time(segment) - _segment_dep_time(sparse)) <= timedelta(hours=4)
+                and (not sparse_time or not _segment_source_received_at(segment) or _segment_source_received_at(segment) >= sparse_time)
+            ]
+            if not candidates:
+                continue
+            keep = _best_duplicate_segment(candidates, active)
+            _merge_duplicate_segment(keep, sparse)
+            _add_booking_relationship(
+                keep,
+                {
+                    "type": "no_pnr_same_route_segment_removed",
+                    "removed_segment_id": sparse.id,
+                    "removed_flight_number": _normalize_flight_number(sparse.flight_number),
+                    "reason": "richer_same_route_segment_exists",
+                },
+            )
+            delete_ids.add(sparse.id)
+
+
+def _mark_rebooked_same_route_replacements(segments: list[Segment], delete_ids: set[int]) -> None:
+    active = [segment for segment in segments if segment.id not in delete_ids and segment.pnr]
+    groups: dict[tuple[str, str, object, str], list[Segment]] = {}
+    for segment in active:
+        groups.setdefault(
+            (
+                segment.dep_airport,
+                segment.arr_airport,
+                _segment_dep_time(segment).date(),
+                segment.airline or "",
+            ),
+            [],
+        ).append(segment)
+
+    for group in groups.values():
+        if len(group) <= 1:
+            continue
+        ordered = sorted(group, key=_segment_sort_key)
+        for older in ordered:
+            if older.id in delete_ids:
+                continue
+            older_time = _segment_source_received_at(older)
+            candidates = [
+                segment
+                for segment in ordered
+                if segment.id != older.id
+                and segment.id not in delete_ids
+                and abs(_segment_dep_time(segment) - _segment_dep_time(older)) <= timedelta(hours=8)
+                and _bookings_linked_in_trip(older, segment, active)
+                and _source_is_newer(segment, older_time)
+            ]
+            if not candidates:
+                continue
+            keep = max(candidates, key=lambda segment: (_segment_source_received_at(segment) or _segment_dep_time(segment), _segment_quality_score(segment), segment.id or 0))
+            _merge_duplicate_segment(keep, older)
+            _add_booking_relationship(
+                keep,
+                {
+                    "type": "rebooked_same_route_segment_removed",
+                    "removed_segment_id": older.id,
+                    "removed_pnr": older.pnr,
+                    "removed_flight_number": _normalize_flight_number(older.flight_number),
+                    "reason": "newer_linked_booking_replaced_same_route",
+                },
+            )
+            delete_ids.add(older.id)
+
+
+def _segment_pnr_set(segment: Segment) -> set[str]:
+    values = {_normalize_pnr(segment.pnr)}
+    meta = segment.meta_json or {}
+    for alias in meta.get("pnr_aliases") or []:
+        values.add(_normalize_pnr(alias))
+    return {value for value in values if value}
+
+
+def _latest_layover_rewrite(segment: Segment) -> Optional[dict]:
+    relationships = (segment.meta_json or {}).get("booking_relationships") or []
+    for relationship in reversed(relationships):
+        if relationship.get("type") == "implied_layover_destination_rewrite":
+            return relationship
+    return None
+
+
+def _split_route(route: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    if not route or "-" not in route:
+        return None, None
+    dep, arr = route.split("-", 1)
+    dep = dep.strip().upper()
+    arr = arr.strip().upper()
+    if len(dep) != 3 or len(arr) != 3:
+        return None, None
+    return dep, arr
+
+
+def _rewrite_old_arrival(segment: Segment, rewrite: dict):
+    raw = rewrite.get("old_arrival")
+    if not raw:
+        return None
+    try:
+        return _db_datetime(datetime.fromisoformat(str(raw)))
+    except ValueError:
+        return None
+
+
+def _has_same_pnr_route_sibling(
+    segment: Segment,
+    candidates: list[Segment],
+    *,
+    dep_airport: str,
+    arr_airport: str,
+) -> bool:
+    pnr_set = _segment_pnr_set(segment)
+    if not pnr_set:
+        return False
+    return any(
+        other.id != segment.id
+        and other.dep_airport == dep_airport
+        and other.arr_airport == arr_airport
+        and _segment_dep_time(other).date() == _segment_dep_time(segment).date()
+        and bool(pnr_set & _segment_pnr_set(other))
+        for other in candidates
+    )
+
+
+def _bookings_linked_in_trip(left: Segment, right: Segment, segments: list[Segment]) -> bool:
+    left_pnrs = _segment_pnr_set(left)
+    right_pnrs = _segment_pnr_set(right)
+    if left_pnrs & right_pnrs:
+        return True
+    if not left_pnrs or not right_pnrs:
+        return False
+    for segment in segments:
+        segment_pnrs = _segment_pnr_set(segment)
+        if not (segment_pnrs & left_pnrs and segment_pnrs & right_pnrs):
+            continue
+        if (
+            abs(_segment_dep_time(segment) - _segment_dep_time(left)) <= timedelta(days=14)
+            or abs(_segment_dep_time(segment) - _segment_dep_time(right)) <= timedelta(days=14)
+        ):
+            return True
+    return False
+
+
+def _source_is_newer(segment: Segment, older_time) -> bool:
+    segment_time = _segment_source_received_at(segment)
+    if older_time and segment_time:
+        return segment_time - older_time >= timedelta(hours=6)
+    if not older_time and segment_time:
+        return True
+    return False
+
+
+def _covering_layover_chain_for_route(
+    *,
+    dep_airport: str,
+    arr_airport: str,
+    dep_time,
+    arr_time,
+    candidates: list[Segment],
+    pnr_set: set[str],
+) -> list[Segment]:
+    if not pnr_set:
+        return []
+    probe = SimpleNamespace(
+        id=-1,
+        dep_airport=dep_airport,
+        arr_airport=arr_airport,
+        dep_time=dep_time,
+        arr_time=arr_time,
+        pnr=next(iter(pnr_set)),
+        meta_json={"pnr_aliases": sorted(pnr_set - {next(iter(pnr_set))})},
+        flight_number=None,
+        airline=None,
+    )
+    return _covering_layover_chain(
+        probe, [segment for segment in candidates if pnr_set & _segment_pnr_set(segment)]
+    )
+
+
+def _mark_same_trip_flight_key_collisions(segments: list[Segment], delete_ids: set[int]) -> None:
+    active = [segment for segment in segments if segment.id not in delete_ids]
+    groups: dict[tuple[str, str, str, object], list[Segment]] = {}
+    for segment in active:
+        normalized_pnr = _normalize_pnr(segment.pnr)
+        normalized_number = _normalize_flight_number(segment.flight_number)
+        if not normalized_pnr or not segment.airline or not normalized_number:
+            continue
+        groups.setdefault(
+            (
+                normalized_pnr,
+                segment.airline,
+                normalized_number,
+                _segment_dep_time(segment),
+            ),
+            [],
+        ).append(segment)
+
+    for group in groups.values():
+        remaining = [segment for segment in group if segment.id not in delete_ids]
+        if len(remaining) <= 1:
+            continue
+        keep = _best_same_trip_flight_key_segment(remaining, active)
+        for duplicate in remaining:
+            if duplicate.id == keep.id:
+                continue
+            _merge_duplicate_segment(keep, duplicate)
+            _add_booking_relationship(
+                keep,
+                {
+                    "type": "same_trip_flight_key_collision_removed",
+                    "removed_segment_id": duplicate.id,
+                    "removed_route": f"{duplicate.dep_airport}-{duplicate.arr_airport}",
+                    "removed_flight_number": _normalize_flight_number(duplicate.flight_number),
+                    "reason": "would_duplicate_trip_flight_departure_key",
+                },
+            )
+            delete_ids.add(duplicate.id)
+
+
+def _best_same_trip_flight_key_segment(duplicates: list[Segment], all_segments: list[Segment]) -> Segment:
+    return max(duplicates, key=lambda segment: _same_trip_flight_key_score(segment, all_segments))
+
+
+def _same_trip_flight_key_score(segment: Segment, all_segments: list[Segment]) -> tuple[int, int, int, int, float, int]:
+    dep_time = _segment_dep_time(segment)
+    arr_time = _segment_arr_time(segment)
+    duration = max(0.0, (arr_time - dep_time).total_seconds()) if dep_time and arr_time else 0.0
+    return (
+        int(_segment_has_nonstop_evidence(segment)),
+        int(_segment_has_following_connection(segment, all_segments)),
+        int(_segment_has_previous_connection(segment, all_segments)),
+        _segment_quality_score(segment),
+        duration,
+        segment.id or 0,
+    )
+
+
+def _segment_has_following_connection(segment: Segment, all_segments: list[Segment]) -> bool:
+    arr_time = _segment_arr_time(segment)
+    return any(
+        other.id != segment.id
+        and other.dep_airport == segment.arr_airport
+        and timedelta(minutes=-30) <= _segment_dep_time(other) - arr_time <= timedelta(hours=36)
+        for other in all_segments
+    )
+
+
+def _segment_has_previous_connection(segment: Segment, all_segments: list[Segment]) -> bool:
+    dep_time = _segment_dep_time(segment)
+    return any(
+        other.id != segment.id
+        and other.arr_airport == segment.dep_airport
+        and timedelta(minutes=-30) <= dep_time - _segment_arr_time(other) <= timedelta(hours=36)
+        for other in all_segments
+    )
+
+
+def _covering_layover_chain(direct: Segment, candidates: list[Segment]) -> list[Segment]:
+    direct_dep = _segment_dep_time(direct)
+    direct_arr = _segment_arr_time(direct)
+    if not direct_dep or not direct_arr or direct_arr <= direct_dep:
+        return []
+    route_legs = [
+        segment
+        for segment in candidates
+        if segment.dep_airport != segment.arr_airport
+        and segment.dep_airport != direct.arr_airport
+        and segment.arr_airport != direct.dep_airport
+        and _segment_dep_time(segment) >= direct_dep - timedelta(hours=18)
+        and _segment_arr_time(segment) <= direct_arr + timedelta(hours=36)
+    ]
+    starts = [
+        segment
+        for segment in route_legs
+        if segment.dep_airport == direct.dep_airport
+        and abs(_segment_dep_time(segment) - direct_dep) <= timedelta(hours=18)
+    ]
+    for start in sorted(starts, key=_segment_sort_key):
+        chain = _walk_layover_chain(
+            current=start,
+            target_airport=direct.arr_airport,
+            target_arrival=direct_arr,
+            candidates=route_legs,
+            used_ids={start.id},
+        )
+        if len(chain) >= 2:
+            return chain
+    return []
+
+
+def _walk_layover_chain(
+    *,
+    current: Segment,
+    target_airport: str,
+    target_arrival,
+    candidates: list[Segment],
+    used_ids: set[int],
+) -> list[Segment]:
+    if current.arr_airport == target_airport and abs(_segment_arr_time(current) - target_arrival) <= timedelta(hours=36):
+        return [current]
+    if len(used_ids) >= 4:
+        return []
+    current_arr = _segment_arr_time(current)
+    next_legs = [
+        segment
+        for segment in candidates
+        if segment.id not in used_ids
+        and segment.dep_airport == current.arr_airport
+        and timedelta(minutes=-30) <= _segment_dep_time(segment) - current_arr <= timedelta(hours=36)
+    ]
+    for leg in sorted(next_legs, key=_segment_sort_key):
+        chain = _walk_layover_chain(
+            current=leg,
+            target_airport=target_airport,
+            target_arrival=target_arrival,
+            candidates=candidates,
+            used_ids={*used_ids, leg.id},
+        )
+        if chain:
+            return [current, *chain]
+    return []
+
+
+def _segment_has_nonstop_evidence(segment: Segment) -> bool:
+    meta = segment.meta_json or {}
+    if meta.get("nonstop") is True or meta.get("direct_nonstop") is True:
+        return True
+    signals = meta.get("signals") or meta.get("evidence_signals") or []
+    if isinstance(signals, str):
+        signals = [signals]
+    return any(str(signal).lower() in {"nonstop", "direct_nonstop", "explicit_nonstop"} for signal in signals)
 
 
 def _best_duplicate_segment(duplicates: list[Segment], all_segments: list[Segment]) -> Segment:
@@ -418,7 +1026,7 @@ def _best_duplicate_segment(duplicates: list[Segment], all_segments: list[Segmen
 def _segment_quality_score(segment: Segment) -> int:
     meta = segment.meta_json or {}
     score = 0
-    if segment.arr_time and segment.dep_time and segment.arr_time > segment.dep_time:
+    if segment.arr_time and segment.dep_time and _segment_arr_time(segment) > _segment_dep_time(segment):
         score += 8
     if meta.get("source") != "subject":
         score += 4
@@ -441,7 +1049,7 @@ def _is_low_information_segment(segment: Segment) -> bool:
         meta.get("source") == "subject"
         or not segment.flight_number
         or not segment.airline
-        or segment.arr_time <= segment.dep_time
+        or _segment_arr_time(segment) <= _segment_dep_time(segment)
     )
 
 
@@ -452,7 +1060,7 @@ def _segments_can_dedupe(a: Segment, b: Segment) -> bool:
         return False
     if a.airline and b.airline and a.airline != b.airline and not _flight_numbers_compatible(a_number, b_number):
         return False
-    if abs(a.dep_time - b.dep_time) > timedelta(hours=24):
+    if abs(_segment_dep_time(a) - _segment_dep_time(b)) > timedelta(hours=24):
         return False
     return True
 
@@ -479,12 +1087,14 @@ def _same_pnr_neighbor_count(segment: Segment, all_segments: list[Segment]) -> i
     for other in all_segments:
         if other.id == segment.id or other.pnr != segment.pnr:
             continue
-        if abs(other.dep_time - segment.dep_time) <= timedelta(days=7):
+        if abs(_segment_dep_time(other) - _segment_dep_time(segment)) <= timedelta(days=7):
             count += 1
     return count
 
 
 def _merge_duplicate_segment(keep: Segment, duplicate: Segment) -> None:
+    _add_pnr_alias(keep, duplicate.pnr, reason="duplicate_segment")
+    _add_pnr_alias(duplicate, keep.pnr, reason="duplicate_segment")
     if duplicate.pnr and not keep.pnr:
         keep.pnr = duplicate.pnr
     if duplicate.airline and not keep.airline:
@@ -511,6 +1121,216 @@ def _merge_duplicate_segment(keep: Segment, duplicate: Segment) -> None:
     if duplicate_meta.get("enrichment") and "enrichment" not in meta:
         meta["enrichment"] = duplicate_meta["enrichment"]
     keep.meta_json = meta
+
+
+def _mark_duplicate_route_aliases(segments: list[Segment]) -> None:
+    route_day_groups: dict[tuple[str, str, object], list[Segment]] = {}
+    for segment in segments:
+        route_day_groups.setdefault(
+            (segment.dep_airport, segment.arr_airport, _segment_dep_time(segment).date()),
+            [],
+        ).append(segment)
+    for group in route_day_groups.values():
+        if len(group) <= 1:
+            continue
+        for segment in group:
+            for other in group:
+                if segment.id == other.id:
+                    continue
+                if not _segments_can_dedupe(segment, other):
+                    continue
+                if segment.pnr and other.pnr and segment.pnr != other.pnr:
+                    _add_pnr_alias(segment, other.pnr, reason="same_route_date")
+                    _add_booking_relationship(
+                        segment,
+                        {
+                            "type": "pnr_alias_same_trip",
+                            "pnr": other.pnr,
+                            "segment_id": other.id,
+                            "reason": "same_route_date",
+                        },
+                    )
+
+
+def _mark_near_duplicate_booking_replacements(segments: list[Segment]) -> None:
+    by_pnr: dict[str, list[Segment]] = {}
+    for segment in segments:
+        if segment.pnr:
+            by_pnr.setdefault(segment.pnr, []).append(segment)
+    pnrs = sorted(by_pnr)
+    for index, left_pnr in enumerate(pnrs):
+        for right_pnr in pnrs[index + 1 :]:
+            left = by_pnr[left_pnr]
+            right = by_pnr[right_pnr]
+            if _booking_similarity(left, right) < 0.75:
+                continue
+            left_time = _booking_first_source_time(left)
+            right_time = _booking_first_source_time(right)
+            if left_time and right_time and abs(left_time - right_time) > timedelta(hours=24):
+                continue
+            for segment in left:
+                _add_booking_relationship(
+                    segment,
+                    {
+                        "type": "similar_booking_candidate",
+                        "pnr": right_pnr,
+                        "reason": "same_dates_routes_near_source_time",
+                    },
+                )
+            for segment in right:
+                _add_booking_relationship(
+                    segment,
+                    {
+                        "type": "similar_booking_candidate",
+                        "pnr": left_pnr,
+                        "reason": "same_dates_routes_near_source_time",
+                    },
+                )
+
+
+def _mark_reused_pnr_candidates(segments: list[Segment]) -> None:
+    by_pnr: dict[str, list[Segment]] = {}
+    for segment in segments:
+        if segment.pnr:
+            by_pnr.setdefault(segment.pnr, []).append(segment)
+    for pnr, group in by_pnr.items():
+        trip_ids = {segment.trip_id for segment in group}
+        if len(trip_ids) <= 1:
+            continue
+        ordered = sorted(group, key=_segment_sort_key)
+        for previous, current in zip(ordered, ordered[1:]):
+            if previous.trip_id == current.trip_id:
+                continue
+            gap = _segment_dep_time(current) - _segment_arr_time(previous)
+            if gap < timedelta(days=30):
+                continue
+            _add_booking_relationship(
+                current,
+                {
+                    "type": "possible_reused_pnr_or_travel_credit",
+                    "pnr": pnr,
+                    "previous_segment_id": previous.id,
+                    "previous_trip_id": previous.trip_id,
+                    "gap_days": gap.days,
+                },
+            )
+
+
+def _mark_cancellation_replacements(
+    db: Session,
+    user_id: int,
+    canceled_pnr: str,
+    canceled_segments: list[Segment],
+    cancellation_time,
+) -> None:
+    if not canceled_segments:
+        return
+    candidates = (
+        db.query(Segment)
+        .join(Trip)
+        .filter(Trip.user_id == user_id, Segment.pnr != canceled_pnr)
+        .all()
+    )
+    for canceled in canceled_segments:
+        for candidate in candidates:
+            if not candidate.pnr or candidate.id == canceled.id:
+                continue
+            if not _segments_are_replacement_candidates(canceled, candidate):
+                continue
+            _add_booking_relationship(
+                candidate,
+                {
+                    "type": "surviving_replacement_candidate",
+                    "replaces_pnr": canceled_pnr,
+                    "canceled_segment_id": canceled.id,
+                    "cancellation_received_at": cancellation_time.isoformat() if cancellation_time else None,
+                },
+            )
+            _add_pnr_alias(candidate, canceled_pnr, reason="canceled_similar_booking")
+
+
+def _first_active_pnr_alias(segment: Segment, canceled_pnr: str) -> Optional[str]:
+    aliases = (segment.meta_json or {}).get("pnr_aliases") or []
+    for alias in aliases:
+        normalized = _normalize_pnr(alias)
+        if normalized and normalized != canceled_pnr:
+            return normalized
+    return None
+
+
+def _segments_are_replacement_candidates(canceled: Segment, candidate: Segment) -> bool:
+    if _segment_dep_time(canceled).date() != _segment_dep_time(candidate).date():
+        return False
+    if canceled.dep_airport != candidate.dep_airport or canceled.arr_airport != candidate.arr_airport:
+        return False
+    if abs(_segment_dep_time(canceled) - _segment_dep_time(candidate)) > timedelta(hours=4):
+        return False
+    canceled_number = _normalize_flight_number(canceled.flight_number)
+    candidate_number = _normalize_flight_number(candidate.flight_number)
+    return not canceled_number or not candidate_number or _flight_numbers_compatible(canceled_number, candidate_number)
+
+
+def _booking_similarity(left: list[Segment], right: list[Segment]) -> float:
+    if not left or not right:
+        return 0.0
+    left_keys = {_segment_similarity_key(segment) for segment in left}
+    right_keys = {_segment_similarity_key(segment) for segment in right}
+    overlap = len(left_keys & right_keys)
+    if not overlap:
+        # Same date/route with changed flight number is still a meaningful
+        # replacement signal.
+        left_route_keys = {_segment_route_day_key(segment) for segment in left}
+        right_route_keys = {_segment_route_day_key(segment) for segment in right}
+        overlap = len(left_route_keys & right_route_keys)
+        denominator = max(len(left_route_keys), len(right_route_keys), 1)
+    else:
+        denominator = max(len(left_keys), len(right_keys), 1)
+    return overlap / denominator
+
+
+def _segment_similarity_key(segment: Segment) -> tuple[str, str, object, Optional[str]]:
+    return (
+        segment.dep_airport,
+        segment.arr_airport,
+        _segment_dep_time(segment).date(),
+        _normalize_flight_number(segment.flight_number),
+    )
+
+
+def _segment_route_day_key(segment: Segment) -> tuple[str, str, object]:
+    return (segment.dep_airport, segment.arr_airport, _segment_dep_time(segment).date())
+
+
+def _booking_first_source_time(segments: list[Segment]):
+    times = [time for segment in segments if (time := _segment_source_received_at(segment))]
+    return min(times) if times else None
+
+
+def _add_pnr_alias(segment: Segment, alias: Optional[str], *, reason: str) -> None:
+    alias = _normalize_pnr(alias)
+    if not alias or alias == _normalize_pnr(segment.pnr):
+        return
+    meta = dict(segment.meta_json or {})
+    aliases = list(meta.get("pnr_aliases") or [])
+    if alias not in aliases:
+        aliases.append(alias)
+    meta["pnr_aliases"] = aliases
+    _add_booking_relationship_to_meta(meta, {"type": "pnr_alias", "pnr": alias, "reason": reason})
+    segment.meta_json = meta
+
+
+def _add_booking_relationship(segment: Segment, relationship: dict) -> None:
+    meta = dict(segment.meta_json or {})
+    _add_booking_relationship_to_meta(meta, relationship)
+    segment.meta_json = meta
+
+
+def _add_booking_relationship_to_meta(meta: dict, relationship: dict) -> None:
+    cleaned = {key: value for key, value in relationship.items() if value is not None}
+    relationships = list(meta.get("booking_relationships") or [])
+    if cleaned not in relationships:
+        relationships.append(cleaned)
+    meta["booking_relationships"] = relationships
 
 
 def _belongs_to_current_trip(
@@ -566,14 +1386,14 @@ def _segments_can_overlap_in_same_booking(current: list[Segment], segment: Segme
     return any(
         existing.dep_airport == segment.dep_airport
         and existing.arr_airport == segment.arr_airport
-        and existing.dep_time.date() == segment.dep_time.date()
+        and _segment_dep_time(existing).date() == _segment_dep_time(segment).date()
         for existing in current
     )
 
 
 def _infer_home_airport(segments: list[Segment]) -> Optional[str]:
     if segments:
-        ordered = sorted(segments, key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
+        ordered = sorted(segments, key=_segment_sort_key)
         if ordered[0].dep_airport == ordered[-1].arr_airport:
             return ordered[0].dep_airport
     counts: Counter[str] = Counter()
@@ -607,7 +1427,7 @@ def _select_reusable_trip_id(cluster: list[Segment], used_trip_ids: set[int]) ->
 def _trip_title_for_segments(segments: list[Segment], home_airport: Optional[str] = None) -> Optional[str]:
     if not segments:
         return None
-    ordered = sorted(segments, key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
+    ordered = sorted(segments, key=_segment_sort_key)
     origin = ordered[0].dep_airport
     final = ordered[-1].arr_airport
     title = _smart_trip_title(ordered, origin, final, home_airport=home_airport)
@@ -665,7 +1485,7 @@ def _meaningful_destination_airports(
 ) -> list[str]:
     main_destination = _main_destination(segments, origin, final, home_airport=home_airport)
     meaningful: list[str] = []
-    ordered = sorted(segments, key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
+    ordered = sorted(segments, key=_segment_sort_key)
 
     if home_airport and final == home_airport and origin != home_airport and len(ordered) == 1:
         return [origin]
@@ -675,7 +1495,7 @@ def _meaningful_destination_airports(
         if code == origin:
             continue
         next_segment = ordered[index + 1]
-        stopover = next_segment.dep_time - segment.arr_time
+        stopover = _segment_dep_time(next_segment) - _segment_arr_time(segment)
         if code == main_destination or stopover >= _EXTRA_DESTINATION_STOPOVER:
             _append_unique(meaningful, code)
 
@@ -788,9 +1608,9 @@ def _main_destination(
 ) -> Optional[str]:
     longest_stop_code: Optional[str] = None
     longest_stop = timedelta()
-    ordered = sorted(segments, key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
+    ordered = sorted(segments, key=_segment_sort_key)
     for previous, next_segment in zip(ordered, ordered[1:]):
-        gap = next_segment.dep_time - previous.arr_time
+        gap = _segment_dep_time(next_segment) - _segment_arr_time(previous)
         if gap > longest_stop and previous.arr_airport != origin:
             longest_stop = gap
             longest_stop_code = previous.arr_airport
@@ -858,7 +1678,7 @@ def _group_by_proximity(flights: list) -> list[list]:
         return []
     groups: list[list] = [[flights[0]]]
     for f in flights[1:]:
-        gap = f.dep_time - groups[-1][-1].arr_time
+        gap = _db_datetime(f.dep_time) - _db_datetime(groups[-1][-1].arr_time)
         if gap <= timedelta(hours=48):
             groups[-1].append(f)
         else:
@@ -868,8 +1688,8 @@ def _group_by_proximity(flights: list) -> list[list]:
 
 def _find_or_create_trip(db: Session, user_id: int, flights: list) -> Trip:
     """Return an existing Trip that spans the same time window or create one."""
-    start_ts = min(f.dep_time for f in flights)
-    end_ts = max(f.arr_time for f in flights)
+    start_ts = min(_db_datetime(f.dep_time) for f in flights)
+    end_ts = max(_db_datetime(f.arr_time) for f in flights)
 
     existing = (
         db.query(Trip)
@@ -905,9 +1725,13 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     if existing:
         allow_overwrite = _incoming_is_newer_or_equal(existing, flight)
         if allow_overwrite and _incoming_is_contained_partial_segment(existing, flight):
-            allow_overwrite = False
-        _refresh_existing_segment(db, existing, flight, allow_overwrite=allow_overwrite)
-        return "updated"
+            if existing.dep_airport == flight.dep_airport and existing.arr_airport != flight.arr_airport:
+                existing = None
+            else:
+                allow_overwrite = False
+        if existing:
+            _refresh_existing_segment(db, existing, flight, allow_overwrite=allow_overwrite)
+            return "updated"
 
     q = db.query(Segment).join(Trip).filter(
         Trip.user_id == user_id,
@@ -927,6 +1751,22 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     existing = q.first()
     if existing:
         _refresh_existing_segment(db, existing, flight)
+        return "updated"
+
+    existing = _find_unique_trip_flight_segment(
+        db,
+        trip_id=trip_id,
+        dep_time=dep_time,
+        airline=airline,
+        flight_number=flight_number,
+    )
+    if existing:
+        _refresh_existing_segment(
+            db,
+            existing,
+            flight,
+            allow_overwrite=not _segment_has_nonstop_evidence(existing),
+        )
         return "updated"
 
     distance_km, geom = _segment_geometry(db, flight.dep_airport, flight.arr_airport)
@@ -949,6 +1789,28 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     db.add(seg)
     db.flush()
     return "inserted"
+
+
+def _find_unique_trip_flight_segment(
+    db: Session,
+    *,
+    trip_id: int,
+    dep_time,
+    airline: Optional[str],
+    flight_number: Optional[str],
+) -> Optional[Segment]:
+    if not dep_time:
+        return None
+    q = db.query(Segment).filter(Segment.trip_id == trip_id, Segment.dep_time == dep_time)
+    if airline is not None:
+        q = q.filter(Segment.airline == airline)
+    else:
+        q = q.filter(Segment.airline.is_(None))
+    if flight_number is not None:
+        q = q.filter(Segment.flight_number == flight_number)
+    else:
+        q = q.filter(Segment.flight_number.is_(None))
+    return q.first()
 
 
 def _find_supersedable_segment(db: Session, user_id: int, flight) -> Optional[Segment]:
@@ -974,7 +1836,8 @@ def _find_supersedable_segment(db: Session, user_id: int, flight) -> Optional[Se
         if segment.dep_airport == flight.dep_airport and segment.arr_airport == flight.arr_airport
     ]
     if route_matches:
-        return min(route_matches, key=lambda segment: abs(segment.dep_time - _db_datetime(flight.dep_time)))
+        incoming_dep = _db_datetime(flight.dep_time)
+        return min(route_matches, key=lambda segment: abs(_db_datetime(segment.dep_time) - incoming_dep))
 
     return None
 
@@ -998,7 +1861,9 @@ def _incoming_is_contained_partial_segment(segment: Segment, flight) -> bool:
     incoming_arr = _db_datetime(flight.arr_time)
     if not incoming_dep or not incoming_arr:
         return False
-    existing_duration = segment.arr_time - segment.dep_time
+    segment_dep = _db_datetime(segment.dep_time)
+    segment_arr = _db_datetime(segment.arr_time)
+    existing_duration = segment_arr - segment_dep
     incoming_duration = incoming_arr - incoming_dep
     if incoming_duration >= existing_duration:
         return False
@@ -1012,11 +1877,11 @@ def _incoming_is_contained_partial_segment(segment: Segment, flight) -> bool:
     if not route_changed or not (shares_arrival or shares_departure):
         return False
 
-    if incoming_dep >= segment.dep_time and incoming_arr <= segment.arr_time:
+    if incoming_dep >= segment_dep and incoming_arr <= segment_arr:
         return True
-    if shares_arrival and incoming_dep > segment.dep_time + timedelta(hours=2):
+    if shares_arrival and incoming_dep > segment_dep + timedelta(hours=2):
         return True
-    if shares_departure and incoming_arr < segment.arr_time - timedelta(hours=2):
+    if shares_departure and incoming_arr < segment_arr - timedelta(hours=2):
         return True
     return False
 
@@ -1035,6 +1900,10 @@ def _refresh_existing_segment(db: Session, segment: Segment, flight, *, allow_ov
     incoming_pnr = _normalize_pnr(flight.pnr)
     if incoming_pnr and not segment.pnr:
         segment.pnr = incoming_pnr
+    elif incoming_pnr and segment.pnr and incoming_pnr != _normalize_pnr(segment.pnr):
+        _add_pnr_alias(segment, incoming_pnr, reason="matched_existing_segment")
+    for alias in getattr(flight, "pnr_aliases", []) or []:
+        _add_pnr_alias(segment, alias, reason="source_message_alias")
     incoming_flight_number = _normalize_flight_number(flight.flight_number)
     incoming_airline = _normalize_airline(flight.airline, incoming_flight_number)
     dep_time = _db_datetime(flight.dep_time)
@@ -1046,15 +1915,17 @@ def _refresh_existing_segment(db: Session, segment: Segment, flight, *, allow_ov
     if allow_overwrite and flight.arr_airport and flight.arr_airport != segment.arr_airport:
         segment.arr_airport = flight.arr_airport
         route_changed = True
-    if allow_overwrite and dep_time and dep_time != segment.dep_time:
+    segment_dep = _db_datetime(segment.dep_time)
+    segment_arr = _db_datetime(segment.arr_time)
+    if allow_overwrite and dep_time and dep_time != segment_dep:
         segment.dep_time = dep_time
     if (
         arr_time
-        and arr_time != segment.arr_time
+        and arr_time != segment_arr
         and (
             allow_overwrite
-            or not segment.arr_time
-            or (segment.arr_time <= segment.dep_time and arr_time > dep_time)
+            or not segment_arr
+            or (segment_arr <= segment_dep and arr_time > dep_time)
         )
     ):
         segment.arr_time = arr_time
@@ -1071,7 +1942,11 @@ def _refresh_existing_segment(db: Session, segment: Segment, flight, *, allow_ov
         meta["confidence"] = flight.confidence
     if getattr(flight, "source_received_at", None) is not None:
         meta["source_received_at"] = flight.source_received_at.isoformat()
+    if getattr(flight, "nonstop", False):
+        meta["nonstop"] = True
     segment.meta_json = meta
+    for alias in getattr(flight, "pnr_aliases", []) or []:
+        _add_pnr_alias(segment, alias, reason="source_message_alias")
     enrich_segment(segment, include_weather=False)
 
 
@@ -1171,4 +2046,18 @@ def _segment_meta(flight) -> dict:
         meta["enrichment"] = {"aircraft": aircraft}
     if getattr(flight, "source_received_at", None) is not None:
         meta["source_received_at"] = flight.source_received_at.isoformat()
+    if getattr(flight, "nonstop", False):
+        meta["nonstop"] = True
+    aliases = []
+    for alias in getattr(flight, "pnr_aliases", []) or []:
+        normalized = _normalize_pnr(alias)
+        if normalized and normalized != _normalize_pnr(getattr(flight, "pnr", None)) and normalized not in aliases:
+            aliases.append(normalized)
+    if aliases:
+        meta["pnr_aliases"] = aliases
+        for alias in aliases:
+            _add_booking_relationship_to_meta(
+                meta,
+                {"type": "pnr_alias", "pnr": alias, "reason": "source_message_alias"},
+            )
     return meta

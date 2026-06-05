@@ -5,24 +5,26 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from typing import Optional
+from typing import Any, Optional
 
 from bs4 import BeautifulSoup
 from rapidfuzz import fuzz
 
 from ..models import MessageStatus
+from .parser_preprocess import prepare_parser_text
 
 logger = logging.getLogger(__name__)
-PARSER_VERSION = 18
+PARSER_VERSION = 22
 
 # ──────────────────────────── regex patterns ────────────────────────────────
 
-# Two-letter airline IATA code followed immediately or with a space by 1-4 digits
-_AIRLINE_FLIGHT = re.compile(r"\b([A-Z]{2})\s*(\d{1,4})\b")
+# Two-character airline IATA code followed immediately or with a space by 1-4 digits.
+_AIRLINE_FLIGHT = re.compile(r"\b([A-Z0-9]{2})\s*(\d{1,4})\b")
 # Three-letter IATA airport code (all-uppercase word)
 _AIRPORT = re.compile(r"\b([A-Z]{3})\b")
 # Six-char alphanumeric PNR (uppercase)
@@ -42,7 +44,7 @@ _PNR_LABEL = re.compile(
         airline\ confirmation|
         pnr
     )
-    (?:\s+is)?[:\s#-]*
+    (?:\s+is)?[:\s#*\-]*
     ([A-Z0-9]{5,8})
     \b
     """,
@@ -57,6 +59,19 @@ _CAPITAL_ONE_AIRLINE_CONFIRMATION = re.compile(
         |
         (?:American\s+Airlines|United|ANA|EVA\s+Air|Iberia|Southwest|AirAsia|Volaris|Aeromexico)
         \s+confirmation\s+code
+    )
+    \s*[:#-]?\s*
+    ([A-Z0-9]{5,8})
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_AIRLINE_CONFIRMATION_LABEL = re.compile(
+    r"""
+    \b
+    (?:
+        airline\ confirmation(?:\s+\#)?|
+        (?:UAL|United(?:\s+Airlines)?|American(?:\s+Airlines)?|Southwest(?:\s+Airlines)?|Delta(?:\s+Air\s+Lines|Airlines)?)\s+record\ locator
     )
     \s*[:#-]?\s*
     ([A-Z0-9]{5,8})
@@ -96,7 +111,7 @@ _PNR_STOPWORDS = _NOT_AIRPORTS | {
     "PLEASE", "TRAVEL", "ONLINE", "UNITED", "THANKS", "RECEIPT", "TICKET",
     "FLIGHT", "CHANGE", "CANCEL", "REWARD", "MOBILE", "EMAILS", "NOTICE",
     "CODES", "BELOW", "NUMBER", "CHECK", "AMERICAN", "AIRLINES", "CAPITAL",
-    "DENVER", "MANAGUA", "CONFIRMED", "CONFIMED",
+    "DENVER", "MANAGUA", "CONFIRMED", "CONFIMED", "EMAIL", "LETTER", "POLICY", "FORYOUR",
 }
 
 # Valid IATA airport codes from airportsdata — the primary whitelist.
@@ -1111,6 +1126,22 @@ _V5_SOUTHWEST_SPARSE_TRIP = re.compile(
     """,
     re.IGNORECASE | re.VERBOSE,
 )
+_SHAPE_LIFEMILES_BLOCK = re.compile(
+    r"""
+    \bFlight\s+\d+\s+
+    (?P<airline>[A-Z0-9]{2})\s*(?P<number>\d{1,4}[A-Z]?)\b
+    .{0,500}?
+    \((?P<dep_airport>[A-Z]{3})\)\s*[-–—]\s*
+    [A-Za-z .,'/-]+?\((?P<arr_airport>[A-Z]{3})\)
+    .{0,300}?
+    Departure:\s*(?P<dep_date>[A-Za-z]+,?\s+\d{1,2}\s*(?:st|nd|rd|th)?,?\s+\d{4})
+    \s+(?P<dep_time>\d{1,2}:\d{2})
+    .{0,240}?
+    Arrival:\s*(?P<arr_date>[A-Za-z]+,?\s+\d{1,2}\s*(?:st|nd|rd|th)?,?\s+\d{4})
+    \s+(?P<arr_time>\d{1,2}:\d{2})
+    """,
+    re.IGNORECASE | re.VERBOSE | re.DOTALL,
+)
 
 
 # ──────────────────────────── data classes ──────────────────────────────────
@@ -1129,6 +1160,7 @@ class ParsedFlight:
     confidence: Optional[int] = None
     aircraft: Optional[dict] = None
     source_received_at: Optional[datetime] = None
+    pnr_aliases: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -1168,6 +1200,7 @@ def parse_email(
     received_at: Optional[datetime] = None,
     subject: Optional[str] = None,
     from_email: Optional[str] = None,
+    diagnostics: Optional[dict[str, Any]] = None,
 ) -> ParseResult:
     """Parse email content and return the best available ParseResult.
 
@@ -1180,9 +1213,12 @@ def parse_email(
     if _is_minimal_justfly_confirmation(raw_context):
         return ParseResult()
 
+    stage_started = time.perf_counter()
     # 1. JSON-LD (most reliable)
     if html:
         flights = extract_jsonld_flights(html)
+        if diagnostics is not None:
+            diagnostics["jsonld_seconds"] = round(time.perf_counter() - stage_started, 6)
         if flights:
             if not _jsonld_should_yield_to_text(flights, subject=subject, from_email=from_email):
                 _stamp_source_received_at(flights, received_at)
@@ -1193,8 +1229,11 @@ def parse_email(
                     status=check_identity(passenger_name, user_name, aliases),
                     source="jsonld",
                 )
+    elif diagnostics is not None:
+        diagnostics["jsonld_seconds"] = 0.0
 
     # 2. ICS attachments
+    stage_started = time.perf_counter()
     for filename, data in attachments:
         try:
             flights = extract_ics_flights(data.decode("utf-8", errors="replace"))
@@ -1209,17 +1248,28 @@ def parse_email(
                 )
         except Exception as exc:
             logger.debug("ICS parse failed for %s: %s", filename, exc)
+    if diagnostics is not None:
+        diagnostics["ics_seconds"] = round(time.perf_counter() - stage_started, 6)
 
     # 3. Heuristic (best-effort)
-    html_text = _html_to_parser_text(html) if html else ""
-    base_text = plain_text or html_text
-    table_text = _html_table_text_only(html) if html and plain_text else ""
-    if html:
-        table_text = table_text or ""
+    stage_started = time.perf_counter()
+    text_bundle = prepare_parser_text(
+        html=html or "",
+        plain_text=plain_text or "",
+        subject=subject,
+        from_email=from_email,
+    )
+    if diagnostics is not None:
+        diagnostics["preprocess_seconds"] = round(time.perf_counter() - stage_started, 6)
+        diagnostics["preprocess_stages"] = text_bundle.timings
+        diagnostics["preprocess_stats"] = text_bundle.stats
+        diagnostics["is_forwarded"] = text_bundle.is_forwarded
+    base_text = text_bundle.forwarded_text or text_bundle.clean_text
     header_context = "\n".join(part for part in [from_email, subject] if part)
-    v5_parts = [header_context, base_text, table_text]
-    if html_text and html_text != base_text:
-        v5_parts.append(html_text)
+    compact_parser_text = text_bundle.evidence_text or text_bundle.table_text or text_bundle.clean_text
+    v5_parts = [header_context, compact_parser_text]
+    if text_bundle.clean_text and text_bundle.clean_text != compact_parser_text:
+        v5_parts.append(text_bundle.clean_text)
     v5_text = "\n".join(part for part in v5_parts if part)
     if _is_minimal_airasia_confirmation(v5_text):
         # Sparse-body AirAsia confirmations sometimes still encode the full
@@ -1238,12 +1288,64 @@ def parse_email(
                 )
         return ParseResult()
     if v5_text:
+        pnr = _extract_pnr(v5_text.upper())
+        pnr_aliases = _extract_pnr_aliases(v5_text.upper(), primary=pnr)
+        stage_started = time.perf_counter()
+        shape_flights = extract_shape_flights(v5_text, pnr=pnr, received_at=received_at)
+        _attach_pnr_aliases(shape_flights, pnr_aliases)
+        if diagnostics is not None:
+            diagnostics["shape_seconds"] = round(time.perf_counter() - stage_started, 6)
+            diagnostics["shape_count"] = len(shape_flights)
+        shape_covers_message = bool(shape_flights) and not _should_run_legacy_recall_fallback(v5_text, shape_flights)
+        if diagnostics is not None:
+            diagnostics["shape_covers_message"] = shape_covers_message
+        if shape_covers_message:
+            _stamp_source_received_at(shape_flights, received_at)
+            passenger_name = shape_flights[0].passenger_name
+            return ParseResult(
+                flights=shape_flights,
+                passenger_name=passenger_name,
+                status=check_identity(passenger_name, user_name, aliases),
+                source="shape",
+            )
+        stage_started = time.perf_counter()
         v5_flights = extract_v5_flights(
             v5_text,
-            pnr=_extract_pnr(v5_text.upper()),
+            pnr=pnr,
             received_at=received_at,
         )
+        legacy_used = False
+        legacy_seconds = 0.0
+        if _should_run_legacy_recall_fallback(v5_text, v5_flights):
+            legacy_started = time.perf_counter()
+            legacy_text = _legacy_parser_text(
+                html=html or "",
+                plain_text=plain_text or "",
+                header_context=header_context,
+            )
+            if legacy_text and legacy_text != v5_text:
+                legacy_flights = extract_v5_flights(
+                    legacy_text,
+                    pnr=_extract_pnr(legacy_text.upper()) or pnr,
+                    received_at=received_at,
+                )
+                _attach_pnr_aliases(
+                    legacy_flights,
+                    _extract_pnr_aliases(legacy_text.upper(), primary=legacy_flights[0].pnr if legacy_flights else pnr),
+                )
+                if len(legacy_flights) > len(v5_flights):
+                    v5_flights = _dedupe_flights([*v5_flights, *legacy_flights])
+            legacy_seconds = time.perf_counter() - legacy_started
+            legacy_used = True
+        if shape_flights:
+            v5_flights = _dedupe_flights([*shape_flights, *v5_flights])
+        if diagnostics is not None:
+            diagnostics["legacy_recall_seconds"] = round(legacy_seconds, 6)
+            diagnostics["legacy_recall_used"] = legacy_used
+        if diagnostics is not None:
+            diagnostics["v5_seconds"] = round(time.perf_counter() - stage_started, 6)
         if v5_flights:
+            _attach_pnr_aliases(v5_flights, pnr_aliases)
             _stamp_source_received_at(v5_flights, received_at)
             passenger_name = v5_flights[0].passenger_name
             return ParseResult(
@@ -1252,14 +1354,25 @@ def parse_email(
                 status=check_identity(passenger_name, user_name, aliases),
                 source="heuristic",
             )
+    elif diagnostics is not None:
+        diagnostics["shape_seconds"] = 0.0
+        diagnostics["shape_count"] = 0
+        diagnostics["v5_seconds"] = 0.0
 
     text_parts = [header_context, base_text]
-    if html_text and html_text != base_text:
-        text_parts.append(html_text)
+    if text_bundle.evidence_text and text_bundle.evidence_text != base_text:
+        text_parts.append(text_bundle.evidence_text)
     text = "\n".join(part for part in text_parts if part)
     if text:
+        stage_started = time.perf_counter()
         flights = extract_heuristic_flights(text, received_at=received_at)
+        if diagnostics is not None:
+            diagnostics["heuristic_seconds"] = round(time.perf_counter() - stage_started, 6)
         if flights:
+            _attach_pnr_aliases(
+                flights,
+                _extract_pnr_aliases(text.upper(), primary=flights[0].pnr if flights else None),
+            )
             _stamp_source_received_at(flights, received_at)
             passenger_name = flights[0].passenger_name
             return ParseResult(
@@ -1268,6 +1381,8 @@ def parse_email(
                 status=check_identity(passenger_name, user_name, aliases),
                 source="heuristic",
             )
+    elif diagnostics is not None:
+        diagnostics["heuristic_seconds"] = 0.0
 
     # Last resort: some confirmation emails (AirAsia and similar carriers)
     # encode the entire itinerary in the subject line and leave the body too
@@ -1292,6 +1407,18 @@ def _stamp_source_received_at(flights: list[ParsedFlight], received_at: Optional
         return
     for flight in flights:
         flight.source_received_at = received_at
+
+
+def _attach_pnr_aliases(flights: list[ParsedFlight], aliases: list[str]) -> None:
+    if not aliases:
+        return
+    for flight in flights:
+        existing = list(getattr(flight, "pnr_aliases", []) or [])
+        primary = (flight.pnr or "").upper()
+        for alias in aliases:
+            if alias != primary and alias not in existing:
+                existing.append(alias)
+        flight.pnr_aliases = existing
 
 
 def _extract_subject_itinerary_flight(
@@ -1722,6 +1849,1004 @@ def _extract_itinerary_block_flights(
     return _dedupe_flights(flights)
 
 
+def extract_shape_flights(
+    text: str,
+    *,
+    pnr: Optional[str],
+    received_at: Optional[datetime],
+) -> list[ParsedFlight]:
+    """High-confidence generic shape extractors that avoid broad regex passes."""
+    text = _unwrap_forwarded(text)
+    flights: list[ParsedFlight] = []
+    flights.extend(_shape_labeled_route_time_blocks(text, pnr=pnr, received_at=received_at))
+    flights.extend(_shape_delta_receipt_table(text, pnr=pnr))
+    flights.extend(_shape_numbered_flight_cards(text, pnr=pnr))
+    flights.extend(_shape_eticket_flight_information_table(text, pnr=pnr))
+    flights.extend(_shape_column_itinerary_table(text, pnr=pnr, received_at=received_at))
+    flights.extend(_shape_airline_receipt_vertical_rows(text, pnr=pnr))
+    flights.extend(_shape_checkin_route_blocks(text, pnr=pnr))
+    flights.extend(_shape_vertical_route_date_time_blocks(text, pnr=pnr))
+    flights.extend(_shape_labeled_depart_arrive_segments(text, pnr=pnr))
+    flights.extend(_shape_ota_vertical_itinerary(text, pnr=pnr))
+    flights.extend(_shape_compact_airline_flight_rows(text, pnr=pnr, received_at=received_at))
+    flights.extend(_shape_southwest_itinerary_blocks(text, pnr=pnr))
+    flights.extend(_shape_jetblue_compact_itinerary(text, pnr=pnr, received_at=received_at))
+    flights.extend(_shape_spirit_compact_itinerary(text, pnr=pnr))
+    flights.extend(_shape_allegiant_labeled_itinerary(text, pnr=pnr))
+    flights.extend(_shape_lifemiles_flight_details(text, pnr=pnr))
+    flights.extend(_shape_vertical_itinerary_lines(text, pnr=pnr, received_at=received_at))
+    flights.extend(_shape_ota_multi_confirmation(text, fallback_pnr=pnr, received_at=received_at))
+    return _dedupe_flights(flights)
+
+
+def _should_run_legacy_recall_fallback(text: str, flights: list[ParsedFlight]) -> bool:
+    seen_numbers: set[str] = set()
+    for match in _AIRLINE_FLIGHT.finditer(text.upper()):
+        airline = match.group(1)
+        number = match.group(2).upper()
+        if airline not in _KNOWN_AIRLINES:
+            continue
+        if number.startswith("0") and len(number) <= 2:
+            continue
+        seen_numbers.add(f"{airline}{number}")
+        if len(seen_numbers) >= len(flights) + 2:
+            return True
+    for match in re.finditer(r"\bFlight\s+(\d{3,4}[A-Z]?)\b", text, re.IGNORECASE):
+        seen_numbers.add(match.group(1).upper())
+        if len(seen_numbers) >= len(flights) + 2:
+            return True
+    return not flights and bool(seen_numbers)
+
+
+def _legacy_parser_text(*, html: str, plain_text: str, header_context: str) -> str:
+    html_text = _html_to_parser_text(html) if html else ""
+    base_text = plain_text or html_text
+    table_text = _html_table_text_only(html) if html and plain_text else ""
+    parts = [header_context, base_text, table_text]
+    if html_text and html_text != base_text:
+        parts.append(html_text)
+    return "\n".join(part for part in parts if part)
+
+
+def _shape_labeled_route_time_blocks(
+    text: str,
+    *,
+    pnr: Optional[str],
+    received_at: Optional[datetime],
+) -> list[ParsedFlight]:
+    flights: list[ParsedFlight] = []
+    frontier_like = re.compile(
+        r"\b(?:DEPARTING|RETURNING)?\s*FLIGHT\s+(?P<number>\d{1,4}[A-Z]?)\s+"
+        r"(?P<dep_place>[^|\n]{2,80}?)\s*\((?P<dep_airport>[A-Z]{3})\)\s+to\s+"
+        r"(?P<arr_place>[^|\n]{2,80}?)\s*\((?P<arr_airport>[A-Z]{3})\)\s+"
+        r"Depart:\s*(?P<dep_date>\d{1,2}/\d{1,2}/\d{2,4})\s+(?P<dep_time>\d{1,2}:\d{2}\s*[AP]M)\s*\|\s*"
+        r"Arrive:\s*(?P<arr_date>\d{1,2}/\d{1,2}/\d{2,4})\s+(?P<arr_time>\d{1,2}:\d{2}\s*[AP]M)",
+        re.IGNORECASE,
+    )
+    for match in frontier_like.finditer(text):
+        dep_airport = match.group("dep_airport").upper()
+        arr_airport = match.group("arr_airport").upper()
+        if not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_dt = _parse_date_time(match.group("dep_date"), match.group("dep_time"))
+        arr_dt = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
+        if not dep_dt or not arr_dt:
+            continue
+        airline = _infer_airline_from_context(text[: match.start()] + text[match.end() : match.end() + 300]) or "F9"
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{match.group('number').upper()}",
+                pnr=pnr,
+                source="shape_labeled_route_time_blocks",
+                confidence=94,
+            )
+        )
+
+    delta_like = re.compile(
+        r"\bDEPARTURE\s+(?P<dep_airport>[A-Z]{3})\s+"
+        r"(?P<dep_time>\d{1,2}:\d{2}\s*[AP]M)\s+"
+        r"(?P<dep_date>(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+[A-Z][a-z]{2,8}\.?\s+\d{1,2})\s+"
+        r"(?P<flight>[A-Z0-9]{2}\s*\d{1,4}[A-Z]?)\s+DESTINATION\s+"
+        r"(?P<arr_airport>[A-Z]{3})\s+(?P<arr_time>\d{1,2}:\d{2}\s*[AP]M)\s+"
+        r"(?P<arr_date>(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+[A-Z][a-z]{2,8}\.?\s+\d{1,2})",
+        re.IGNORECASE,
+    )
+    for match in delta_like.finditer(text):
+        dep_airport = match.group("dep_airport").upper()
+        arr_airport = match.group("arr_airport").upper()
+        if not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_dt = _parse_partial_dow_month_day_time(match.group("dep_date"), match.group("dep_time"), received_at)
+        arr_dt = _parse_partial_dow_month_day_time(match.group("arr_date"), match.group("arr_time"), received_at)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flight_number = re.sub(r"\s+", "", match.group("flight").upper())
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=flight_number[:2],
+                flight_number=flight_number,
+                pnr=pnr,
+                source="shape_labeled_route_time_blocks",
+                confidence=94,
+            )
+        )
+    return flights
+
+
+def _shape_delta_receipt_table(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    if "delta" not in text.lower() or "flight receipt" not in text.lower():
+        return []
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        date_match = re.fullmatch(r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+\d{1,2}[A-Z]{3}", line, re.IGNORECASE)
+        if not date_match or index + 8 >= len(lines):
+            continue
+        flight_match = re.fullmatch(r"DELTA\s+(\d{1,4}[A-Z]?)", lines[index + 3], re.IGNORECASE)
+        if not flight_match:
+            continue
+        dep_airport = _airport_code_from_place(lines[index + 5])
+        arr_airport = _airport_code_from_place(lines[index + 7])
+        if not dep_airport or not arr_airport or not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_dt = _parse_delta_compact_date_time(line, lines[index + 6], text)
+        arr_dt = _parse_delta_compact_date_time(line, lines[index + 8], text)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline="DL",
+                flight_number=f"DL{flight_match.group(1).upper()}",
+                pnr=pnr,
+                source="shape_delta_receipt_table",
+                confidence=95,
+            )
+        )
+    return flights
+
+
+def _parse_delta_compact_date_time(date_part: str, time_part: str, context: str) -> Optional[datetime]:
+    date_match = re.search(r"(\d{1,2})([A-Z]{3})", date_part.upper())
+    if not date_match:
+        return None
+    year_match = re.search(r"\b\d{1,2}[A-Z]{3}(\d{2})\b", context.upper())
+    year = 2000 + int(year_match.group(1)) if year_match else _infer_year_from_text(context)
+    if not year:
+        return None
+    clean_time = re.sub(r"\s+", "", time_part.strip().upper())
+    for fmt in ("%d%b%Y %I:%M%p",):
+        try:
+            return datetime.strptime(
+                f"{date_match.group(1)}{date_match.group(2)}{year} {clean_time}",
+                fmt,
+            ).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _shape_eticket_flight_information_table(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    if "flight information" not in text.lower() or "departure city and time" not in text.lower():
+        return []
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        if not re.fullmatch(r"[A-Z][a-z]{2},\s+\d{1,2}[A-Z]{3}\d{2}", line):
+            continue
+        if index + 8 >= len(lines):
+            continue
+        flight_match = re.fullmatch(r"([A-Z0-9]{2})(\d{1,4}[A-Z]?)", lines[index + 1].strip().upper())
+        if not flight_match or flight_match.group(1) not in _KNOWN_AIRLINES:
+            continue
+        dep_airport = _airport_from_parenthesized_line(lines[index + 4])
+        arr_airport = _airport_from_parenthesized_line(lines[index + 7])
+        dep_time = lines[index + 5]
+        arr_time = lines[index + 8]
+        if not dep_airport or not arr_airport or not _parse_time_only(dep_time) or not _parse_time_only(arr_time):
+            continue
+        if not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_dt = _parse_compact_dow_day_month_year_time(line, dep_time)
+        arr_dt = _parse_compact_dow_day_month_year_time(line, arr_time)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        airline = flight_match.group(1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{flight_match.group(2).upper()}",
+                pnr=pnr,
+                source="shape_eticket_flight_information_table",
+                confidence=95,
+            )
+        )
+    return flights
+
+
+def _shape_numbered_flight_cards(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        match = re.fullmatch(
+            r"Flight\s+\d+(?:\s+of\s+\d+)?\s+([A-Z0-9]{2})(\d{1,4}[A-Z]?)",
+            line,
+            re.IGNORECASE,
+        )
+        if not match or match.group(1).upper() not in _KNOWN_AIRLINES:
+            continue
+        if index + 7 >= len(lines) or not lines[index + 1].lower().startswith("class:"):
+            continue
+        dep_date = lines[index + 2]
+        arr_date = lines[index + 3]
+        dep_time = lines[index + 4]
+        arr_time = lines[index + 5]
+        dep_airport = _airport_from_parenthesized_line(lines[index + 6])
+        arr_airport = _airport_from_parenthesized_line(lines[index + 7])
+        if not dep_airport or not arr_airport or not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_dt = _parse_date_time(dep_date, dep_time)
+        arr_dt = _parse_date_time(arr_date, arr_time)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        airline = match.group(1).upper()
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{match.group(2).upper()}",
+                pnr=pnr,
+                source="shape_numbered_flight_cards",
+                confidence=95,
+            )
+        )
+    return flights
+
+
+def _airport_from_parenthesized_line(value: str) -> Optional[str]:
+    match = re.search(r"\(([A-Z]{3})(?:\s*[-/][^)]+)?\)", value.upper())
+    if not match:
+        return None
+    code = match.group(1)
+    if _VALID_IATA and code not in _VALID_IATA:
+        return None
+    return code
+
+
+def _shape_column_itinerary_table(
+    text: str,
+    *,
+    pnr: Optional[str],
+    received_at: Optional[datetime],
+) -> list[ParsedFlight]:
+    fallback_year = _infer_year_from_text(text)
+    if not (received_at or fallback_year) or "flt #" not in text.lower() or "route" not in text.lower():
+        return []
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        if not re.fullmatch(
+            r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+[A-Z][a-z]{2,8}\.?\s+\d{1,2}",
+            line,
+            re.IGNORECASE,
+        ):
+            continue
+        if index + 4 >= len(lines):
+            continue
+        dep_time = lines[index + 1]
+        arr_time = lines[index + 2]
+        flight_match = re.fullmatch(r"([A-Z0-9]{2})\s*(\d{1,4}[A-Z]?)", lines[index + 3], re.IGNORECASE)
+        route_match = re.fullmatch(r"([A-Z]{3})\s+to\s+([A-Z]{3})", lines[index + 4], re.IGNORECASE)
+        if not flight_match or not route_match:
+            continue
+        airline = flight_match.group(1).upper()
+        dep_airport = route_match.group(1).upper()
+        arr_airport = route_match.group(2).upper()
+        if airline not in _KNOWN_AIRLINES or not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_dt = _parse_short_date_time(line, dep_time, received_at) if received_at else None
+        arr_dt = _parse_short_date_time(line, arr_time, received_at) if received_at else None
+        if (not dep_dt or not arr_dt) and fallback_year:
+            dep_dt = _parse_abbrev_month_day_time(line, dep_time, fallback_year)
+            arr_dt = _parse_abbrev_month_day_time(line, arr_time, fallback_year)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{flight_match.group(2).upper()}",
+                pnr=pnr,
+                source="shape_column_itinerary_table",
+                confidence=94,
+            )
+        )
+    return _merge_same_flight_continuations(_dedupe_flights(flights))
+
+
+def _merge_same_flight_continuations(flights: list[ParsedFlight]) -> list[ParsedFlight]:
+    merged: list[ParsedFlight] = []
+    for flight in sorted(flights, key=lambda item: item.dep_time):
+        if (
+            merged
+            and merged[-1].flight_number
+            and flight.flight_number == merged[-1].flight_number
+            and flight.dep_airport == merged[-1].arr_airport
+            and flight.dep_time >= merged[-1].arr_time
+            and flight.dep_time - merged[-1].arr_time <= timedelta(hours=3)
+        ):
+            merged[-1] = ParsedFlight(
+                dep_airport=merged[-1].dep_airport,
+                arr_airport=flight.arr_airport,
+                dep_time=merged[-1].dep_time,
+                arr_time=flight.arr_time,
+                airline=merged[-1].airline,
+                flight_number=merged[-1].flight_number,
+                pnr=merged[-1].pnr or flight.pnr,
+                passenger_name=merged[-1].passenger_name or flight.passenger_name,
+                source=merged[-1].source,
+                confidence=max(merged[-1].confidence or 0, flight.confidence or 0),
+            )
+            continue
+        merged.append(flight)
+    return merged
+
+
+def _shape_airline_receipt_vertical_rows(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        if not re.fullmatch(
+            r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+"
+            r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},\s+\d{4}",
+            line,
+            re.IGNORECASE,
+        ):
+            continue
+        if index + 8 >= len(lines):
+            continue
+        dep_airport = _airport_token_from_line(lines[index + 1])
+        dep_time = lines[index + 3]
+        flight_index = index + 4
+        flight_match = re.fullmatch(r"([A-Z0-9]{2})\s*(\d{1,4}[A-Z]?)", lines[flight_index], re.IGNORECASE)
+        if not flight_match:
+            continue
+        arr_index = flight_index + 1
+        while arr_index < min(len(lines), flight_index + 5) and not _airport_token_from_line(lines[arr_index]):
+            arr_index += 1
+        if arr_index + 2 >= len(lines):
+            continue
+        arr_airport = _airport_token_from_line(lines[arr_index])
+        arr_time = lines[arr_index + 2]
+        airline = flight_match.group(1).upper()
+        if not dep_airport or not arr_airport or airline not in _KNOWN_AIRLINES:
+            continue
+        if not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_dt = _parse_date_time(line, dep_time)
+        arr_dt = _parse_date_time(line, arr_time)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{flight_match.group(2).upper()}",
+                pnr=pnr,
+                source="shape_airline_receipt_vertical_rows",
+                confidence=95,
+            )
+        )
+    return flights
+
+
+def _shape_checkin_route_blocks(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        route_match = re.fullmatch(r"([A-Z]{3})\s+to\s+([A-Z]{3})", line, re.IGNORECASE)
+        if not route_match or index + 2 >= len(lines):
+            continue
+        dep_airport = route_match.group(1).upper()
+        arr_airport = route_match.group(2).upper()
+        if not _valid_route(dep_airport, arr_airport):
+            continue
+        date_line = lines[index + 1]
+        if not re.fullmatch(
+            r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+"
+            r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},\s+\d{4}",
+            date_line,
+            re.IGNORECASE,
+        ):
+            continue
+        times: list[str] = []
+        flight_match = None
+        for scan_index in range(index + 2, min(len(lines), index + 10)):
+            times.extend(
+                re.findall(
+                    r"\b\d{1,2}:\d{2}\s*(?:AM|PM|a\.m\.|p\.m\.|am|pm)\b",
+                    lines[scan_index],
+                    re.IGNORECASE,
+                )
+            )
+            flight_match = flight_match or re.fullmatch(
+                r"([A-Z0-9]{2})\s*(\d{1,4}[A-Z]?)",
+                lines[scan_index],
+                re.IGNORECASE,
+            )
+        if len(times) < 2 or not flight_match:
+            continue
+        airline = flight_match.group(1).upper()
+        if airline not in _KNOWN_AIRLINES:
+            continue
+        dep_dt = _parse_date_time(date_line, times[0])
+        arr_dt = _parse_date_time(date_line, times[1])
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{flight_match.group(2).upper()}",
+                pnr=pnr,
+                source="shape_checkin_route_blocks",
+                confidence=94,
+            )
+        )
+    return flights
+
+
+def _parse_compact_dow_day_month_year_time(date_part: str, time_part: str) -> Optional[datetime]:
+    clean_date = date_part.strip().upper().replace(",", "")
+    clean_time = re.sub(r"(?i)(\d)(AM|PM)$", r"\1 \2", time_part.strip())
+    clean_time = clean_time.replace("am", "AM").replace("pm", "PM")
+    for fmt in ("%a %d%b%y %I:%M %p", "%d%b%y %I:%M %p"):
+        try:
+            return datetime.strptime(f"{clean_date} {clean_time}", fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _infer_year_from_text(text: str) -> Optional[int]:
+    match = re.search(r"\b(?:19|20)\d{2}\b", text)
+    if not match:
+        return None
+    return int(match.group(0))
+
+
+def _parse_abbrev_month_day_time(date_part: str, time_part: str, year: int) -> Optional[datetime]:
+    clean_date = re.sub(r",", "", date_part.strip())
+    clean_time = (
+        time_part.strip()
+        .replace("a.m.", "AM")
+        .replace("p.m.", "PM")
+        .replace("am", "AM")
+        .replace("pm", "PM")
+    )
+    clean_time = re.sub(r"(?i)(\d)(AM|PM)$", r"\1 \2", clean_time)
+    raw = f"{clean_date} {year} {clean_time}"
+    for fmt in ("%a %b %d %Y %I:%M %p", "%b %d %Y %I:%M %p"):
+        try:
+            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _shape_labeled_depart_arrive_segments(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    current_airline: Optional[str] = None
+    for index, line in enumerate(lines):
+        airline = _airline_code_from_name(line)
+        if airline:
+            current_airline = airline
+            continue
+        flight_match = re.fullmatch(r"Flight\s+0*(\d{1,4}[A-Z]?)", line, re.IGNORECASE)
+        if not flight_match:
+            continue
+        dep_index = _find_next_matching_line(
+            lines,
+            lambda value: bool(re.fullmatch(r"departs\s+[A-Z]{3}", value, re.IGNORECASE)),
+            index + 1,
+            index + 6,
+        )
+        arr_index = _find_next_matching_line(
+            lines,
+            lambda value: bool(re.fullmatch(r"arrives\s+[A-Z]{3}", value, re.IGNORECASE)),
+            index + 1,
+            index + 10,
+        )
+        if dep_index is None or arr_index is None or dep_index + 1 >= len(lines) or arr_index + 1 >= len(lines):
+            continue
+        dep_airport = lines[dep_index].split()[-1].upper()
+        arr_airport = lines[arr_index].split()[-1].upper()
+        if not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_time = lines[dep_index + 1]
+        arr_time = lines[arr_index + 1]
+        dep_date = lines[dep_index + 2] if dep_index + 2 < len(lines) and _looks_like_full_date(lines[dep_index + 2]) else None
+        arr_date = lines[arr_index + 2] if arr_index + 2 < len(lines) and _looks_like_full_date(lines[arr_index + 2]) else None
+        dep_date = dep_date or _nearest_full_date(lines, index)
+        arr_date = arr_date or dep_date
+        if not dep_date or not arr_date:
+            continue
+        dep_dt = _parse_date_time(dep_date, dep_time)
+        arr_dt = _parse_date_time(arr_date, arr_time)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        airline = current_airline or _infer_airline_from_context("\n".join(lines[max(0, index - 8) : index + 1]))
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{flight_match.group(1).upper()}" if airline else flight_match.group(1).upper(),
+                pnr=pnr,
+                source="shape_labeled_depart_arrive_segments",
+                confidence=92,
+            )
+        )
+    return flights
+
+
+def _shape_vertical_route_date_time_blocks(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    """Parse compact itinerary blocks with route/time/date/flight stacked vertically."""
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        dep_match = re.fullmatch(r"==\s*(?P<dep>[A-Z]{3})\s*==", line)
+        if not dep_match or index + 7 >= len(lines):
+            continue
+        arr_match = re.search(r"==\s*(?P<arr>[A-Z]{3})\s*==", lines[index + 1])
+        dep_time_match = re.search(r"==\s*(?P<dep_time>\d{1,2}:\d{2})\s*==", lines[index + 2])
+        arr_time_match = re.search(
+            r"(?P<dep_date>\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\s*==\s*"
+            r"(?P<arr_time>\d{1,2}:\d{2})\s*==",
+            lines[index + 4],
+        )
+        arr_date_match = None
+        flight_match = None
+        for arr_offset, flight_offset in ((6, 7), (5, 6)):
+            arr_date_match = re.search(
+                r"(?P<arr_date>\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\s+Flight\b",
+                lines[index + arr_offset],
+                re.IGNORECASE,
+            )
+            flight_match = re.match(
+                r"(?P<airline>[A-Z0-9]{2})(?P<number>\d{1,4}[A-Z]?)\b",
+                lines[index + flight_offset],
+            )
+            if arr_date_match and flight_match:
+                break
+        if not (arr_match and dep_time_match and arr_time_match and arr_date_match and flight_match):
+            continue
+        airline = flight_match.group("airline").upper()
+        dep_airport = dep_match.group("dep").upper()
+        arr_airport = arr_match.group("arr").upper()
+        if airline not in _KNOWN_AIRLINES or not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_time = _parse_date_time(arr_time_match.group("dep_date"), dep_time_match.group("dep_time"))
+        arr_time = _parse_date_time(arr_date_match.group("arr_date"), arr_time_match.group("arr_time"))
+        if not dep_time or not arr_time:
+            continue
+        if arr_time <= dep_time:
+            arr_time += timedelta(days=1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_time,
+                arr_time=arr_time,
+                airline=airline,
+                flight_number=f"{airline}{flight_match.group('number').upper()}",
+                pnr=pnr,
+                source="shape_vertical_route_date_time_blocks",
+                confidence=94,
+            )
+        )
+    return flights
+
+
+def _looks_like_full_date(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+"
+            r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}",
+            value,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _nearest_full_date(lines: list[str], index: int) -> Optional[str]:
+    for scan_index in range(index - 1, max(-1, index - 12), -1):
+        if _looks_like_full_date(lines[scan_index]):
+            return lines[scan_index]
+    for scan_index in range(index + 1, min(len(lines), index + 12)):
+        if _looks_like_full_date(lines[scan_index]):
+            return lines[scan_index]
+    return None
+
+
+def _shape_ota_vertical_itinerary(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        if line.strip().lower() != "depart:":
+            continue
+        date_line = _next_nonempty_line(lines, index + 1, index + 4)
+        dep_time_index = _find_next_time_line(lines, index + 1, index + 8)
+        if dep_time_index is None or dep_time_index + 4 >= len(lines):
+            continue
+        dep_airport = _airport_token_from_line(lines[dep_time_index + 1])
+        arr_time_index = _find_next_time_line(lines, dep_time_index + 2, dep_time_index + 8)
+        if arr_time_index is None or arr_time_index + 1 >= len(lines):
+            continue
+        arr_airport = _airport_token_from_line(lines[arr_time_index + 1])
+        airline_line_index = _find_next_matching_line(
+            lines,
+            lambda value: bool(_airline_code_from_name(value)),
+            arr_time_index + 2,
+            arr_time_index + 8,
+        )
+        flight_line_index = _find_next_matching_line(
+            lines,
+            lambda value: bool(_AIRLINE_FLIGHT.search(value.upper())),
+            arr_time_index + 2,
+            arr_time_index + 10,
+        )
+        if (
+            not date_line
+            or not dep_airport
+            or not arr_airport
+            or not airline_line_index
+            or flight_line_index is None
+            or not _valid_route(dep_airport, arr_airport)
+        ):
+            continue
+        dep_dt = _parse_date_time(date_line, lines[dep_time_index])
+        arr_dt = _parse_date_time(date_line, lines[arr_time_index])
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flight_match = _AIRLINE_FLIGHT.search(lines[flight_line_index].upper())
+        if not flight_match:
+            continue
+        airline = _airline_code_from_name(lines[airline_line_index]) or flight_match.group(1).upper()
+        if airline not in _KNOWN_AIRLINES:
+            continue
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{flight_match.group(2).upper()}",
+                pnr=pnr,
+                source="shape_ota_vertical_itinerary",
+                confidence=93,
+            )
+        )
+    return flights
+
+
+def _shape_compact_airline_flight_rows(
+    text: str,
+    *,
+    pnr: Optional[str],
+    received_at: Optional[datetime],
+) -> list[ParsedFlight]:
+    pattern = re.compile(
+        r"\b(?P<airline_name>[A-Z][A-Za-z ]{2,35}?)\s+Flight\s+(?P<number>\d{1,4}[A-Z]?)"
+        r"(?:\s+Terminal\s+\S+)?\s+"
+        r"(?P<dep_time>\d{1,2}:\d{2}\s*[ap]m)\s+"
+        r"(?P<dep_date>(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\.?\s+[A-Z][a-z]{2,8}\.?\s+\d{1,2})\s+"
+        r"(?P<dep_airport>[A-Z]{3})\s+"
+        r"(?P<arr_time>\d{1,2}:\d{2}\s*[ap]m)\s+"
+        r"(?P<arr_date>(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\.?\s+[A-Z][a-z]{2,8}\.?\s+\d{1,2})\s+"
+        r"(?P<arr_airport>[A-Z]{3})",
+        re.IGNORECASE,
+    )
+    flights: list[ParsedFlight] = []
+    for match in pattern.finditer(text):
+        airline = _airline_code_from_name(match.group("airline_name"))
+        dep_airport = match.group("dep_airport").upper()
+        arr_airport = match.group("arr_airport").upper()
+        if not airline or airline not in _KNOWN_AIRLINES or not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_dt = _parse_partial_dow_month_day_time(match.group("dep_date"), match.group("dep_time"), received_at)
+        arr_dt = _parse_partial_dow_month_day_time(match.group("arr_date"), match.group("arr_time"), received_at)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{match.group('number').upper()}",
+                pnr=pnr,
+                source="shape_compact_airline_flight_rows",
+                confidence=93,
+            )
+        )
+    return flights
+
+
+def _shape_southwest_itinerary_blocks(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    lower = text.lower()
+    if not (
+        "your itinerary" in lower
+        or "your complete itinerary" in lower
+        or "complete itinerary" in lower
+    ):
+        return []
+    lines = [_clean_southwest_line(line) for line in _normalized_lines(text)]
+    pnr = pnr or _extract_pnr("\n".join(lines).upper())
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        flight_header = re.fullmatch(
+            r"Flight(?:\s+\d+)?:\s*(?P<date>[A-Za-z]+,?\s+\d{1,2}/\d{1,2}/\d{4})?",
+            line,
+            re.IGNORECASE,
+        )
+        if not flight_header:
+            continue
+        date_line = flight_header.group("date") or (lines[index + 1] if index + 1 < len(lines) else "")
+        if not re.fullmatch(r"[A-Za-z]+,?\s+\d{1,2}/\d{1,2}/\d{4}", date_line):
+            continue
+        block_start = index + 1 if flight_header.group("date") else index + 2
+        block_end = _next_southwest_block_end(lines, block_start)
+        first = _parse_southwest_segment_from_labels(lines, block_start, block_end, date_line, pnr=pnr)
+        if first:
+            flights.append(first)
+        flights.extend(_parse_southwest_connection_segments(lines, block_start, block_end, date_line, pnr=pnr))
+    return flights
+
+
+def _clean_southwest_line(value: str) -> str:
+    line = value.strip().strip("*_")
+    line = line.replace("*", "").replace("_", "")
+    line = re.sub(r"\s+", " ", line).strip()
+    line = re.sub(r"(\d{1,2}:\d{2})\s*([AP]M)\b", r"\1 \2", line, flags=re.IGNORECASE)
+    return line
+
+
+def _next_southwest_block_end(lines: list[str], start: int) -> int:
+    for index in range(start, len(lines)):
+        if re.fullmatch(r"Flight(?:\s+\d+)?:.*", lines[index], re.IGNORECASE):
+            return index
+        if lines[index].lower() in {"payment information", "trip receipt", "fare rules"}:
+            return index
+    return min(len(lines), start + 80)
+
+
+def _parse_southwest_segment_from_labels(
+    lines: list[str],
+    start: int,
+    end: int,
+    date_line: str,
+    *,
+    pnr: Optional[str],
+) -> Optional[ParsedFlight]:
+    number = _southwest_flight_number_after(lines, start, end)
+    dep_index = _find_next_line(lines, "DEPARTS", start, end)
+    arr_index = _find_next_line(lines, "ARRIVES", start, end)
+    if not number or dep_index is None or arr_index is None:
+        return None
+    dep_airport, dep_time = _parse_southwest_airport_time(lines, dep_index + 1, end)
+    arr_default = dep_time.rsplit(" ", 1)[1] if dep_time and " " in dep_time else None
+    arr_airport, arr_time = _parse_southwest_airport_time(lines, arr_index + 1, end, default_meridiem=arr_default)
+    if not dep_airport or not arr_airport or not dep_time or not arr_time or not _valid_route(dep_airport, arr_airport):
+        return None
+    dep_dt = _parse_southwest_weekday_date_time(date_line, dep_time)
+    arr_dt = _parse_southwest_weekday_date_time(date_line, arr_time)
+    if not dep_dt or not arr_dt:
+        return None
+    if arr_dt <= dep_dt:
+        arr_dt += timedelta(days=1)
+    return ParsedFlight(
+        dep_airport=dep_airport,
+        arr_airport=arr_airport,
+        dep_time=dep_dt,
+        arr_time=arr_dt,
+        airline="WN",
+        flight_number=f"WN{number}",
+        pnr=pnr,
+        source="shape_southwest_itinerary_blocks",
+        confidence=94,
+    )
+
+
+def _parse_southwest_connection_segments(
+    lines: list[str],
+    start: int,
+    end: int,
+    date_line: str,
+    *,
+    pnr: Optional[str],
+) -> list[ParsedFlight]:
+    flights: list[ParsedFlight] = []
+    for index in range(start, end):
+        number_match = re.fullmatch(r"#\s*(\d{1,4})", lines[index])
+        if not number_match or index + 3 >= end:
+            continue
+        dep_index = _find_next_line(lines, "DEPARTS", index + 1, min(end, index + 6))
+        arr_index = _find_next_line(lines, "ARRIVES", index + 1, min(end, index + 10))
+        if dep_index is not None and arr_index is not None:
+            dep_airport, dep_time = _parse_southwest_airport_time(lines, dep_index + 1, end)
+            if dep_airport and not dep_time:
+                dep_time = _southwest_time_from_compact_lines(
+                    lines,
+                    number_match.group(1),
+                    dep_airport,
+                    lines[dep_index + 1],
+                )
+            dep_time = dep_time or _with_default_southwest_meridiem(lines[dep_index + 1], "PM")
+            arr_default = dep_time.rsplit(" ", 1)[1] if dep_time and " " in dep_time else "PM"
+            arr_airport, arr_time = _parse_southwest_airport_time(
+                lines,
+                arr_index + 1,
+                end,
+            )
+            if arr_airport and not arr_time:
+                arr_time = _southwest_time_from_compact_lines(
+                    lines,
+                    number_match.group(1),
+                    arr_airport,
+                    lines[arr_index + 1],
+                )
+            arr_time = arr_time or _with_default_southwest_meridiem(lines[arr_index + 1], arr_default)
+        else:
+            dep_airport, dep_time = _parse_southwest_airport_time(lines, index + 1, end, default_meridiem="PM")
+            arr_airport, arr_time = _parse_southwest_airport_time(lines, index + 3, end, default_meridiem="PM")
+        if not dep_airport or not arr_airport or not dep_time or not arr_time or not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_dt = _parse_southwest_weekday_date_time(date_line, dep_time)
+        arr_dt = _parse_southwest_weekday_date_time(date_line, arr_time)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline="WN",
+                flight_number=f"WN{number_match.group(1).lstrip('0') or '0'}",
+                pnr=pnr,
+                source="shape_southwest_itinerary_blocks",
+                confidence=92,
+            )
+        )
+    return flights
+
+
+def _southwest_flight_number_after(lines: list[str], start: int, end: int) -> Optional[str]:
+    for index in range(start, min(len(lines), end)):
+        match = re.fullmatch(r"#\s*(\d{1,4})", lines[index])
+        if match:
+            return match.group(1).lstrip("0") or "0"
+    return None
+
+
+def _parse_southwest_airport_time(
+    lines: list[str],
+    index: int,
+    end: int,
+    *,
+    default_meridiem: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    if index >= min(len(lines), end):
+        return None, None
+    match = re.fullmatch(r"([A-Z]{3})\s+(\d{1,2}:\d{2})(?:\s*([AP]M))?", lines[index], re.IGNORECASE)
+    if not match:
+        return None, None
+    airport = match.group(1).upper()
+    meridiem = match.group(3)
+    if not meridiem and index + 1 < min(len(lines), end):
+        next_line = lines[index + 1].strip().upper()
+        if next_line in {"AM", "PM"}:
+            meridiem = next_line
+    meridiem = meridiem or default_meridiem
+    if not meridiem:
+        return airport, None
+    return airport, f"{match.group(2)} {meridiem.upper()}"
+
+
+def _with_default_southwest_meridiem(value: str, default_meridiem: str) -> Optional[str]:
+    match = re.fullmatch(r"([A-Z]{3})\s+(\d{1,2}:\d{2})(?:\s*([AP]M))?", value, re.IGNORECASE)
+    if not match:
+        return None
+    meridiem = (match.group(3) or default_meridiem).upper()
+    return f"{match.group(2)} {meridiem}"
+
+
+def _southwest_time_from_compact_lines(
+    lines: list[str],
+    number: str,
+    airport: str,
+    split_line: str,
+) -> Optional[str]:
+    time_match = re.search(r"\b(\d{1,2}:\d{2})\b", split_line)
+    if not time_match:
+        return None
+    flight_number = (number.lstrip("0") or "0").lstrip("# ")
+    airport = airport.upper()
+    time_part = time_match.group(1)
+    compact_pattern = re.compile(
+        rf"\#\s*0*{re.escape(flight_number)}\b.*?\b{re.escape(airport)}\s+{re.escape(time_part)}\s*([AP]M)\b",
+        re.IGNORECASE,
+    )
+    for line in lines:
+        match = compact_pattern.search(line)
+        if match:
+            return f"{time_part} {match.group(1).upper()}"
+    return None
+
+
+def _parse_southwest_weekday_date_time(date_line: str, time_part: str) -> Optional[datetime]:
+    date_match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", date_line)
+    if not date_match:
+        return None
+    return _parse_date_time(date_match.group(1), time_part)
+
+
 def extract_v5_flights(
     text: str,
     *,
@@ -1777,6 +2902,836 @@ def extract_v5_flights(
     )
 
 
+def _shape_jetblue_compact_itinerary(
+    text: str,
+    *,
+    pnr: Optional[str],
+    received_at: Optional[datetime],
+) -> list[ParsedFlight]:
+    if not received_at or "jetblue" not in text.lower() or "flight itinerary" not in text.lower():
+        return []
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    current_date_line: Optional[str] = None
+    for index, line in enumerate(lines):
+        date_at_index = _jetblue_date_at(lines, index)
+        if date_at_index:
+            current_date_line = date_at_index
+        if not re.fullmatch(r"\*?[A-Z]{3}\*?", line):
+            continue
+        dep_airport = _airport_token_from_line(line)
+        arr_airport = _airport_token_from_line(lines[index + 1]) if index + 1 < len(lines) else None
+        if not dep_airport or not arr_airport or not _valid_route(dep_airport, arr_airport):
+            continue
+        if index + 2 >= len(lines) or "jetblue" not in lines[index + 2].lower():
+            continue
+        flight_index = _find_next_line(lines, "Flight", index + 3, index + 7)
+        if flight_index is None or flight_index + 1 >= len(lines):
+            continue
+        number = re.sub(r"\D", "", lines[flight_index + 1])
+        if not number:
+            continue
+        for scan_index in range(flight_index + 2, min(len(lines), flight_index + 8)):
+            date_at_index = _jetblue_date_at(lines, scan_index)
+            if date_at_index:
+                current_date_line = date_at_index
+                break
+        if not current_date_line:
+            continue
+        dep_time_index = _find_next_time_line(lines, flight_index + 2, flight_index + 12)
+        if dep_time_index is None:
+            continue
+        arr_time_index = _find_next_time_line(lines, dep_time_index + 1, dep_time_index + 12)
+        if arr_time_index is None:
+            continue
+        dep_dt = _parse_jetblue_partial_datetime(current_date_line, lines[dep_time_index], received_at)
+        arr_dt = _parse_jetblue_partial_datetime(current_date_line, lines[arr_time_index], received_at)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline="B6",
+                flight_number=f"B6{number.zfill(4)}",
+                pnr=pnr,
+                source="shape_jetblue_compact_itinerary",
+                confidence=95,
+            )
+        )
+    return flights
+
+
+def _shape_spirit_compact_itinerary(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    if "spirit" not in text.lower() or "duration" not in text.lower():
+        return []
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        date_match = re.search(
+            r"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+"
+            r"(January|February|March|April|May|June|July|August|September|October|November|December)"
+            r"\s+\d{1,2},?\s+\d{4}",
+            line,
+            re.IGNORECASE,
+        )
+        if not date_match:
+            continue
+        date_line = date_match.group(0)
+        if index + 2 >= len(lines):
+            continue
+        dep_place, dep_time = _parse_place_time_duration_line(lines[index + 1])
+        arr_place, arr_time = _parse_place_time_line(lines[index + 2])
+        if not dep_place or not arr_place or not dep_time or not arr_time:
+            continue
+        dep_airport = _airport_code_from_place(dep_place)
+        arr_airport = _airport_code_from_place(arr_place)
+        if not dep_airport or not arr_airport or not _valid_route(dep_airport, arr_airport):
+            continue
+        number = _find_spirit_flight_number(lines, index + 3, index + 8)
+        if not number:
+            continue
+        dep_dt = _parse_date_time(date_line, dep_time)
+        arr_dt = _parse_date_time(date_line, arr_time)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline="NK",
+                flight_number=f"NK{number}",
+                pnr=pnr,
+                source="shape_spirit_compact_itinerary",
+                confidence=94,
+            )
+        )
+    return flights
+
+
+def _shape_allegiant_labeled_itinerary(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    if "allegiant" not in text.lower() or "flight details" not in text.lower():
+        return []
+    lines = _normalized_lines(text)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        if line.lower() not in {"departing flight information", "returning flight information"}:
+            continue
+        segment = _parse_allegiant_segment(lines, index, pnr=pnr)
+        if segment:
+            flights.append(segment)
+    flights.extend(_parse_allegiant_trip_detail_sections(lines, pnr=pnr))
+    return flights
+
+
+def _parse_allegiant_segment(
+    lines: list[str],
+    index: int,
+    *,
+    pnr: Optional[str],
+) -> Optional[ParsedFlight]:
+    date_line = _value_after_label(lines, "Date", index, index + 40)
+    number = _value_after_label(lines, "Flight #", index, index + 40)
+    dep_place = _value_after_label(lines, "Departure Airport", index, index + 50)
+    dep_time = _time_after_label(lines, "Departs", index, index + 60)
+    arr_place = _value_after_label(lines, "Arrival Airport", index, index + 70)
+    arr_time = _time_after_label(lines, "Arrives", index, index + 80)
+    if not date_line or not number or not dep_place or not dep_time or not arr_place or not arr_time:
+        return None
+    dep_airport = _airport_code_from_place(dep_place)
+    arr_airport = _airport_code_from_place(arr_place)
+    if not dep_airport or not arr_airport or not _valid_route(dep_airport, arr_airport):
+        return None
+    dep_dt = _parse_date_time(date_line, dep_time)
+    arr_dt = _parse_date_time(date_line, arr_time)
+    if not dep_dt or not arr_dt:
+        return None
+    if arr_dt <= dep_dt:
+        arr_dt += timedelta(days=1)
+    return ParsedFlight(
+        dep_airport=dep_airport,
+        arr_airport=arr_airport,
+        dep_time=dep_dt,
+        arr_time=arr_dt,
+        airline="G4",
+        flight_number=f"G4{number.strip().upper()}",
+        pnr=pnr,
+        source="shape_allegiant_labeled_itinerary",
+        confidence=94,
+    )
+
+
+def _parse_allegiant_trip_detail_sections(lines: list[str], *, pnr: Optional[str]) -> list[ParsedFlight]:
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        if not _is_labelish(line, "Departure Date") or index + 1 >= len(lines):
+            continue
+        date_line = line if _time_from_allegiant_datetime_line(line) else _next_allegiant_value(lines, index)
+        dep_label = _find_next_labelish_line(lines, "Departure Airport", index + 2, index + 8)
+        arr_label = _find_next_labelish_line(lines, "Arrival", index + 2, index + 12)
+        if dep_label is None or arr_label is None:
+            continue
+        dep_value = _next_allegiant_value(lines, dep_label)
+        arr_value = _next_allegiant_value(lines, arr_label)
+        if not date_line or not dep_value or not arr_value:
+            continue
+        dep_airport = _airport_code_from_place(dep_value)
+        arr_airport = _airport_code_from_place(arr_value)
+        dep_time = _time_from_allegiant_datetime_line(date_line)
+        arr_time = _time_from_allegiant_arrival_line(arr_value)
+        dep_date = _date_from_allegiant_datetime_line(date_line)
+        if not dep_airport or not arr_airport or not dep_date or not dep_time or not arr_time:
+            continue
+        if not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_dt = _parse_date_time(dep_date, dep_time)
+        arr_dt = _parse_date_time(dep_date, arr_time)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        number = _nearby_allegiant_flight_number(lines, index, dep_airport, arr_airport)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline="G4",
+                flight_number=f"G4{number}" if number else None,
+                pnr=pnr,
+                source="shape_allegiant_trip_detail_sections",
+                confidence=92,
+            )
+        )
+    return flights
+
+
+def _is_labelish(value: str, label: str) -> bool:
+    normalized = value.strip().lower()
+    target = label.strip().lower()
+    return normalized == target or normalized.startswith(f"{target} |")
+
+
+def _find_next_labelish_line(lines: list[str], label: str, start: int, end: int) -> Optional[int]:
+    for index in range(start, min(len(lines), end)):
+        if _is_labelish(lines[index], label):
+            return index
+    return None
+
+
+def _next_allegiant_value(lines: list[str], label_index: int) -> Optional[str]:
+    for value in lines[label_index + 1 : min(len(lines), label_index + 5)]:
+        if any(
+            _is_labelish(value, label)
+            for label in ("Confirmation #", "Departure Date", "Departure Airport", "Arrival", "Your Return Flight")
+        ):
+            continue
+        return value
+    return None
+
+
+def _date_from_allegiant_datetime_line(value: str) -> Optional[str]:
+    match = re.search(
+        r"((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+"
+        r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+        r"\s+\d{1,2},\s+\d{4})",
+        value,
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
+def _time_from_allegiant_datetime_line(value: str) -> Optional[str]:
+    match = re.search(r"\bat\s+(\d{1,2}:\d{2}\s*[AP]M)\b", value, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def _time_from_allegiant_arrival_line(value: str) -> Optional[str]:
+    match = re.search(r"\bat\s+(\d{1,2}:\d{2}\s*[AP]M)\b", value, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def _nearby_allegiant_flight_number(
+    lines: list[str],
+    index: int,
+    dep_airport: str,
+    arr_airport: str,
+) -> Optional[str]:
+    for line in lines[max(0, index - 20) : min(len(lines), index + 4)]:
+        match = re.search(
+            rf"\bFlight\s+(\d{{1,4}}[A-Z]?),\s*{re.escape(dep_airport)}\s+{re.escape(arr_airport)}\b",
+            line,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).upper()
+    return None
+
+
+def _shape_lifemiles_flight_details(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    if "lifemiles" not in text.lower() or "flight details" not in text.lower():
+        return []
+    text = _compact_space(re.sub(r"<[^>]+>", " ", text).replace("*", " "))
+    flights: list[ParsedFlight] = []
+    for match in _SHAPE_LIFEMILES_BLOCK.finditer(text):
+        dep_airport = match.group("dep_airport").upper()
+        arr_airport = match.group("arr_airport").upper()
+        if not _valid_route(dep_airport, arr_airport):
+            continue
+        dep_time = _parse_date_time(match.group("dep_date"), match.group("dep_time"))
+        arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
+        if not dep_time or not arr_time:
+            continue
+        if arr_time <= dep_time:
+            arr_time += timedelta(days=1)
+        airline = match.group("airline").upper()
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_time,
+                arr_time=arr_time,
+                airline=airline,
+                flight_number=f"{airline}{match.group('number').upper()}",
+                pnr=pnr,
+                source="shape_lifemiles_flight_details",
+                confidence=96,
+            )
+        )
+    return flights
+
+
+def _shape_vertical_itinerary_lines(
+    text: str,
+    *,
+    pnr: Optional[str],
+    received_at: Optional[datetime],
+) -> list[ParsedFlight]:
+    if not received_at or "flight" not in text.lower():
+        return []
+    lines = _normalized_lines(text)
+    if not any("your itinerary" in line.lower() for line in lines):
+        return []
+
+    flights: list[ParsedFlight] = []
+    current_airline: Optional[str] = None
+    previous_arr_airport: Optional[str] = None
+    previous_arr_dt: Optional[datetime] = None
+    route_start: Optional[str] = None
+    route_end: Optional[str] = None
+    in_itinerary = False
+
+    for index, raw_line in enumerate(lines):
+        line = raw_line.lstrip("> ").strip()
+        lower = line.lower()
+        if "your itinerary" in lower:
+            in_itinerary = True
+            continue
+        if not in_itinerary:
+            continue
+        if re.search(r"\b(important flight information|price summary)\b", lower):
+            break
+
+        route_match = re.search(r"\(([A-Z]{3})\)\s*(?:to|->|-)\s*.*?\(([A-Z]{3})\)", line, re.IGNORECASE)
+        if route_match:
+            route_start, route_end = route_match.group(1).upper(), route_match.group(2).upper()
+            previous_arr_airport = None
+            previous_arr_dt = None
+            continue
+
+        airline_from_line = _airline_code_from_name(line)
+        if airline_from_line:
+            current_airline = airline_from_line
+            continue
+
+        flight_match = re.fullmatch(
+            r"(?:(?P<airline_name>[A-Z][A-Za-z .&'-]{2,35})\s+)?Flight\s+(?P<number>\d{1,4}[A-Z]?)",
+            line,
+            re.IGNORECASE,
+        )
+        if not flight_match:
+            continue
+        if flight_match.group("airline_name"):
+            current_airline = _airline_code_from_name(flight_match.group("airline_name")) or current_airline
+        parsed = _parse_vertical_segment_after_flight(
+            lines,
+            index,
+            airline=current_airline,
+            number=flight_match.group("number").upper(),
+            route_start=route_start,
+            route_end=route_end,
+            previous_arr_airport=previous_arr_airport,
+            previous_arr_dt=previous_arr_dt,
+            pnr=pnr,
+            received_at=received_at,
+        )
+        if not parsed:
+            continue
+        flights.append(parsed)
+        previous_arr_airport = parsed.arr_airport
+        previous_arr_dt = parsed.arr_time
+    return flights
+
+
+def _parse_vertical_segment_after_flight(
+    lines: list[str],
+    index: int,
+    *,
+    airline: Optional[str],
+    number: str,
+    route_start: Optional[str],
+    route_end: Optional[str],
+    previous_arr_airport: Optional[str],
+    previous_arr_dt: Optional[datetime],
+    pnr: Optional[str],
+    received_at: datetime,
+) -> Optional[ParsedFlight]:
+    window = [line.lstrip("> ").strip() for line in lines[index + 1 : index + 16]]
+    tokens = [
+        line
+        for line in window
+        if line and not re.fullmatch(r"Terminal\s+\S+", line, re.IGNORECASE)
+    ]
+
+    dep_time_line = arr_time_line = dep_date_line = arr_date_line = None
+    dep_airport = arr_airport = None
+    cursor = 0
+    for pos, token in enumerate(tokens):
+        if _parse_time_only(token):
+            dep_time_line = token
+            cursor = pos + 1
+            break
+    if dep_time_line is None:
+        return None
+    if cursor < len(tokens) and _parse_time_only(tokens[cursor]) and previous_arr_airport:
+        dep_airport = previous_arr_airport
+        if previous_arr_dt is not None:
+            dep_date_line = previous_arr_dt.strftime("%b %d")
+        arr_time_line = tokens[cursor]
+        cursor += 1
+    for pos in range(cursor, min(len(tokens), cursor + 4)):
+        if dep_date_line is not None:
+            break
+        if _looks_like_short_date(tokens[pos]):
+            dep_date_line = tokens[pos]
+            cursor = pos + 1
+            break
+    for pos in range(cursor, min(len(tokens), cursor + 4)):
+        if dep_airport is not None:
+            break
+        if _airport_token_from_line(tokens[pos]):
+            dep_airport = _airport_token_from_line(tokens[pos])
+            cursor = pos + 1
+            break
+        if _parse_time_only(tokens[pos]):
+            break
+    if dep_airport is None:
+        dep_airport = previous_arr_airport or route_start
+    dep_date_inferred_from_arrival = False
+    if dep_date_line is None and previous_arr_dt is not None:
+        dep_date_line = previous_arr_dt.strftime("%b %d")
+
+    if arr_time_line is None:
+        for pos in range(cursor, min(len(tokens), cursor + 5)):
+            if _parse_time_only(tokens[pos]):
+                arr_time_line = tokens[pos]
+                cursor = pos + 1
+                break
+    if arr_time_line is None:
+        return None
+    for pos in range(cursor, min(len(tokens), cursor + 4)):
+        if _looks_like_short_date(tokens[pos]):
+            arr_date_line = tokens[pos]
+            cursor = pos + 1
+            break
+    if arr_date_line is None:
+        arr_date_line = dep_date_line
+    elif dep_date_line is None:
+        dep_date_line = arr_date_line
+        dep_date_inferred_from_arrival = True
+    for pos in range(cursor, min(len(tokens), cursor + 5)):
+        if _airport_token_from_line(tokens[pos]):
+            arr_airport = _airport_token_from_line(tokens[pos])
+            break
+        layover_airport = _airport_from_layover_line(tokens[pos])
+        if layover_airport:
+            arr_airport = layover_airport
+            break
+    if arr_airport is None:
+        arr_airport = route_end
+
+    if not dep_airport or not arr_airport or not dep_date_line or not arr_date_line:
+        return None
+    dep_dt = _parse_short_month_day_time(dep_date_line, dep_time_line, received_at)
+    arr_dt = _parse_short_month_day_time(arr_date_line, arr_time_line, received_at)
+    if not dep_dt or not arr_dt or not _valid_route(dep_airport, arr_airport):
+        return None
+    if arr_dt <= dep_dt:
+        if dep_date_inferred_from_arrival:
+            dep_dt -= timedelta(days=1)
+        else:
+            arr_dt += timedelta(days=1)
+    return ParsedFlight(
+        dep_airport=dep_airport,
+        arr_airport=arr_airport,
+        dep_time=dep_dt,
+        arr_time=arr_dt,
+        airline=airline,
+        flight_number=f"{airline}{number}" if airline else number,
+        pnr=pnr,
+        source="shape_vertical_itinerary_rows",
+        confidence=92,
+    )
+
+
+def _looks_like_short_date(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\.?\s+"
+            r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}",
+            value,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _airport_token_from_line(value: str) -> Optional[str]:
+    match = re.fullmatch(r"\*?([A-Z]{3})\*?", value.strip())
+    if not match:
+        return None
+    code = match.group(1).upper()
+    if _VALID_IATA and code not in _VALID_IATA:
+        return None
+    return code
+
+
+def _airport_from_layover_line(value: str) -> Optional[str]:
+    match = re.search(r"\bLayover\s+in\s+([A-Za-z .'-]+)", value, re.IGNORECASE)
+    if not match:
+        return None
+    place = _normalize_place_key(match.group(1))
+    overrides = {
+        "ADDIS ABABA": "ADD",
+        "DULLES": "IAD",
+    }
+    return overrides.get(place) or _city_airport_lookup().get(place)
+
+
+def _parse_short_month_day_time(
+    date_line: str,
+    time_line: str,
+    received_at: datetime,
+) -> Optional[datetime]:
+    match = re.search(
+        r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)?\.?\s*"
+        r"(?P<month>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+"
+        r"(?P<day>\d{1,2})",
+        date_line,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    month = "Sep" if match.group("month").lower().startswith("sept") else match.group("month")
+    return _parse_partial_date_time(month, match.group("day"), time_line, received_at)
+
+
+def _shape_ota_multi_confirmation(
+    text: str,
+    *,
+    fallback_pnr: Optional[str],
+    received_at: Optional[datetime],
+) -> list[ParsedFlight]:
+    if "confirmation codes" not in text.lower():
+        return []
+    lines = _normalized_lines(text)
+    pnr_by_airline = _airline_confirmation_codes_from_lines(lines)
+    if not pnr_by_airline:
+        return []
+
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        match = re.search(
+            r"\b(?P<airline_name>[A-Z][A-Za-z .&'-]{2,35})\s*-\s*"
+            r"(?P<airline>[A-Z0-9]{2})\s*(?P<number>\d{1,4}[A-Z]?)\b",
+            line,
+            re.IGNORECASE,
+        )
+        if not match:
+            continue
+        airline = match.group("airline").upper()
+        inferred_airline = _airline_code_from_name(match.group("airline_name")) or airline
+        if airline not in _KNOWN_AIRLINES and inferred_airline not in _KNOWN_AIRLINES:
+            continue
+        airline = inferred_airline if inferred_airline in _KNOWN_AIRLINES else airline
+        date_line = _nearest_prior_date_line(lines, index)
+        dep_airport, dep_time, arr_airport, arr_time = _next_two_airport_time_pairs(lines, index + 1)
+        if not date_line or not dep_airport or not arr_airport or not dep_time or not arr_time:
+            continue
+        dep_dt = _parse_date_time(date_line, dep_time)
+        arr_dt = _parse_date_time(date_line, arr_time)
+        if (not dep_dt or not arr_dt) and received_at:
+            dep_dt = _parse_partial_month_day_line(date_line, dep_time, received_at)
+            arr_dt = _parse_partial_month_day_line(date_line, arr_time, received_at)
+        if not dep_dt or not arr_dt or not _valid_route(dep_airport, arr_airport):
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{match.group('number').upper()}",
+                pnr=pnr_by_airline.get(airline) or fallback_pnr,
+                source="shape_ota_multi_confirmation",
+                confidence=94,
+            )
+        )
+    return flights
+
+
+def _airline_confirmation_codes_from_lines(lines: list[str]) -> dict[str, str]:
+    codes: dict[str, str] = {}
+    in_section = False
+    captured_any = False
+    for index, line in enumerate(lines):
+        clean = line.lstrip("> ").strip()
+        lower = clean.lower()
+        if "confirmation codes" in lower or "confirmation code" in lower:
+            in_section = True
+            continue
+        if not in_section:
+            continue
+        if captured_any and re.search(r"\b(manage|flight|fare|payment|receipt|itinerar)", lower):
+            break
+        airline = _airline_code_from_name(clean)
+        if not airline:
+            continue
+        for candidate_line in lines[index + 1 : index + 4]:
+            candidate = re.sub(r"[^A-Z0-9]", "", candidate_line.upper())
+            if 5 <= len(candidate) <= 8 and candidate not in _PNR_STOPWORDS and candidate not in _KNOWN_AIRLINES:
+                codes[airline] = candidate
+                captured_any = True
+                break
+    return codes
+
+
+def _nearest_prior_date_line(lines: list[str], index: int) -> Optional[str]:
+    date_re = re.compile(
+        r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+        r"\s+\d{1,2},?\s+\d{4}\b",
+        re.IGNORECASE,
+    )
+    for line in reversed(lines[max(0, index - 12) : index]):
+        match = date_re.search(line)
+        if match:
+            return match.group(0)
+    return None
+
+
+def _next_two_airport_time_pairs(
+    lines: list[str],
+    start: int,
+) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    pairs: list[tuple[str, str]] = []
+    for index in range(start, min(len(lines), start + 20)):
+        clean_line = lines[index].lstrip("> ").strip()
+        airport_match = re.fullmatch(r"\*?([A-Z]{3})\*?", clean_line)
+        if not airport_match:
+            continue
+        airport = airport_match.group(1).upper()
+        if _VALID_IATA and airport not in _VALID_IATA:
+            continue
+        for lookahead in range(index + 1, min(len(lines), index + 5)):
+            clean_time = lines[lookahead].lstrip("> ").strip()
+            if _parse_time_only(clean_time):
+                pairs.append((airport, clean_time))
+                break
+        if len(pairs) >= 2:
+            break
+    if len(pairs) < 2:
+        return None, None, None, None
+    return pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]
+
+
+def _parse_partial_month_day_line(
+    date_line: str,
+    time_part: str,
+    received_at: datetime,
+) -> Optional[datetime]:
+    match = re.search(
+        r"\b(?P<month>January|February|March|April|May|June|July|August|September|October|November|December)"
+        r"\s+(?P<day>\d{1,2})",
+        date_line,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return _parse_partial_date_time(match.group("month"), match.group("day"), time_part, received_at)
+
+
+def _find_next_line(lines: list[str], value: str, start: int, end: int) -> Optional[int]:
+    target = value.lower()
+    for index in range(start, min(len(lines), end)):
+        if lines[index].strip().lower() == target:
+            return index
+    return None
+
+
+def _find_next_matching_line(lines: list[str], predicate, start: int, end: int) -> Optional[int]:
+    for index in range(start, min(len(lines), end)):
+        if predicate(lines[index]):
+            return index
+    return None
+
+
+def _find_next_time_line(lines: list[str], start: int, end: int) -> Optional[int]:
+    for index in range(start, min(len(lines), end)):
+        if _parse_time_only(lines[index]):
+            return index
+    return None
+
+
+def _value_after_label(lines: list[str], label: str, start: int, end: int) -> Optional[str]:
+    label_key = label.strip().lower()
+    for index in range(start, min(len(lines), end)):
+        current = lines[index].strip()
+        current_key = current.rstrip(":").strip().lower()
+        if current_key == label_key:
+            return _next_nonempty_line(lines, index + 1, end)
+        if current_key.startswith(f"{label_key}:"):
+            value = current.split(":", 1)[1].strip()
+            if value:
+                return value
+    return None
+
+
+def _time_after_label(lines: list[str], label: str, start: int, end: int) -> Optional[str]:
+    label_key = label.strip().lower()
+    for index in range(start, min(len(lines), end)):
+        current = lines[index].strip()
+        current_key = current.rstrip(":").strip().lower()
+        if current_key == label_key:
+            return _time_from_following_lines(lines, index + 1, end)
+        if current_key.startswith(f"{label_key}:"):
+            value = current.split(":", 1)[1].strip()
+            if _parse_time_only(value):
+                return value
+            combined = _time_from_following_lines([value, *lines[index + 1 :]], 0, min(end - index, 5))
+            if combined:
+                return combined
+    return None
+
+
+def _next_nonempty_line(lines: list[str], start: int, end: int) -> Optional[str]:
+    for index in range(start, min(len(lines), end)):
+        value = lines[index].strip()
+        if value:
+            return value
+    return None
+
+
+def _time_from_following_lines(lines: list[str], start: int, end: int) -> Optional[str]:
+    scan_end = min(len(lines), end, start + 5)
+    for index in range(start, scan_end):
+        value = lines[index].strip()
+        if not value:
+            continue
+        if index + 1 < scan_end and re.fullmatch(r"\d{1,2}:\d{2}", value):
+            meridiem = lines[index + 1].strip().upper().replace(".", "")
+            if meridiem in {"AM", "PM"}:
+                return f"{value} {meridiem}"
+        if _parse_time_only(value):
+            return value
+    return None
+
+
+def _looks_like_jetblue_date_line(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*"
+            r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}",
+            value.strip(),
+            re.IGNORECASE,
+        )
+    )
+
+
+def _jetblue_date_at(lines: list[str], index: int) -> Optional[str]:
+    if index + 2 >= len(lines):
+        return None
+    dow = lines[index].strip()
+    month = lines[index + 1].strip()
+    day = lines[index + 2].strip()
+    if not re.fullmatch(r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?", dow, re.IGNORECASE):
+        return None
+    if not re.fullmatch(r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*", month, re.IGNORECASE):
+        return None
+    if not re.fullmatch(r"\d{1,2}", day):
+        return None
+    return f"{month} {day}"
+
+
+def _parse_jetblue_partial_datetime(
+    date_line: str,
+    time_line: str,
+    received_at: datetime,
+) -> Optional[datetime]:
+    match = re.search(
+        r"(?P<month>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+(?P<day>\d{1,2})",
+        date_line,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    month = "Sep" if match.group("month").lower().startswith("sept") else match.group("month")
+    return _parse_partial_date_time(month, match.group("day"), time_line, received_at)
+
+
+def _parse_place_time_duration_line(value: str) -> tuple[Optional[str], Optional[str]]:
+    match = re.match(
+        r"(?P<place>[A-Z][A-Za-z .,'/-]+?)\s+"
+        r"(?P<time>\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))\s+"
+        r"\d{1,2}\s*h",
+        value,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None, None
+    return match.group("place"), match.group("time")
+
+
+def _parse_place_time_line(value: str) -> tuple[Optional[str], Optional[str]]:
+    match = re.match(
+        r"(?P<place>[A-Z][A-Za-z .,'/-]+?)\s+"
+        r"(?P<time>\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))$",
+        value,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None, None
+    return match.group("place"), match.group("time")
+
+
+def _find_spirit_flight_number(lines: list[str], start: int, end: int) -> Optional[str]:
+    for index in range(start, min(len(lines), end)):
+        match = re.fullmatch(r"(\d{1,4})(?:\s+[A-Z])?", lines[index].strip(), re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
 def _jsonld_should_yield_to_text(
     flights: list[ParsedFlight],
     *,
@@ -1790,6 +3745,10 @@ def _jsonld_should_yield_to_text(
 
 
 def _extract_pnr(text: str) -> Optional[str]:
+    for match in _AIRLINE_CONFIRMATION_LABEL.finditer(text):
+        candidate = match.group(1).upper()
+        if candidate not in _PNR_STOPWORDS and candidate not in _KNOWN_AIRLINES:
+            return candidate
     for match in _CAPITAL_ONE_AIRLINE_CONFIRMATION.finditer(text):
         candidate = match.group(1).upper()
         if candidate not in _PNR_STOPWORDS and candidate not in _KNOWN_AIRLINES:
@@ -1799,6 +3758,20 @@ def _extract_pnr(text: str) -> Optional[str]:
         if candidate not in _PNR_STOPWORDS and candidate not in _KNOWN_AIRLINES:
             return candidate
     return None
+
+
+def _extract_pnr_aliases(text: str, *, primary: Optional[str]) -> list[str]:
+    primary = primary.upper() if primary else None
+    aliases: list[str] = []
+    for pattern in (_AIRLINE_CONFIRMATION_LABEL, _CAPITAL_ONE_AIRLINE_CONFIRMATION, _PNR_LABEL):
+        for match in pattern.finditer(text):
+            candidate = match.group(1).upper()
+            if candidate in _PNR_STOPWORDS or candidate in _KNOWN_AIRLINES:
+                continue
+            if candidate == primary or candidate in aliases:
+                continue
+            aliases.append(candidate)
+    return aliases
 
 
 def _v5_route_rows(text: str, received_at: Optional[datetime]) -> list[_FlightEvidence]:
@@ -2118,7 +4091,7 @@ def _v5_labeled_depart_arrive_rows(text: str) -> list[_FlightEvidence]:
         if not section_date:
             continue
         context = text[max(0, section.start() - 500) : section.end()]
-        airline = _infer_airline_from_context(context)
+        airline = _infer_airline_from_context(context) or _infer_airline_from_context(text[: section.start()])
         if not airline:
             continue
         previous_arrival: Optional[datetime] = None
@@ -2153,7 +4126,7 @@ def _v5_labeled_depart_arrive_rows(text: str) -> list[_FlightEvidence]:
                     dep_time=dep_time,
                     arr_time=arr_time,
                     airline=airline,
-                    flight_number=f"{airline}{number}" if airline else number,
+                    flight_number=_format_flight_number(airline, number) if airline else number,
                     score=_v5_score(block, has_airline=bool(airline)),
                 )
             )
@@ -2550,7 +4523,16 @@ def _legacy_terminal_flight_number(head: str, airline: Optional[str]) -> Optiona
     if not numbers:
         return None
     number = numbers[-1].upper()
-    return f"{airline}{number}" if airline else number
+    return _format_flight_number(airline, number) if airline else number
+
+
+def _format_flight_number(airline: Optional[str], number: str) -> str:
+    clean = str(number or "").upper().strip()
+    if re.fullmatch(r"0+\d+[A-Z]?", clean):
+        suffix = clean[-1] if clean[-1].isalpha() else ""
+        digits = clean[:-1] if suffix else clean
+        clean = f"{int(digits)}{suffix}"
+    return f"{airline}{clean}" if airline else clean
 
 
 def _v5_ba_eticket_rows(text: str) -> list[_FlightEvidence]:
@@ -4497,6 +6479,8 @@ def _parse_date_time(date_part: str, time_part: str) -> Optional[datetime]:
         "%b %d %Y %H:%M",
         "%d %b %Y %H:%M",
         "%d %B %Y %H:%M",
+        "%d %b %y %H:%M",
+        "%d %B %y %H:%M",
     ]
     for fmt in formats:
         try:
@@ -4586,6 +6570,23 @@ def _parse_partial_date_time(
         except ValueError:
             continue
     return None
+
+
+def _parse_partial_dow_month_day_time(
+    date_part: str,
+    time_part: str,
+    received_at: Optional[datetime],
+) -> Optional[datetime]:
+    match = re.search(
+        r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\.?,?\s+"
+        r"(?P<month>Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|"
+        r"Sep|Sept|September|Oct|October|Nov|November|Dec|December)\.?\s+(?P<day>\d{1,2})",
+        date_part,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return _parse_partial_date_time(match.group("month"), match.group("day"), time_part, received_at)
 
 
 def _parse_compact_dow_day_month_time(

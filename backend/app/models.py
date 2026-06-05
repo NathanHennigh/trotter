@@ -120,7 +120,15 @@ class Message(Base):
     from_email = Column(String(320), nullable=True)
     subject = Column(Text, nullable=True)
     snippet_sha256 = Column(String(64), nullable=True)
-    status = Column(Enum(MessageStatus), nullable=False, default=MessageStatus.PENDING)
+    status = Column(
+        Enum(
+            MessageStatus,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+            name="message_status",
+        ),
+        nullable=False,
+        default=MessageStatus.PENDING,
+    )
     parse_version = Column(Integer, nullable=False, default=0)
     parse_error = Column(Text, nullable=True)
     parse_evidence = Column(JSON, nullable=True)

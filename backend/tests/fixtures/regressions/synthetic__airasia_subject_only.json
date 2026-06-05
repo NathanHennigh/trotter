@@ -13,7 +13,7 @@
   "expectations": {
     "must_complete_within_seconds": 2.0,
     "expected_flights": [
-      {"flight_number": null, "dep_airport": "MNL", "arr_airport": "MPH"}
+      {"flight_number": null, "dep_airport": "MNL", "arr_airport": "MPH", "pnr": "MDHIYD"}
     ],
     "notes": "AirAsia subject-line-only itinerary. Body is too sparse to parse. New _extract_subject_itinerary_flight fallback lifts route+date+PNR from the subject 'Booking No: PNR DD/MM/YYYY DEP ✈ ARR'. Date format is ambiguous; parser picks DD/MM (international convention) when month > 12 in MM/DD reading."
   },
