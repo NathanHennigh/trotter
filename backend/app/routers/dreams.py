@@ -24,6 +24,11 @@ from ..services.dream_parser import (
     parse_caption_with_fallback_model,
     parse_caption_with_ollama,
 )
+from ..services.dream_thumbnail_cache import (
+    DreamThumbnailError,
+    cache_thumbnail,
+    read_cached_thumbnail,
+)
 from ..services.google_places import (
     GeoapifyError,
     GooglePlacesError,
@@ -517,7 +522,7 @@ def delete_empty_dream(db: Session, dream_id: Optional[int], user_id: int) -> No
 def dream_item_out(item: DreamItem) -> DreamItemOut:
     raw = item.raw_metadata_json or {}
     metadata = raw.get("instagram_metadata") if isinstance(raw, dict) else None
-    thumbnail_url = metadata.get("thumbnail_url") if isinstance(metadata, dict) else None
+    thumbnail_url = f"/dream-items/{item.id}/thumbnail" if isinstance(metadata, dict) and metadata.get("thumbnail_url") else None
     return DreamItemOut(
         id=item.id,
         dream_id=item.dream_id,
@@ -541,6 +546,47 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         created_at=item.created_at,
         updated_at=item.updated_at,
     )
+
+
+@router.get("/dream-items/{item_id}/thumbnail")
+def get_dream_item_thumbnail(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Dream item not found")
+
+    cached = read_cached_thumbnail(item.id)
+    if cached:
+        content, content_type = cached
+        return Response(content=content, media_type=content_type, headers={"Cache-Control": "private, max-age=604800"})
+
+    raw = item.raw_metadata_json or {}
+    metadata = raw.get("instagram_metadata") if isinstance(raw, dict) else None
+    thumbnail_url = metadata.get("thumbnail_url") if isinstance(metadata, dict) else None
+    try:
+        if not thumbnail_url:
+            refreshed = fetch_instagram_metadata(item.source_url)
+            metadata = refreshed.model_dump()
+            thumbnail_url = refreshed.thumbnail_url
+        if not thumbnail_url:
+            raise DreamThumbnailError("Instagram metadata did not include a thumbnail")
+        try:
+            content, content_type = cache_thumbnail(item.id, thumbnail_url)
+        except DreamThumbnailError:
+            refreshed = fetch_instagram_metadata(item.source_url)
+            metadata = refreshed.model_dump()
+            if not refreshed.thumbnail_url:
+                raise
+            content, content_type = cache_thumbnail(item.id, refreshed.thumbnail_url)
+    except (DreamThumbnailError, InstagramMetadataError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    item.raw_metadata_json = {**raw, "instagram_metadata": metadata}
+    db.commit()
+    return Response(content=content, media_type=content_type, headers={"Cache-Control": "private, max-age=604800"})
 
 
 def maybe_attach_google_place(item: DreamItem) -> dict[str, Any]:
@@ -609,6 +655,11 @@ def enrich_dream_item_from_url(db: Session, item: DreamItem, current_user: User)
             **(item.raw_metadata_json or {}),
             "instagram_metadata": metadata,
         }
+        if metadata.get("thumbnail_url"):
+            try:
+                cache_thumbnail(item.id, metadata["thumbnail_url"])
+            except DreamThumbnailError:
+                pass
         parsed = parse_caption_with_fallback_model(caption, item.source_url)
     except HTTPException as exc:
         note = str(exc.detail)

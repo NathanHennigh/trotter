@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomNav, IconButton, IconGlyph, PaperSurface, ScreenHeader } from '../components/trotter/TrotterKit';
 import { BottomNavTab } from '../data/trotterMock';
 import { Dream, DreamItem, DreamItemCategory, useDreams } from '../services/dreams';
+import { getApiBaseUrl, getStoredToken } from '../services/travelTrips';
 import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
 
 type DreamsView =
@@ -65,7 +66,12 @@ export function DreamsScreen({ active, onChange }: { active: BottomNavTab; onCha
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24 }}
+      >
         <ScreenHeader
           title={view.name === 'home' ? 'DREAMS' : view.name === 'review' ? 'REVIEW' : 'DREAM'}
           subtitle={view.name === 'home' ? 'SAVED INSPIRATION' : view.name === 'review' ? 'NEEDS REVIEW' : selectedDream?.title.toUpperCase()}
@@ -448,7 +454,15 @@ function BackButton({ onPress }: { onPress: () => void }) {
 }
 
 function dreamVisual(country?: string, city?: string, title?: string, thumbnailUrl?: string) {
-  const image = thumbnailUrl ? { uri: thumbnailUrl } : (country && COVER_IMAGES[country]) || fallbackCoverImage;
+  const image = thumbnailUrl
+    ? {
+        uri: thumbnailUrl.startsWith('http') ? thumbnailUrl : `${getApiBaseUrl()}${thumbnailUrl}`,
+        headers: {
+          ...(getStoredToken() ? { Authorization: `Bearer ${getStoredToken()}` } : {}),
+          'ngrok-skip-browser-warning': 'true',
+        },
+      }
+    : (country && COVER_IMAGES[country]) || fallbackCoverImage;
   const key = (country || city || title || '').toLowerCase();
   const accent = key.includes('japan') ? colors.red : key.includes('mexico') ? colors.green : key.includes('guatemala') ? colors.teal : key.includes('portugal') ? colors.blue : colors.brass;
   const tint = key.includes('guatemala') ? 'rgba(79,135,128,0.18)' : key.includes('japan') ? 'rgba(182,84,63,0.15)' : 'rgba(21,20,18,0.08)';

@@ -1,5 +1,5 @@
 import React from 'react';
-import { getApiBaseUrl, getStoredToken, hydrateStoredToken, storeAuthToken } from './travelTrips';
+import { clearAuthToken, getApiBaseUrl, getStoredToken, hydrateStoredToken, storeAuthToken } from './travelTrips';
 
 export type DreamItemCategory =
   | 'restaurant'
@@ -92,6 +92,7 @@ export type IncomingDreamShare = {
 };
 
 const seedItems: DreamItem[] = [];
+let devTokenRequest: Promise<string | undefined> | undefined;
 
 export function useDreams() {
   return React.useContext(DreamsContext) ?? useDreamsState();
@@ -143,15 +144,9 @@ function useDreamsState() {
 
   const refresh = React.useCallback(async (mode: 'loading' | 'refreshing' = 'refreshing') => {
     setStatus(mode);
-    const token = await getDreamsAuthToken();
-    if (!token) {
-      setSource('mock');
-      setStatus('idle');
-      return;
-    }
     try {
-      const apiDreams = await dreamsApiFetch<ApiDream[]>('/dreams', token);
-      const apiItemsNested = await Promise.all(apiDreams.map((dream) => dreamsApiFetch<ApiDreamItem[]>(`/dreams/${dream.id}/items`, token)));
+      const apiDreams = await dreamsApiFetch<ApiDream[]>('/dreams');
+      const apiItemsNested = await Promise.all(apiDreams.map((dream) => dreamsApiFetch<ApiDreamItem[]>(`/dreams/${dream.id}/items`)));
       const mappedDreams = apiDreams.map(mapApiDream);
       const mappedItems = apiItemsNested.flat().map(mapApiDreamItem);
       setLiveDreams(mappedDreams);
@@ -172,6 +167,11 @@ function useDreamsState() {
 
   const shareInstagramLink = React.useCallback((sourceUrl: string, caption?: string) => {
     const normalizedUrl = normalizeSourceUrl(sourceUrl);
+    if (!isInstagramUrl(normalizedUrl)) {
+      setError('Paste a valid Instagram post or reel link.');
+      setStatus('error');
+      return undefined;
+    }
     const existing = itemsRef.current.find((item) => item.sourceUrl === normalizedUrl);
     if (existing) return existing;
     if (inFlightUrlsRef.current.has(normalizedUrl)) {
@@ -194,11 +194,14 @@ function useDreamsState() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    setError(undefined);
+    setStatus('refreshing');
     setItems((current) => [next, ...current]);
     shareInstagramLinkRemote(normalizedUrl, caption)
       .then(() => refresh('refreshing'))
       .catch((caught) => {
         setError(caught instanceof Error ? caught.message : String(caught));
+        setStatus('error');
         setItems((current) => current.map((item) => item.id === next.id ? {
           ...item,
           summary: 'Save failed. Check backend/auth, then try again.',
@@ -253,22 +256,17 @@ function useDreamsState() {
   };
 }
 
-async function dreamsApiFetch<T>(path: string, token: string): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+async function dreamsApiFetch<T>(path: string): Promise<T> {
+  const response = await dreamsAuthenticatedFetch(path);
   const data = await readJson(response);
   if (!response.ok) throw new Error(readError(data, `Dreams API returned ${response.status}`));
   return data as T;
 }
 
 async function shareInstagramLinkRemote(sourceUrl: string, caption?: string) {
-  const token = await getDreamsAuthToken();
-  if (!token) throw new Error('No auth token. Sign in or enable DEV_MODE=true on the backend.');
-  const response = await fetch(`${getApiBaseUrl()}/dreams/share`, {
+  const response = await dreamsAuthenticatedFetch('/dreams/share', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ source_url: sourceUrl, source_platform: 'instagram', shared_text: caption }),
@@ -277,12 +275,51 @@ async function shareInstagramLinkRemote(sourceUrl: string, caption?: string) {
   if (!response.ok) throw new Error(readError(data, `Dream save failed: ${response.status}`));
 }
 
-async function getDreamsAuthToken() {
-  const existing = getStoredToken() ?? await hydrateStoredToken();
-  if (existing) return existing;
+async function dreamsAuthenticatedFetch(path: string, init?: RequestInit) {
+  let token = await getDreamsAuthToken();
+  if (!token) throw new Error('No auth token. Sign in or enable DEV_MODE=true on the backend.');
 
+  let response = await fetch(`${getApiBaseUrl()}${path}`, withAuth(init, token));
+  if (response.status !== 401) return response;
+
+  token = await getDreamsAuthToken(true);
+  if (!token) return response;
+  response = await fetch(`${getApiBaseUrl()}${path}`, withAuth(init, token));
+  return response;
+}
+
+function withAuth(init: RequestInit | undefined, token: string): RequestInit {
+  return {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'ngrok-skip-browser-warning': 'true',
+    },
+  };
+}
+
+async function getDreamsAuthToken(forceRefresh = false) {
+  if (forceRefresh) {
+    clearAuthToken();
+  } else {
+    const existing = getStoredToken() ?? await hydrateStoredToken();
+    if (existing) return existing;
+  }
+
+  if (!devTokenRequest) {
+    devTokenRequest = requestDreamsDevToken().finally(() => {
+      devTokenRequest = undefined;
+    });
+  }
+  return devTokenRequest;
+}
+
+async function requestDreamsDevToken() {
   try {
-    const response = await fetch(`${getApiBaseUrl()}/auth/dev-token`);
+    const response = await fetch(`${getApiBaseUrl()}/auth/dev-token`, {
+      headers: { 'ngrok-skip-browser-warning': 'true' },
+    });
     const data = await readJson(response);
     if (!response.ok || !data || typeof data !== 'object' || !('access_token' in data)) return undefined;
     const token = String((data as { access_token: unknown }).access_token);
@@ -419,12 +456,23 @@ function parseDraftDreamItem(sourceUrl: string, caption?: string): Omit<DreamIte
 function normalizeSourceUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return 'https://www.instagram.com/';
-  return trimmed.startsWith('http') ? trimmed : `https://${trimmed}`;
+  const extracted = extractInstagramUrl(trimmed);
+  const source = extracted ?? trimmed;
+  return source.startsWith('http') ? source : `https://${source}`;
 }
 
 function extractInstagramUrl(value?: string) {
   if (!value) return undefined;
-  return value.match(/https?:\/\/(?:www\.)?instagram\.com\/[^\s]+/i)?.[0];
+  return value.match(/https?:\/\/(?:www\.)?instagram\.com\/[^\s]+/i)?.[0]?.replace(/[),.;]+$/, '');
+}
+
+function isInstagramUrl(value: string) {
+  try {
+    const parsed = new URL(value);
+    return /(^|\.)instagram\.com$/i.test(parsed.hostname) && /^\/(reel|reels|p|tv)\//i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
 }
 
 function dreamIdFor(country?: string, city?: string) {

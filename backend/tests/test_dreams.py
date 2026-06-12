@@ -166,6 +166,38 @@ def test_list_dreams_includes_counts(client, test_user):
     assert data[0]["needs_review_count"] == 1
 
 
+def test_dream_thumbnail_uses_stable_authenticated_endpoint(client, test_user, test_db, monkeypatch):
+    dream = Dream(user_id=test_user.id, title="Spain", country="Spain", status="active")
+    test_db.add(dream)
+    test_db.flush()
+    item = DreamItem(
+        user_id=test_user.id,
+        dream_id=dream.id,
+        source_platform="instagram",
+        source_url="https://instagram.com/reel/thumb",
+        category="attraction",
+        summary="A saved place.",
+        needs_review=False,
+        needs_google_places_lookup=False,
+        status="parsed",
+        raw_metadata_json={"instagram_metadata": {"thumbnail_url": "https://instagram.example/expiring.jpg"}},
+    )
+    test_db.add(item)
+    test_db.commit()
+    test_db.refresh(item)
+
+    monkeypatch.setattr("app.routers.dreams.read_cached_thumbnail", lambda item_id: (b"jpeg-data", "image/jpeg"))
+
+    listed = client.get(f"/dreams/{dream.id}/items")
+    assert listed.status_code == 200
+    assert listed.json()[0]["thumbnail_url"] == f"/dream-items/{item.id}/thumbnail"
+
+    thumbnail = client.get(f"/dream-items/{item.id}/thumbnail")
+    assert thumbnail.status_code == 200
+    assert thumbnail.headers["content-type"] == "image/jpeg"
+    assert thumbnail.content == b"jpeg-data"
+
+
 def test_review_confirm_applies_edits(client, test_user, test_db):
     created = client.post(
         "/dreams/share",

@@ -27,18 +27,36 @@
         <data android:scheme="trotterv2"/>
         <data android:scheme="exp+trotter-v2"/>
       </intent-filter>
-      <intent-filter android:label="@string/share_to_dreams">
+    </activity>
+    <activity-alias
+      android:name=".ShareToDreams"
+      android:targetActivity=".MainActivity"
+      android:enabled="true"
+      android:exported="true"
+      android:icon="@mipmap/ic_launcher"
+      android:label="@string/share_to_dreams">
+      <intent-filter>
+        <action android:name="android.intent.action.SEND"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:mimeType="text/plain"/>
+      </intent-filter>
+      <intent-filter>
         <action android:name="android.intent.action.SEND"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <data android:mimeType="text/*"/>
       </intent-filter>
-      <intent-filter android:label="@string/share_to_dreams">
+      <intent-filter>
         <action android:name="android.intent.action.SEND"/>
         <action android:name="android.intent.action.SEND_MULTIPLE"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <data android:mimeType="image/*"/>
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.SEND"/>
+        <action android:name="android.intent.action.SEND_MULTIPLE"/>
+        <category android:name="android.intent.category.DEFAULT"/>
         <data android:mimeType="video/*"/>
       </intent-filter>
-    </activity>
+    </activity-alias>
   </application>
 </manifest>
