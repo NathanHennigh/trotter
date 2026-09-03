@@ -18,6 +18,6 @@ compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 "${compose[@]}" run --rm migrate
 "${compose[@]}" run --rm \
   --volume "$SQLITE_FILE:/migration/trotter.db:ro" \
-  api python scripts/migrate_sqlite_to_postgres.py --source /migration/trotter.db
+  api python -m scripts.migrate_sqlite_to_postgres --source /migration/trotter.db
 
 echo 'SQLite data imported. Start the full stack with ./scripts/deploy.sh.'
