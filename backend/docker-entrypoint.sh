@@ -29,4 +29,8 @@ if [ -z "${DATABASE_URL:-}" ]; then
   export DATABASE_URL="postgresql+psycopg://${POSTGRES_USER:-trotter}:$encoded_password@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-trotter}"
 fi
 
+if [ "$(id -u)" -eq 0 ]; then
+  exec gosu trotter "$@"
+fi
+
 exec "$@"

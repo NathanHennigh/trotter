@@ -5,7 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     POETRY_VIRTUALENVS_CREATE=false
 
-RUN pip install --no-cache-dir poetry==2.4.2 \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir poetry==2.4.2 \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin trotter
 
 WORKDIR /app
@@ -23,8 +26,6 @@ COPY domains.csv ./domains.csv
 RUN chmod 0755 /usr/local/bin/trotter-entrypoint \
     && mkdir -p /var/lib/trotter \
     && chown -R trotter:trotter /app /var/lib/trotter
-
-USER trotter
 
 ENTRYPOINT ["trotter-entrypoint"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
