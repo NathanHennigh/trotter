@@ -99,8 +99,8 @@ android {
         applicationId 'com.trotter.mobilev2'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode (findProperty('trotterVersionCode') ?: '1').toInteger()
-        versionName (findProperty('trotterVersionName') ?: '0.1.0')
+        versionCode (project.findProperty('trotterVersionCode') ?: '1').toInteger()
+        versionName (project.findProperty('trotterVersionName') ?: '0.1.0')
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
