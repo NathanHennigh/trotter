@@ -8,6 +8,7 @@ deploy/secrets/
 **/node_modules/
 **/.expo/
 **/.gradle/
+**/.cxx/
 **/build/
 **/dist/
 backend/.venv/
@@ -22,5 +23,6 @@ backend/*.dump
 **/*.keystore
 mobile/
 trotter-photo-curation/
+mobile-v2/assets/photo-candidates/
 mobile-v2/docs/design-directions/
 mobile-v2/qa-screens/
