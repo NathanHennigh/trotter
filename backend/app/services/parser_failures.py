@@ -14,14 +14,18 @@ from __future__ import annotations
 
 import json
 import os
+import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Iterable, Iterator
 
-DEFAULT_LOG_PATH = (
-    Path(__file__).resolve().parents[2] / "scripts" / "flight_parser_failures.jsonl"
+DEFAULT_LOG_PATH = Path(
+    os.getenv(
+        "TROTTER_PARSER_FAILURE_LOG",
+        Path(__file__).resolve().parents[2] / "scripts" / "flight_parser_failures.jsonl",
+    )
 )
 
 FAILURE_TYPES = {

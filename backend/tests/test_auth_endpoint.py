@@ -1,12 +1,11 @@
 """Tests for the browser-based Google OAuth flow and authenticated profile."""
 
-import base64
-import json
 import time
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+import jwt
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -57,8 +56,15 @@ def auth_env(monkeypatch):
 
 
 def _oauth_state(app_redirect_uri: str = "trotterv2://oauthredirect") -> str:
-    payload = {"uri": app_redirect_uri, "exp": time.time() + 600}
-    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    now = int(time.time())
+    payload = {
+        "uri": app_redirect_uri,
+        "iat": now,
+        "exp": now + 600,
+        "iss": "trotter-oauth",
+        "aud": "trotter-oauth-callback",
+    }
+    return jwt.encode(payload, "test-jwt-secret", algorithm="HS256")
 
 
 class TestGoogleAuthEndpoint:
@@ -85,6 +91,25 @@ class TestGoogleAuthEndpoint:
         )
         assert response.status_code == 400
         assert response.json()["detail"] == "Disallowed redirect URI scheme"
+
+    def test_google_start_allows_configured_web_app_redirect(self, client, auth_env, monkeypatch):
+        monkeypatch.setenv("WEB_APP_URL", "https://app.trotter.example")
+        response = client.get(
+            "/auth/google/start",
+            params={"app_redirect_uri": "https://app.trotter.example/oauthredirect"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 307
+
+    def test_google_start_rejects_other_path_on_web_app_origin(self, client, auth_env, monkeypatch):
+        monkeypatch.setenv("WEB_APP_URL", "https://app.trotter.example")
+        response = client.get(
+            "/auth/google/start",
+            params={"app_redirect_uri": "https://app.trotter.example/steal-token"},
+        )
+
+        assert response.status_code == 400
 
     def test_google_start_requires_configuration(self, client, monkeypatch):
         monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
@@ -170,6 +195,43 @@ class TestGoogleAuthEndpoint:
         assert user.name == "Updated Name"
         assert test_db.query(User).count() == 1
 
+    @patch("app.routers.auth._verify_id_token", new_callable=AsyncMock)
+    @patch("app.routers.auth._exchange_code", new_callable=AsyncMock)
+    def test_google_callback_uses_fragment_for_web_token(
+        self,
+        mock_exchange,
+        mock_verify,
+        client,
+        test_db,
+        auth_env,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("WEB_APP_URL", "https://app.trotter.example")
+        mock_exchange.return_value = {
+            "refresh_token": "1//web_refresh_token",
+            "id_token": "test-id-token",
+            "scope": "https://www.googleapis.com/auth/gmail.readonly",
+        }
+        mock_verify.return_value = {
+            "iss": "accounts.google.com",
+            "email": "webuser@gmail.com",
+            "name": "Web User",
+        }
+
+        response = client.get(
+            "/auth/google/callback",
+            params={
+                "code": "test-code",
+                "state": _oauth_state("https://app.trotter.example/oauthredirect"),
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 307
+        redirect = urlparse(response.headers["location"])
+        assert redirect.query == ""
+        assert parse_qs(redirect.fragment)["token"][0]
+
     @patch("app.routers.auth._exchange_code", new_callable=AsyncMock)
     def test_google_callback_surfaces_exchange_failure(
         self,
@@ -191,6 +253,16 @@ class TestGoogleAuthEndpoint:
             "/auth/google/callback",
             params={"code": "test-code", "state": "not-valid-state"},
         )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Invalid or expired OAuth state"
+
+    def test_google_callback_rejects_forged_redirect(self, client, test_db, auth_env):
+        state = _oauth_state("https://example.com/steal-token")
+        response = client.get(
+            "/auth/google/callback",
+            params={"code": "test-code", "state": state},
+        )
+
         assert response.status_code == 400
         assert response.json()["detail"] == "Invalid or expired OAuth state"
 

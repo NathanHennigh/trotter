@@ -1,0 +1,6 @@
+# Copy this file to signing.properties and replace every placeholder.
+# Keep signing.properties and the upload keystore out of Git.
+storeFile=app/trotter-upload.keystore
+storePassword=replace-me
+keyAlias=trotter-upload
+keyPassword=replace-me

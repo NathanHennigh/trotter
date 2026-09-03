@@ -1,6 +1,6 @@
 # Trotter Context History
 
-Last updated: 2026-08-14
+Last updated: 2026-08-27
 
 ## Purpose
 
@@ -72,6 +72,14 @@ To build and install the native Android client:
 ```
 
 The setup script targets `mobile-v2/`, starts the backend and Expo environment, and discovers common Windows locations for Docker, Android SDK tools, and Android Studio's JDK.
+
+To create a standalone Android APK through the local WSL toolchain without installing it:
+
+```powershell
+.\scripts\Build-Android-Artifacts.ps1 -Mode apk
+```
+
+The artifact workflow verifies a clean synchronized `main`, copies `mobile-v2` into WSL's Linux filesystem, installs locked dependencies, runs Expo and TypeScript checks, builds with Gradle, validates the artifact, and publishes timestamped and `latest` files under the current Windows user's `Documents\builds` folder. Play AAB builds additionally require an ignored upload keystore, `android/signing.properties`, and an explicit version code.
 
 ## Development And Android Troubleshooting History
 

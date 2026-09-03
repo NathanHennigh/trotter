@@ -7,7 +7,7 @@ Current priorities after the flight parser and Gmail discovery reliability check
 - [ ] Build a production-ready new-user flow:
   - signed-out and onboarding screens instead of snapshot data
   - visible Google sign-in, reauthorization, and sign-out controls
-  - environment-based API configuration without a hardcoded ngrok fallback
+  - [x] environment-based API configuration without a hardcoded ngrok fallback
   - initial Gmail scan progress with phases, counters, network retry state, and completion messaging
   - polling that follows the import job to a terminal state instead of timing out after six minutes
 

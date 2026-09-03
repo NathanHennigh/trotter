@@ -5,11 +5,10 @@ Authentication endpoints — Google OAuth web flow + dev bypass.
 
 import os
 import time
-import secrets
-from datetime import datetime
 from typing import Optional
 from urllib.parse import urlencode
 
+import jwt
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -20,13 +19,10 @@ import httpx
 from ..db import get_db
 from ..models import User, Account
 from ..crypto import encrypt_refresh_token, decrypt_refresh_token
-from ..auth import create_app_jwt, get_user_from_jwt
+from ..auth import create_app_jwt, get_jwt_secret, get_user_from_jwt
 
 router   = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer()
-
-import base64
-import json
 
 SCOPES = " ".join([
     "openid", "profile", "email",
@@ -41,6 +37,43 @@ def _get_google_config():
     if not client_id or not client_secret:
         raise HTTPException(500, "Google OAuth not configured (GOOGLE_CLIENT_ID/SECRET missing)")
     return client_id, client_secret, backend_url
+
+
+def _is_allowed_app_redirect(app_redirect_uri: str) -> bool:
+    native_prefixes = ("trotter://", "trotterv2://", "exp://", "com.trotter")
+    if any(app_redirect_uri.startswith(prefix) for prefix in native_prefixes):
+        return True
+    web_app_url = os.getenv("WEB_APP_URL", "").rstrip("/")
+    return bool(web_app_url) and app_redirect_uri == f"{web_app_url}/oauthredirect"
+
+
+def _create_oauth_state(app_redirect_uri: str) -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "uri": app_redirect_uri,
+            "iat": now,
+            "exp": now + 600,
+            "iss": "trotter-oauth",
+            "aud": "trotter-oauth-callback",
+        },
+        get_jwt_secret(),
+        algorithm="HS256",
+    )
+
+
+def _decode_oauth_state(state: str) -> str:
+    state_data = jwt.decode(
+        state,
+        get_jwt_secret(),
+        algorithms=["HS256"],
+        issuer="trotter-oauth",
+        audience="trotter-oauth-callback",
+    )
+    app_redirect_uri = state_data["uri"]
+    if not isinstance(app_redirect_uri, str) or not _is_allowed_app_redirect(app_redirect_uri):
+        raise ValueError("Disallowed redirect")
+    return app_redirect_uri
 
 
 # ── Schema models ────────────────────────────────────────────────────────────
@@ -136,16 +169,10 @@ async def google_start(app_redirect_uri: str):
     client_id, _, backend_url = _get_google_config()
 
     # Validate the app redirect URI — only allow known schemes
-    allowed = ("trotter://", "trotterv2://", "exp://", "com.trotter")
-    if not any(app_redirect_uri.startswith(s) for s in allowed):
+    if not _is_allowed_app_redirect(app_redirect_uri):
         raise HTTPException(400, "Disallowed redirect URI scheme")
 
-    state_payload = {
-        "uri": app_redirect_uri,
-        "exp": time.time() + 600
-    }
-    state_bytes = json.dumps(state_payload).encode()
-    state = base64.urlsafe_b64encode(state_bytes).decode().rstrip("=")
+    state = _create_oauth_state(app_redirect_uri)
 
     callback_uri = f"{backend_url}/auth/google/callback"
     params = {
@@ -169,12 +196,7 @@ async def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     Exchange code → tokens → create app JWT → redirect back to app.
     """
     try:
-        padding = "=" * (4 - len(state) % 4)
-        state_bytes = base64.urlsafe_b64decode(state + padding)
-        state_data = json.loads(state_bytes)
-        if time.time() > state_data["exp"]:
-            raise ValueError("Expired")
-        app_redirect_uri = state_data["uri"]
+        app_redirect_uri = _decode_oauth_state(state)
     except Exception:
         raise HTTPException(400, "Invalid or expired OAuth state")
         
@@ -189,7 +211,8 @@ async def google_callback(code: str, state: str, db: Session = Depends(get_db)):
             raise HTTPException(400, "No refresh token returned — revoke app access in Google Account and retry")
         user = _upsert_user(db, user_info, refresh_tok, token_resp.get("scope", ""))
         jwt  = create_app_jwt(user.id, user.email)
-        # Redirect back to app with token in query string
+        if app_redirect_uri.startswith(("https://", "http://")):
+            return RedirectResponse(url=f"{app_redirect_uri}#token={jwt}")
         sep = "&" if "?" in app_redirect_uri else "?"
         return RedirectResponse(url=f"{app_redirect_uri}{sep}token={jwt}")
     except HTTPException:

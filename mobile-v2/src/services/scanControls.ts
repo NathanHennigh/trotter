@@ -1,4 +1,4 @@
-import { Linking } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import { getApiBaseUrl, getStoredToken, storeAuthToken } from './travelTrips';
 
 export type ScanJobStatus = {
@@ -44,8 +44,14 @@ export type UserInfo = {
 };
 
 export async function signInWithGoogle() {
-  const redirectUri = 'trotterv2://oauthredirect';
+  const redirectUri = getOAuthRedirectUri();
   const startUrl = `${getApiBaseUrl()}/auth/google/start?app_redirect_uri=${encodeURIComponent(redirectUri)}`;
+  if (Platform.OS === 'web') {
+    const browser = globalThis as typeof globalThis & { location?: { assign: (url: string) => void } };
+    if (!browser.location) throw new Error('Web sign-in requires a browser location.');
+    browser.location.assign(startUrl);
+    return new Promise<never>(() => undefined);
+  }
   const callbackUrl = await openExternalAuthSession(startUrl, redirectUri);
   const token = readQueryParam(callbackUrl, 'token');
   if (!token) {
@@ -54,6 +60,13 @@ export async function signInWithGoogle() {
 
   storeAuthToken(token);
   return getMe(token);
+}
+
+function getOAuthRedirectUri() {
+  if (Platform.OS !== 'web') return 'trotterv2://oauthredirect';
+  const browser = globalThis as typeof globalThis & { location?: { origin?: string } };
+  if (!browser.location?.origin) throw new Error('Web sign-in requires a browser origin.');
+  return `${browser.location.origin}/oauthredirect`;
 }
 
 function openExternalAuthSession(startUrl: string, redirectUri: string) {

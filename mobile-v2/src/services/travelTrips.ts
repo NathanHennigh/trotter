@@ -115,7 +115,9 @@ const COUNTRY_ABBREVIATIONS: Record<string, string> = {
   'United Arab Emirates': 'UAE',
 };
 
-const DEFAULT_API_BASE_URL = 'https://affectionate-aeroscopically-rhys.ngrok-free.dev';
+const DEFAULT_API_BASE_URL = 'http://localhost:8000';
+const CONFIGURED_API_BASE_URL = process.env.EXPO_PUBLIC_TROTTER_API_URL;
+const CONFIGURED_AUTH_TOKEN = process.env.EXPO_PUBLIC_TROTTER_AUTH_TOKEN;
 let memoryAuthToken: string | undefined;
 const AUTH_TOKEN_STORAGE_KEY = 'trotterAuthToken';
 
@@ -246,6 +248,7 @@ function useTravelTripsState(): TravelTripsContextValue {
       const token = readTokenFromUrl(url);
       if (!token) return;
       storeAuthToken(token);
+      removeTokenFromBrowserUrl(url);
       loadTrips('refreshing');
     };
 
@@ -297,14 +300,34 @@ function useTravelTripsState(): TravelTripsContextValue {
 
 export function getApiBaseUrl() {
   const params = getUrlParams();
-  const configured = params.get('apiUrl') || getProcessEnv('EXPO_PUBLIC_TROTTER_API_URL');
+  const configured = params.get('apiUrl') || CONFIGURED_API_BASE_URL;
   if (configured) return configured.replace(/\/$/, '');
   return DEFAULT_API_BASE_URL;
 }
 
+function removeTokenFromBrowserUrl(url: string) {
+  const browser = globalThis as typeof globalThis & {
+    history?: { replaceState: (data: unknown, unused: string, url?: string | URL | null) => void };
+    location?: { origin?: string };
+  };
+  if (!browser.history || !browser.location?.origin) return;
+  try {
+    const parsed = new URL(url);
+    const fragmentParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+    const hasToken = parsed.searchParams.has('token') || fragmentParams.has('token');
+    if (parsed.origin !== browser.location.origin || !hasToken) return;
+    parsed.searchParams.delete('token');
+    fragmentParams.delete('token');
+    parsed.hash = fragmentParams.toString() ? `#${fragmentParams}` : '';
+    browser.history.replaceState({}, '', `${parsed.pathname}${parsed.search}${parsed.hash}`);
+  } catch {
+    // Native deep links do not need browser history cleanup.
+  }
+}
+
 export function getStoredToken() {
   const params = getUrlParams();
-  const token = params.get('token') || getProcessEnv('EXPO_PUBLIC_TROTTER_AUTH_TOKEN');
+  const token = params.get('token') || CONFIGURED_AUTH_TOKEN;
   const storage = getLocalStorage();
   if (token) {
     storeAuthToken(token);
@@ -339,8 +362,13 @@ export async function hydrateStoredToken() {
 }
 
 function getUrlParams() {
-  const location = (globalThis as { location?: { search?: string } }).location;
-  return new URLSearchParams(location?.search ?? '');
+  const location = (globalThis as { location?: { search?: string; hash?: string } }).location;
+  const params = new URLSearchParams(location?.search ?? '');
+  const fragmentParams = new URLSearchParams(location?.hash?.replace(/^#/, '') ?? '');
+  fragmentParams.forEach((value, key) => {
+    if (!params.has(key)) params.set(key, value);
+  });
+  return params;
 }
 
 function getLocalStorage() {
@@ -349,9 +377,12 @@ function getLocalStorage() {
 
 function readTokenFromUrl(url: string) {
   try {
-    return new URL(url).searchParams.get('token') ?? undefined;
+    const parsed = new URL(url);
+    return parsed.searchParams.get('token')
+      ?? new URLSearchParams(parsed.hash.replace(/^#/, '')).get('token')
+      ?? undefined;
   } catch {
-    const match = /[?&]token=([^&]+)/.exec(url);
+    const match = /[?&#]token=([^&#]+)/.exec(url);
     return match ? decodeURIComponent(match[1]) : undefined;
   }
 }
@@ -409,11 +440,6 @@ function readError(data: unknown, fallback: string) {
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
-
-function getProcessEnv(key: string) {
-  const processLike = globalThis as { process?: { env?: Record<string, string | undefined> } };
-  return processLike.process?.env?.[key];
 }
 
 function mapApiTrips(apiTrips: ApiTrip[]): TripSummary[] {

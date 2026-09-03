@@ -457,7 +457,8 @@ def _registrable_domain(domain: str) -> str:
 
 
 def _default_domains_csv_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "domains.csv"
+    configured = os.getenv("TROTTER_DOMAINS_CSV")
+    return Path(configured) if configured else Path(__file__).resolve().parents[3] / "domains.csv"
 
 
 def _extract_sender_domain(sender: str) -> Optional[str]:

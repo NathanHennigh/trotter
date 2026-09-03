@@ -36,7 +36,20 @@ backend/ngrok.exe
 trotter-parser-test-data-*/
 mobile-v2/expo-trip-detail.log
 mobile-v2/assets/photo-candidates/
+mobile-v2/docs/design-directions/
+mobile-v2/android/signing.properties
+mobile-v2/android/app/trotter-upload.keystore
+mobile-v2/android/app/*.jks
+
+# Local Android build outputs and downloaded build tooling
+artifacts/
+.tooling/
+deploy/home-server.env
+deploy/backups/
+deploy/secrets/*
+!deploy/secrets/README.md
 trotter-photo-curation/
+/mobile/
 temp.md
 
 # Node / Expo

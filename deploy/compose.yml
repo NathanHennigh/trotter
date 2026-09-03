@@ -1,0 +1,205 @@
+name: trotter
+
+x-backend-environment: &backend-environment
+  TROTTER_ENV: production
+  TROTTER_ENABLE_DOCS: "false"
+  BACKEND_URL: ${TROTTER_API_URL:?Set TROTTER_API_URL in home-server.env}
+  WEB_APP_URL: ${TROTTER_WEB_URL:?Set TROTTER_WEB_URL in home-server.env}
+  CORS_ALLOWED_ORIGINS: ${TROTTER_WEB_URL}
+  ALLOWED_HOSTS: ${TROTTER_API_HOST:?Set TROTTER_API_HOST in home-server.env},api,localhost,127.0.0.1
+  DEV_MODE: "false"
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: ${POSTGRES_DB:-trotter}
+  POSTGRES_USER: ${POSTGRES_USER:-trotter}
+  POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID in home-server.env}
+  GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google_client_secret
+  JWT_SECRET_FILE: /run/secrets/jwt_secret
+  ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
+  TROTTER_DATA_CACHE: /var/lib/trotter/data-cache
+  DREAM_THUMBNAIL_CACHE_DIR: /var/lib/trotter/dream-thumbnails
+  TROTTER_PARSER_FAILURE_LOG: /var/lib/trotter/parser-failures.jsonl
+  TROTTER_DOMAINS_CSV: /app/domains.csv
+  TROTTER_PARSE_WORKERS: ${TROTTER_PARSE_WORKERS:-4}
+  TROTTER_ENABLE_AUTOMATIC_BACKFILL: ${TROTTER_ENABLE_AUTOMATIC_BACKFILL:-true}
+  TROTTER_ENABLE_RECALL_DISCOVERY_TIERS: ${TROTTER_ENABLE_RECALL_DISCOVERY_TIERS:-true}
+  TROTTER_GMAIL_NETWORK_RETRY_SECONDS: ${TROTTER_GMAIL_NETWORK_RETRY_SECONDS:-1800}
+  TROTTER_GMAIL_NETWORK_RETRY_INTERVAL_SECONDS: ${TROTTER_GMAIL_NETWORK_RETRY_INTERVAL_SECONDS:-30}
+  AERODATABOX_ENABLED: ${AERODATABOX_ENABLED:-true}
+  AERODATABOX_RAPIDAPI_KEY: ${AERODATABOX_RAPIDAPI_KEY:-}
+  AERODATABOX_APIMARKET_KEY: ${AERODATABOX_APIMARKET_KEY:-}
+  AERODATABOX_PROVIDER_ORDER: ${AERODATABOX_PROVIDER_ORDER:-rapidapi,apimarket}
+  AERODATABOX_MAX_LOOKUPS_PER_SYNC: ${AERODATABOX_MAX_LOOKUPS_PER_SYNC:-60}
+  GEOAPIFY_API_KEY: ${GEOAPIFY_API_KEY:-}
+  GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+  DREAM_PARSER_MODEL: ${DREAM_PARSER_MODEL:-qwen3.5:4b}
+
+x-backend-secrets: &backend-secrets
+  - postgres_password
+  - google_client_secret
+  - jwt_secret
+  - encryption_key
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+services:
+  db:
+    image: trotter-postgis:local
+    build:
+      context: ..
+      dockerfile: deploy/postgis/Dockerfile
+      args:
+        POSTGRES_MAJOR: "16"
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-trotter}
+      POSTGRES_USER: ${POSTGRES_USER:-trotter}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../backend/db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
+
+  migrate:
+    image: trotter-backend:local
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment: *backend-environment
+    secrets: *backend-secrets
+    command: ["sh", "-c", "python -m app.preflight && alembic upgrade head"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+    logging: *default-logging
+
+  api:
+    image: trotter-backend:local
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment: *backend-environment
+    secrets: *backend-secrets
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
+    ports:
+      - "127.0.0.1:${TROTTER_LOCAL_API_PORT:-8000}:8000"
+    volumes:
+      - trotter_data:/var/lib/trotter
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+
+  worker:
+    image: trotter-backend:local
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment: *backend-environment
+    secrets: *backend-secrets
+    command: ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=INFO", "--concurrency=${TROTTER_CELERY_CONCURRENCY:-2}"]
+    volumes:
+      - trotter_data:/var/lib/trotter
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    stop_grace_period: 2m
+    logging: *default-logging
+
+  web:
+    image: trotter-web:local
+    build:
+      context: ..
+      dockerfile: mobile-v2/Dockerfile.web
+      args:
+        EXPO_PUBLIC_TROTTER_API_URL: ${TROTTER_API_URL}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${TROTTER_LOCAL_WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflare_tunnel_token"]
+    secrets:
+      - cloudflare_tunnel_token
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    logging: *default-logging
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+  google_client_secret:
+    file: ./secrets/google_client_secret
+  jwt_secret:
+    file: ./secrets/jwt_secret
+  encryption_key:
+    file: ./secrets/encryption_key
+  cloudflare_tunnel_token:
+    file: ./secrets/cloudflare_tunnel_token
+
+volumes:
+  postgres_data:
+  redis_data:
+  trotter_data:

@@ -28,6 +28,36 @@ Trotter uses Metro port `8083` by default so it does not collide with other Expo
 
 Local iPhone builds require macOS and Xcode. From Windows, use an EAS iOS development build and an Apple Developer account instead.
 
+## Build Android Artifacts In WSL
+
+The helper mirrors the Etch build-only workflow: it copies `mobile-v2` into WSL's Linux filesystem, installs locked dependencies, runs Expo configuration and TypeScript checks, and builds verified artifacts without installing or uploading them. Release mode also requires a clean `main` branch that exactly matches `origin/main`; development mode builds the current working tree for personal testing.
+
+WSL Ubuntu needs nvm with Node `20.20.2`, Java 17, `rsync`, `unzip`, and the Android SDK at `~/Android/Sdk`.
+
+Build a standalone preview APK:
+
+```powershell
+.\scripts\Build-Android-Artifacts.ps1 -Mode apk -ApiBaseUrl https://api.example.com
+```
+
+Build a personal test APK from the current working tree, including uncommitted changes:
+
+```powershell
+.\scripts\Build-Android-Artifacts.ps1 -Mode apk -Development -ApiBaseUrl https://api.example.com
+```
+
+Development artifacts include `-dev` in their timestamped filename. Release builds remain restricted to a clean `main` branch that exactly matches `origin/main`.
+
+Artifacts are written to `$env:USERPROFILE\Documents\builds`, including a timestamped file, `trotter-latest.apk`, and a SHA-256 checksum.
+
+For a Play AAB, first create an Android upload key, copy `mobile-v2/android/signing.properties.example` to the ignored `signing.properties`, and fill in its real values. Then supply a Play version code greater than every version already uploaded:
+
+```powershell
+.\scripts\Build-Android-Artifacts.ps1 -Mode both -VersionCode 2 -ApiBaseUrl https://api.example.com
+```
+
+The APK falls back to the tracked debug key for convenient local installation. The script refuses to create an AAB unless the private signing configuration and keystore exist.
+
 ## Current Scope
 
 - Passport/ticket-inspired home screen.

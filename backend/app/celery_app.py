@@ -3,8 +3,9 @@ from celery import Celery
 
 
 def create_celery_app() -> Celery:
-	broker_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-	backend_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+	redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+	broker_url = os.getenv("CELERY_BROKER_URL", redis_url)
+	backend_url = os.getenv("CELERY_RESULT_BACKEND", redis_url)
 	app = Celery(
 		"travelstrava",
 		broker=broker_url,

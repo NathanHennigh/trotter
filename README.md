@@ -10,6 +10,10 @@ TravelStrava is the Strava of travel: a private-by-default app that reconstructs
 
 From a fresh install on Android, a user signs in with Google, grants Gmail read-only access, and sees at least one real flight route from their inbox drawn on a map with basic trip details. Import runs in the background on the backend with a job status endpoint; the app can poll for progress (UI progress display may land after the core slice). The pipeline runs end to end with tests and docs.
 
+## Home-server deployment
+
+The production-style stack lives in `deploy/`. It runs FastAPI, Celery, Postgres/PostGIS, Redis, and an Expo web build behind an outbound-only Cloudflare Tunnel. See [deploy/README.md](deploy/README.md) for domain setup, SQLite migration, secrets, deployment, mobile builds, backups, and recovery. Oracle Cloud Always Free provisioning is covered in [deploy/OCI.md](deploy/OCI.md).
+
 ## Non-goals for Phase 0
 
 No leaderboards, no badges, no tours, no publishing, no push webhooks, no Outlook, no location history. We will not persist raw email bodies.
