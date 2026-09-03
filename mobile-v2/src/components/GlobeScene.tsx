@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { PanResponder, StyleSheet, View } from 'react-native';
 import { GLView } from 'expo-gl';
-import Renderer from 'expo-three/build/Renderer';
-import TextureLoader from 'expo-three/build/TextureLoader';
 import * as THREE from 'three';
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import { ExpoRenderer, ExpoTextureLoader } from '../lib/expoThree';
 import { colors } from '../theme/tokens';
 import { flightMapPoints, flightRoutes, FlightRoute, RoutePoint } from '../data/demoTravel';
 import countryBorderRings from '../data/countryBorders110m.json';
@@ -498,7 +497,7 @@ export function GlobeScene({
 
   const onContextCreate = useCallback(async (gl: any) => {
     patchExpoPixelStorei(gl);
-    const renderer = new Renderer({ gl, antialias: true });
+    const renderer = new ExpoRenderer({ gl, antialias: true });
     renderer.setSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
 
     const scene = new THREE.Scene();
@@ -522,8 +521,8 @@ export function GlobeScene({
       typeof maxTextureSize === 'number' && maxTextureSize >= 4096
         ? EARTH_DAY_TEXTURE_HIGH
         : EARTH_DAY_TEXTURE_STANDARD;
-    const dayTexture = new TextureLoader().load(dayTextureAsset);
-    const nightTexture = new TextureLoader().load(EARTH_NIGHT_TEXTURE);
+    const dayTexture = new ExpoTextureLoader().load(dayTextureAsset);
+    const nightTexture = new ExpoTextureLoader().load(EARTH_NIGHT_TEXTURE);
     const maxAnisotropy = renderer.capabilities?.getMaxAnisotropy?.() ?? 1;
     const textureAnisotropy = Math.max(1, Math.min(4, maxAnisotropy || 1));
     dayTexture.anisotropy = textureAnisotropy;
@@ -664,7 +663,7 @@ export function GlobeScene({
           mesh.visible = opacity > 0 && isNearVisibleHemisphere;
           material.opacity = mesh.visible ? opacity : 0;
           if (mesh.visible && !mesh.userData.loaded) {
-            const texture = new TextureLoader().load(mesh.userData.tileAsset);
+            const texture = new ExpoTextureLoader().load(mesh.userData.tileAsset);
             texture.colorSpace = THREE.SRGBColorSpace;
             texture.anisotropy = textureAnisotropy;
             material.map = texture;
