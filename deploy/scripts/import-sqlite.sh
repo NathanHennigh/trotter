@@ -13,6 +13,7 @@ ENV_FILE="$DEPLOY_DIR/home-server.env"
 COMPOSE_FILE="$DEPLOY_DIR/compose.yml"
 compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
+"${compose[@]}" build migrate
 "${compose[@]}" up -d db redis
 "${compose[@]}" run --rm migrate
 "${compose[@]}" run --rm \
