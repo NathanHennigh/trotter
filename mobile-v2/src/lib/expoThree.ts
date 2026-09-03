@@ -27,13 +27,19 @@ async function resolveAsset(reference: AssetReference) {
     throw new Error(`Cannot resolve asset automatically: ${String(reference)}`);
   }
 
-  if (!asset.localUri) {
-    try {
-      await asset.downloadAsync();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!message.includes('unsupported URL')) throw error;
+  const needsNativeFile = Platform.OS !== 'web' && !asset.localUri?.startsWith('file://');
+  if (!asset.localUri || needsNativeFile) {
+    // Android image requires resolve to resource identifiers. Expo GL can only
+    // decode a file URI, so force expo-asset to copy the resource into cache.
+    if (needsNativeFile) {
+      asset.localUri = null;
+      asset.downloaded = false;
     }
+    await asset.downloadAsync();
+  }
+
+  if (Platform.OS !== 'web' && !asset.localUri?.startsWith('file://')) {
+    throw new Error(`Texture asset did not resolve to a local file: ${asset.uri}`);
   }
 
   return asset;

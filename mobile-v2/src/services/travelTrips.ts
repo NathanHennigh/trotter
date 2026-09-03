@@ -5,6 +5,7 @@ import type { CountryIconKey, StampShapeKey } from '../components/trotter/stamps
 import { realTravelerProfile, realTravelTrips } from '../data/realTravelSnapshot';
 import type { TravelerProfile, TripSummary } from '../data/trotterMock';
 import type { TrotterAccent } from '../theme/trotterTheme';
+import { requestGoogleAuthToken } from './googleAuth';
 
 type ApiSegment = {
   id: number;
@@ -274,8 +275,11 @@ function useTravelTripsState(): TravelTripsContextValue {
     syncFromGmail: async () => {
       setStatus('syncing');
       try {
-        const token = getStoredToken() ?? await hydrateStoredToken();
-        if (!token) throw new Error('No auth token. Sign in with Google first.');
+        let token = getStoredToken() ?? await hydrateStoredToken();
+        if (!token) {
+          token = await requestGoogleAuthToken(getApiBaseUrl());
+          storeAuthToken(token);
+        }
         const importResponse = await authFetch('/ingest/gmail/import', { method: 'POST' }, token);
         if (importResponse.status === 401) {
           clearAuthToken();
