@@ -6,7 +6,7 @@ import argparse
 import os
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine, func, inspect, select, text
+from sqlalchemy import Engine, Enum as SqlEnum, MetaData, create_engine, func, inspect, select, text
 
 from app.models import Base
 
@@ -15,6 +15,8 @@ def copy_database(source: Engine, target: Engine, *, truncate: bool = False) -> 
     source_tables = set(inspect(source).get_table_names())
     target_tables = set(inspect(target).get_table_names())
     model_tables = [table for table in Base.metadata.sorted_tables if table.name in source_tables]
+    source_metadata = MetaData()
+    source_metadata.reflect(bind=source, only=[table.name for table in model_tables])
 
     missing_targets = [table.name for table in model_tables if table.name not in target_tables]
     if missing_targets:
@@ -36,7 +38,11 @@ def copy_database(source: Engine, target: Engine, *, truncate: bool = False) -> 
             target_connection.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
 
         for table in model_tables:
-            rows = [dict(row._mapping) for row in source_connection.execute(select(table))]
+            source_table = source_metadata.tables[table.name]
+            rows = [
+                _normalize_row(dict(row._mapping), table)
+                for row in source_connection.execute(select(source_table))
+            ]
             if rows:
                 target_connection.execute(table.insert(), rows)
             copied[table.name] = len(rows)
@@ -45,6 +51,17 @@ def copy_database(source: Engine, target: Engine, *, truncate: bool = False) -> 
             _reset_postgres_sequences(target_connection, model_tables)
 
     return copied
+
+
+def _normalize_row(row: dict, target_table) -> dict:
+    for column in target_table.columns:
+        value = row.get(column.name)
+        if value is None or not isinstance(column.type, SqlEnum) or not isinstance(value, str):
+            continue
+        enum_class = column.type.enum_class
+        if enum_class is not None and value in enum_class.__members__:
+            row[column.name] = enum_class.__members__[value]
+    return row
 
 
 def _reset_postgres_sequences(connection, tables) -> None:
