@@ -12,8 +12,8 @@ Create an Always Free-eligible compute instance with:
 
 - Shape: `VM.Standard.A1.Flex`
 - CPU and memory: 2 OCPUs and 12 GB RAM
-- Image: Ubuntu 24.04 (`aarch64`)
-- Boot volume: 50 GB
+- Image: Canonical Ubuntu 24.04 Minimal (`aarch64`)
+- Boot volume: the default 46.6 GB (or larger)
 - Authentication: upload a dedicated SSH public key
 
 Keep the default SSH ingress rule while provisioning. Trotter's HTTP services do
@@ -23,10 +23,13 @@ Shell/Bastion.
 
 ## 2. Prepare the Host
 
-Connect as the image's `ubuntu` user, clone Trotter under the persistent home
-directory, and bootstrap Docker:
+Connect as the image's `ubuntu` user. The Minimal image does not include Git, so
+install the small set of bootstrap tools first. Then clone Trotter under the
+persistent home directory and bootstrap Docker:
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl git
 git clone https://github.com/NathanHennigh/trotter.git ~/trotter
 cd ~/trotter/deploy
 chmod +x scripts/*.sh

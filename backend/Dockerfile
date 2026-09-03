@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     POETRY_VIRTUALENVS_CREATE=false
 
-RUN pip install --no-cache-dir poetry==1.8.5 \
+RUN pip install --no-cache-dir poetry==2.4.2 \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin trotter
 
 WORKDIR /app
