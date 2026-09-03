@@ -140,16 +140,18 @@ if [[ "$project_real" != "$home_real/projects/trotter-mobile-v2" ]]; then
 fi
 PROJECT="$project_real"
 
-rsync -a --delete \
+rsync -a --delete --delete-excluded \
   --exclude node_modules \
   --exclude .expo \
   --exclude .gradle \
   --exclude dist \
   --exclude build \
   --exclude qa-screens \
+  --exclude assets/photo-candidates \
   --exclude docs/design-directions \
   --exclude android/.gradle \
   --exclude android/build \
+  --exclude android/app/.cxx \
   --exclude android/app/build \
   --exclude android/local.properties \
   "$SOURCE_MOBILE/" "$PROJECT/"
