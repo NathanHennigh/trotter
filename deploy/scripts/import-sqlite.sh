@@ -12,12 +12,28 @@ DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 ENV_FILE="$DEPLOY_DIR/home-server.env"
 COMPOSE_FILE="$DEPLOY_DIR/compose.yml"
 compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+staged_file=/var/lib/trotter/sqlite-import/trotter.db
+
+cleanup_staged_file() {
+  "${compose[@]}" run --rm --no-deps --user root --entrypoint rm \
+    api -f "$staged_file" >/dev/null 2>&1 || true
+}
+
+trap cleanup_staged_file EXIT
 
 "${compose[@]}" build migrate
 "${compose[@]}" up -d db redis
 "${compose[@]}" run --rm migrate
 "${compose[@]}" run --rm \
+  --no-deps \
+  --user root \
+  --entrypoint install \
   --volume "$SQLITE_FILE:/migration/trotter.db:ro" \
-  api python -m scripts.migrate_sqlite_to_postgres --source /migration/trotter.db
+  api -D -o trotter -g trotter -m 0400 /migration/trotter.db "$staged_file"
+"${compose[@]}" run --rm --no-deps \
+  api python -m scripts.migrate_sqlite_to_postgres --source "$staged_file"
+
+cleanup_staged_file
+trap - EXIT
 
 echo 'SQLite data imported. Start the full stack with ./scripts/deploy.sh.'
