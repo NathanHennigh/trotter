@@ -7,9 +7,12 @@ from .crypto import get_encryption_key
 
 
 def _required(name: str) -> str:
-    value = os.getenv(name, "").strip()
+    raw_value = os.getenv(name, "")
+    value = raw_value.strip()
     if not value:
         raise ValueError(f"{name} is required")
+    if raw_value != value:
+        raise ValueError(f"{name} must not contain surrounding whitespace")
     return value
 
 
