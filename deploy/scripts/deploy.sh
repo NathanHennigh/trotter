@@ -12,7 +12,7 @@ done
 docker compose version >/dev/null
 
 [[ -f "$ENV_FILE" ]] || { echo "ERROR: Copy home-server.env.example to $ENV_FILE and edit it." >&2; exit 1; }
-for secret_name in postgres_password google_client_secret jwt_secret encryption_key cloudflare_tunnel_token; do
+for secret_name in postgres_password google_client_secret jwt_secret encryption_key cloudflare_tunnel_token venice_api_key; do
   [[ -s "$SECRETS_DIR/$secret_name" ]] || { echo "ERROR: Missing secret: $SECRETS_DIR/$secret_name" >&2; exit 1; }
 done
 

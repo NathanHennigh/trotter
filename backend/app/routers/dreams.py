@@ -22,7 +22,6 @@ from ..services.dream_parser import (
     DreamParseResponse,
     fallback_needs_review_response,
     parse_caption_with_fallback_model,
-    parse_caption_with_ollama,
 )
 from ..services.dream_thumbnail_cache import (
     DreamThumbnailError,
@@ -777,7 +776,7 @@ def parse_travel_caption_batch(
     for source_url in urls:
         try:
             caption, _metadata = resolve_caption_for_parse(source_url, None)
-            parsed = parse_caption_with_ollama(caption, source_url)
+            parsed = parse_caption_with_fallback_model(caption, source_url)
             results.append(ParseTravelCaptionBatchResult(source_url=source_url, ok=True, result=parsed))
         except HTTPException as exc:
             if exc.status_code in (status.HTTP_422_UNPROCESSABLE_ENTITY, status.HTTP_502_BAD_GATEWAY):

@@ -7,7 +7,8 @@ Create these extensionless files in this directory before deployment:
 - `encryption_key`: the existing backend `ENCRYPTION_KEY` when migrating data. Changing it makes stored Google refresh tokens unreadable.
 - `google_client_secret`: the existing Google OAuth web client secret.
 - `cloudflare_tunnel_token`: the token for the remotely managed Cloudflare Tunnel.
+- `venice_api_key`: a Venice API key used only by the API and worker containers.
 
-Run `./scripts/init-secrets.sh` on the Linux server to generate the first two and a new encryption key. When migrating the existing database, replace the generated encryption key with the exact value from the current backend `.env` before importing data.
+Run `./scripts/init-secrets.sh` on the Linux server to generate the first two and a new encryption key. It also creates empty placeholders for service credentials. When migrating the existing database, replace the generated encryption key with the exact value from the current backend `.env` before importing data.
 
 These files are ignored by Git. Restrict the directory and files to the deployment user (`chmod 700 secrets && chmod 600 secrets/*`).

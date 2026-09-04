@@ -24,7 +24,7 @@ write_if_missing "$SECRETS_DIR/postgres_password" "$(openssl rand -hex 32)"
 write_if_missing "$SECRETS_DIR/jwt_secret" "$(openssl rand -hex 32)"
 write_if_missing "$SECRETS_DIR/encryption_key" "$(openssl rand -base64 32)"
 
-for required_secret in google_client_secret cloudflare_tunnel_token; do
+for required_secret in google_client_secret cloudflare_tunnel_token venice_api_key; do
   if [[ ! -e "$SECRETS_DIR/$required_secret" ]]; then
     : > "$SECRETS_DIR/$required_secret"
     echo "Created empty placeholder: $SECRETS_DIR/$required_secret"
@@ -32,4 +32,4 @@ for required_secret in google_client_secret cloudflare_tunnel_token; do
 done
 
 chmod 600 "$SECRETS_DIR"/*
-echo 'Fill google_client_secret and cloudflare_tunnel_token before deployment.'
+echo 'Fill google_client_secret, cloudflare_tunnel_token, and venice_api_key before deployment.'

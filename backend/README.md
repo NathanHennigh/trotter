@@ -35,6 +35,12 @@ FastAPI backend for Phase 0 with Google OAuth, Gmail integration, and PostGIS.
    
    # Gmail API
    GMAIL_SCOPES=https://www.googleapis.com/auth/gmail.readonly
+
+   # Hosted Dreams extraction
+   DREAM_AI_PROVIDER=venice
+   DREAM_AI_PRIMARY_MODEL=qwen3-5-9b
+   DREAM_AI_FALLBACK_MODEL=kimi-k2-5
+   VENICE_API_KEY=your-server-side-venice-key
    
    # App Security
    SECRET_KEY=your-jwt-secret-key-change-in-production
@@ -75,6 +81,12 @@ FastAPI backend for Phase 0 with Google OAuth, Gmail integration, and PostGIS.
    - **Web application** (for backend token exchange)
    - **Android** (for mobile app - configure separately)
 5. Add your client ID and secret to `.env`
+
+### Dreams AI
+
+Dreams parsing uses the Venice OpenAI-compatible chat-completions API by default. The primary model returns strict JSON Schema output; weak or failed parses can selectively retry with the configured fallback model. The API key is read only by the backend.
+
+Local Ollama remains available for parser baselines by setting `DREAM_AI_PROVIDER=ollama`. It is not needed for normal development or production.
 
 ### Testing
 

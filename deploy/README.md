@@ -17,6 +17,7 @@ The API and web ports are also bound to `127.0.0.1` on the server for local diag
 - Outbound internet access from the server. Cloudflare Tunnel uses outbound connections, so no inbound router rule is required.
 - The current `backend/trotter.db` and the exact current `ENCRYPTION_KEY` when migrating existing data.
 - A Google OAuth web client.
+- A Venice API key for hosted Dreams extraction.
 
 ## 1. Prepare Configuration
 
@@ -33,6 +34,7 @@ Edit `home-server.env` with the real API hostname, web hostname, and Google clie
 
 - `google_client_secret`
 - `cloudflare_tunnel_token`
+- `venice_api_key`
 
 For an existing Trotter database, replace the generated `secrets/encryption_key` with the exact `ENCRYPTION_KEY` from the old `backend/.env`. Do this before importing. Changing this key makes existing encrypted Google refresh tokens unreadable.
 
@@ -140,10 +142,24 @@ Restore is intentionally guarded because it replaces the current database:
 - Keep `DEV_MODE=false`; production preflight refuses to start otherwise.
 - API docs are disabled in production.
 - CORS only allows the configured web origin.
-- Only the API and web applications are routed through Cloudflare. Never publish Postgres, Redis, Docker, SSH, or Ollama through the public tunnel.
+- Only the API and web applications are routed through Cloudflare. Never publish Postgres, Redis, Docker, or SSH through the public tunnel.
 - Add Cloudflare rate limits for `/auth/*` and `/ingest/*` after the first successful deployment.
 - Rotate the Cloudflare tunnel token if it is exposed. Do not rotate `ENCRYPTION_KEY` without a deliberate refresh-token re-encryption migration.
+- Keep the Venice API key in `deploy/secrets/venice_api_key`; never place it in the mobile app or commit it.
 
-## Optional Ollama
+## Dreams AI
 
-Dream parsing expects Ollama at `OLLAMA_BASE_URL`, which defaults to `http://host.docker.internal:11434` in this deployment. Install and run Ollama directly on the home server, bind it only to interfaces reachable from Docker, and pull the configured `qwen3.5:4b` model. Do not expose Ollama through Cloudflare.
+Dream parsing uses Venice by default with `qwen3-5-9b` as the primary extractor and `kimi-k2-5` as the selective fallback. Put the API key in the ignored secret file without a trailing explanation or quotes:
+
+```bash
+cd /opt/trotter/deploy
+read -rsp 'Venice API key: ' VENICE_KEY && echo
+printf '%s' "$VENICE_KEY" > secrets/venice_api_key
+unset VENICE_KEY
+chmod 600 secrets/venice_api_key
+./scripts/deploy.sh
+```
+
+The backend uses strict JSON Schema responses, disables model web search, and stores only request IDs, token counts, finish reasons, and operational warnings from hosted responses. A missing or unavailable provider never deletes the shared Dream source; the item remains reviewable.
+
+For local baseline testing only, set `DREAM_AI_PROVIDER=ollama`, set `OLLAMA_BASE_URL`, and optionally retain the legacy `DREAM_PARSER_MODEL` variables. Ollama is not required in the production deployment.

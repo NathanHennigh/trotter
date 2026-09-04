@@ -232,7 +232,7 @@ def test_review_confirm_applies_edits(client, test_user, test_db):
     assert item.dream.title == "Spain"
 
 
-def test_parse_caption_endpoint_uses_ollama_service(client, test_user, monkeypatch):
+def test_parse_caption_endpoint_uses_configured_ai_service(client, test_user, monkeypatch):
     def fake_parse(caption, source_url=None):
         assert "Casa Dani" in caption
         assert source_url == "https://instagram.com/reel/parser"
@@ -367,7 +367,7 @@ def test_parse_caption_batch_accepts_url_array_and_keeps_failures(client, test_u
         )
 
     monkeypatch.setattr("app.routers.dreams.fetch_instagram_metadata", fake_metadata)
-    monkeypatch.setattr("app.routers.dreams.parse_caption_with_ollama", fake_parse)
+    monkeypatch.setattr("app.routers.dreams.parse_caption_with_fallback_model", fake_parse)
 
     response = client.post(
         "/parse-travel-caption/batch",
@@ -424,7 +424,7 @@ def test_parse_caption_batch_accepts_pasted_links_and_dedupes(client, test_user,
         )
 
     monkeypatch.setattr("app.routers.dreams.fetch_instagram_metadata", fake_metadata)
-    monkeypatch.setattr("app.routers.dreams.parse_caption_with_ollama", fake_parse)
+    monkeypatch.setattr("app.routers.dreams.parse_caption_with_fallback_model", fake_parse)
 
     response = client.post(
         "/parse-travel-caption/batch",
@@ -471,7 +471,7 @@ def test_parse_item_applies_parser_result_and_regroups(client, test_user, test_d
             model="qwen3.5:4b",
         )
 
-    monkeypatch.setattr("app.routers.dreams.parse_caption_with_ollama", fake_parse)
+    monkeypatch.setattr("app.routers.dreams.parse_caption_with_fallback_model", fake_parse)
 
     response = client.post(
         f"/dream-items/{created['dream_item_id']}/parse",
@@ -525,7 +525,7 @@ def test_parse_item_without_caption_fetches_metadata(client, test_user, test_db,
         )
 
     monkeypatch.setattr("app.routers.dreams.fetch_instagram_metadata", fake_metadata)
-    monkeypatch.setattr("app.routers.dreams.parse_caption_with_ollama", fake_parse)
+    monkeypatch.setattr("app.routers.dreams.parse_caption_with_fallback_model", fake_parse)
 
     response = client.post(f"/dream-items/{created['dream_item_id']}/parse")
 
@@ -580,7 +580,7 @@ def test_duplicate_url_enrichment_uses_caption_fallback_when_model_is_down(clien
     def failed_parse(*args, **kwargs):
         from app.services.dream_parser import DreamParserError
 
-        raise DreamParserError("Ollama unavailable")
+        raise DreamParserError("AI provider unavailable")
 
     monkeypatch.setattr("app.routers.dreams.fetch_instagram_metadata", fake_metadata)
     monkeypatch.setattr("app.routers.dreams.parse_caption_with_fallback_model", failed_parse)
