@@ -360,6 +360,29 @@ class TestUnparsedCandidates:
 
         assert [row.provider_msg_id for row in selected] == [targeted_id]
 
+    def test_targeted_reparse_can_recover_ignored_message(self, test_user, test_db):
+        targeted = Message(
+            user_id=test_user.id,
+            provider_msg_id="known-ignored-miss",
+            subject="Previously misclassified confirmation",
+            status=MessageStatus.ACCEPTED,
+            ignored=True,
+            parse_error="ignored_nonflight_promo",
+            parse_version=22,
+        )
+        test_db.add(targeted)
+        test_db.commit()
+
+        selected = _select_stale_reparse_messages(
+            test_db,
+            user_id=test_user.id,
+            parser_version=23,
+            limit=1,
+            targeted_ids={targeted.provider_msg_id},
+        )
+
+        assert [row.provider_msg_id for row in selected] == [targeted.provider_msg_id]
+
     def test_expensive_parse_gate_skips_newsletter_backfill(self):
         evidence = assess_flight_evidence(
             subject="Leaving The Peacock's Nest",

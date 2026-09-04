@@ -364,7 +364,11 @@ def _select_stale_reparse_messages(
     if targeted_ids:
         targeted = (
             db.query(Message)
-            .filter(*base_filters, Message.provider_msg_id.in_(targeted_ids))
+            .filter(
+                Message.user_id == user_id,
+                Message.parse_version < parser_version,
+                Message.provider_msg_id.in_(targeted_ids),
+            )
             .order_by(Message.created_at.desc(), Message.id.desc())
             .all()
         )
