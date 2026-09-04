@@ -4,8 +4,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlobeScene } from '../components/GlobeScene';
 import {
   BottomNav,
+  DarkPanel,
+  IconButton,
   IconGlyph,
   NewFlightsBanner,
+  PassportViewButton,
+  SplitFlapNumber,
   SplitFlapStatsPanel,
   SyncStatusPill,
   TrotterHeaderTag,
@@ -14,15 +18,16 @@ import { BottomNavTab } from '../data/trotterMock';
 import { FlightRoute, RoutePoint } from '../data/demoTravel';
 import { useTravelTrips } from '../services/travelTrips';
 import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
-import { getMobileVisualWidth } from '../utils/mobileLayout';
 
 export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; onChange: (tab: BottomNavTab) => void }) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const visualWidth = getMobileVisualWidth(width);
-  const screenPadding = visualWidth < 390 ? 16 : layout.screenPadding;
-  const contentWidth = visualWidth - screenPadding * 2;
-  const globeHeight = Math.max(470, Math.min(540, height * 0.55));
+  const screenPadding = width < 390 ? 16 : layout.screenPadding;
+  const contentWidth = width - screenPadding * 2;
+  const headerGap = width < 390 ? 8 : 10;
+  const headerTagWidth = Math.floor(contentWidth * (width < 390 ? 0.53 : 0.54));
+  const statsWidth = contentWidth - headerTagWidth - headerGap;
+  const globeHeight = Math.max(540, Math.min(650, height * 0.66));
   const { trips, profile, source, status, lastSyncedAt, syncFromGmail } = useTravelTrips();
   const isInitialLiveLoading = status === 'loading' && source !== 'api';
   const displayedTrips = isInitialLiveLoading ? [] : trips;
@@ -65,7 +70,7 @@ export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; on
   }, [displayedTrips]);
   const [selectedRoute, setSelectedRoute] = React.useState<FlightRoute | null>(null);
   const syncLabel = source === 'api'
-    ? `Updated ${formatSyncTime(lastSyncedAt)}`
+    ? `Synced ${formatSyncTime(lastSyncedAt)}`
     : status === 'loading' || status === 'syncing'
       ? 'Connecting...'
       : 'Snapshot mode';
@@ -73,36 +78,44 @@ export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; on
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24, width: visualWidth }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24 }}
       >
-        <View style={[styles.topRow, { paddingHorizontal: screenPadding }]}>
-          <TrotterHeaderTag width={contentWidth} year={travelYears.latest} />
-          <View style={[styles.statsWrap, { width: contentWidth }]}>
-            <SplitFlapStatsPanel width={contentWidth} compact flights={displayedProfile.flights} countries={displayedProfile.countries} airports={displayedProfile.airports} />
+        <View style={[styles.topRow, { paddingHorizontal: screenPadding, gap: headerGap }]}>
+          <TrotterHeaderTag width={headerTagWidth} year={travelYears.latest} />
+          <View style={[styles.statsWrap, { width: statsWidth }]}>
+            <SplitFlapStatsPanel width={statsWidth} compact flights={displayedProfile.flights} countries={displayedProfile.countries} airports={displayedProfile.airports} />
+            <SyncStatusPill lastSyncedLabel={syncLabel} sourceLabel={source === 'api' ? 'Live DB' : 'Local'} />
           </View>
         </View>
 
-        <View style={[styles.syncRow, { marginHorizontal: screenPadding }]}>
-          <SyncStatusPill lastSyncedLabel={syncLabel} sourceLabel={source === 'api' ? 'LIVE DATABASE' : 'LOCAL ARCHIVE'} />
+        <View style={[styles.filterRow, { paddingHorizontal: screenPadding }]}>
+          <DarkPanel padding={spacing.sm} radius={8} style={styles.yearChip}>
+            <Text allowFontScaling={false} style={styles.yearText}>{travelYears.latest}</Text>
+            <Text allowFontScaling={false} style={styles.chevron}>v</Text>
+          </DarkPanel>
+          <View style={styles.controlStack}>
+            <IconButton variant="dark" shape="circle" icon={<IconGlyph name="crosshair" size={23} />} />
+            <IconButton variant="dark" shape="circle" icon={<IconGlyph name="sliders" size={23} />} />
+          </View>
         </View>
 
         <View style={[styles.globeWrap, { height: globeHeight }]}>
-          <View pointerEvents="none" style={[styles.mapEyebrow, { left: screenPadding }]}>
-            <Text allowFontScaling={false} style={styles.mapEyebrowLabel}>FLIGHT MAP</Text>
-            <Text allowFontScaling={false} style={styles.mapEyebrowValue}>{travelYears.latest} / {liveRoutes.length} ROUTES</Text>
-          </View>
           <GlobeScene
             key={`live-globe-${source}-${liveRoutes.length}`}
             routes={liveRoutes}
             mapPoints={livePoints}
             onRoutePress={setSelectedRoute}
           />
-          <View pointerEvents="none" style={[styles.mapMetric, { left: screenPadding }]}>
-            <IconGlyph name="plane" color={colors.brassSoft} size={17} />
-            <View>
-              <Text allowFontScaling={false} style={styles.mapMetricValue}>{displayedProfile.miles.toLocaleString()} mi</Text>
-              <Text allowFontScaling={false} style={styles.mapMetricLabel}>LIFETIME DISTANCE</Text>
+          <DarkPanel padding={spacing.sm} radius={12} style={[styles.milesCard, { left: screenPadding }]}>
+            <View style={styles.milesTop}>
+              <IconGlyph name="plane" color={colors.creamText} size={20} />
+              <Text allowFontScaling={false} style={styles.milesLabel}>YOU'VE FLOWN</Text>
             </View>
+            <SplitFlapNumber value={displayedProfile.miles} />
+            <Text allowFontScaling={false} style={styles.milesUnit}>MILES</Text>
+          </DarkPanel>
+          <View style={[styles.passportButtonWrap, { right: screenPadding }]}>
+            <PassportViewButton />
           </View>
           {selectedRoute ? (
             <TripArcModal
@@ -123,7 +136,6 @@ export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; on
             sourceLabel={source === 'api' ? 'live database' : 'Google'}
             actionLabel={status === 'syncing' ? 'SYNCING' : 'SYNC'}
             onReview={syncFromGmail}
-            disabled={status === 'syncing'}
           />
         </View>
       </ScrollView>
@@ -190,72 +202,73 @@ const styles = StyleSheet.create({
   },
   topRow: {
     zIndex: 5,
-    gap: 10,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
   },
   statsWrap: {
     flexShrink: 1,
     minWidth: 0,
   },
-  syncRow: {
-    zIndex: 6,
-    marginTop: 10,
+  filterRow: {
+    zIndex: 5,
+    marginTop: 18,
+    paddingHorizontal: spacing.lg,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  yearChip: {
+    minWidth: 84,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  yearText: {
+    color: colors.creamText,
+    fontFamily: fonts.sansBold,
+    fontSize: 20,
+  },
+  chevron: {
+    color: colors.subtleText,
+    fontFamily: fonts.sansBold,
+    fontSize: 14,
+  },
+  controlStack: {
+    gap: 12,
   },
   globeWrap: {
-    marginTop: 4,
+    marginTop: -140,
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  mapEyebrow: {
+  milesCard: {
     position: 'absolute',
-    top: 14,
-    zIndex: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.darkBorder,
-    backgroundColor: 'rgba(21, 20, 18, 0.9)',
-    paddingHorizontal: 9,
-    paddingVertical: 7,
+    bottom: 82,
+    width: 174,
   },
-  mapEyebrowLabel: {
-    color: colors.subtleText,
-    fontFamily: fonts.sansBold,
-    fontSize: 9,
-    letterSpacing: 1.4,
-  },
-  mapEyebrowValue: {
-    color: colors.creamText,
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    marginTop: 3,
-  },
-  mapMetric: {
-    position: 'absolute',
-    bottom: 16,
-    zIndex: 5,
+  milesTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.darkBorder,
-    backgroundColor: 'rgba(21, 20, 18, 0.92)',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    gap: 6,
+    marginBottom: 6,
   },
-  mapMetricValue: {
+  milesLabel: {
     color: colors.creamText,
-    fontFamily: fonts.mono,
-    fontSize: 14,
+    fontFamily: fonts.sansBold,
+    fontSize: 11,
   },
-  mapMetricLabel: {
+  milesUnit: {
     color: colors.subtleText,
     fontFamily: fonts.sansBold,
-    fontSize: 7,
-    letterSpacing: 0.8,
-    marginTop: 1,
+    fontSize: 12,
+    textAlign: 'right',
+    marginTop: 5,
+  },
+  passportButtonWrap: {
+    position: 'absolute',
+    bottom: 72,
   },
   bannerWrap: {
-    marginTop: 12,
+    marginTop: -28,
   },
   arcModal: {
     position: 'absolute',

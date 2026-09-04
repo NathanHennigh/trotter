@@ -16,6 +16,7 @@ import { PngStamp } from '../components/trotter/stamps/PngStamp';
 import { BottomNavTab, TripSegmentSummary, TripSummary } from '../data/trotterMock';
 import { useTravelTrips } from '../services/travelTrips';
 import { accentColors, colors, fonts, layout, shadows, spacing } from '../theme/trotterTheme';
+import { formatAirlineFlight, formatAirlineNames } from '../utils/airlines';
 import { mapboxFlightImageUrl, mapboxFlightImageUrlFromCoordinates } from '../utils/mapboxFlightImage';
 import { getMobileVisualWidth } from '../utils/mobileLayout';
 
@@ -56,9 +57,11 @@ export function TripDetailScreen({
     : mapboxFlightImageUrl(firstSegment.depAirport, lastSegment.arrAirport, 720, 420, accent);
   const heroSource = activeTrip.destinationImage ?? (mapUrl ? ({ uri: mapUrl } as ImageSourcePropType) : undefined);
   const [heroImageFailed, setHeroImageFailed] = React.useState(false);
+  const [heroImageAttempt, setHeroImageAttempt] = React.useState(0);
 
   React.useEffect(() => {
     setHeroImageFailed(false);
+    setHeroImageAttempt(0);
   }, [activeTrip.destinationImage, mapUrl, activeTrip.id]);
 
   React.useEffect(() => {
@@ -103,7 +106,19 @@ export function TripDetailScreen({
           <PaperSurface radius={14} padding={0} style={[styles.heroCard, { marginHorizontal: screenPadding, width: contentWidth }]}>
             <View style={styles.heroImage}>
               {heroSource && !heroImageFailed ? (
-                <Image source={heroSource} resizeMode="cover" style={StyleSheet.absoluteFillObject} onError={() => setHeroImageFailed(true)} />
+                <Image
+                  key={`trip-map-${activeTrip.id}-${heroImageAttempt}`}
+                  source={heroSource}
+                  resizeMode="cover"
+                  style={StyleSheet.absoluteFillObject}
+                  onError={() => {
+                    if (mapUrl && !activeTrip.destinationImage && heroImageAttempt < 2) {
+                      setHeroImageAttempt((attempt) => attempt + 1);
+                      return;
+                    }
+                    setHeroImageFailed(true);
+                  }}
+                />
               ) : (
                 <View style={styles.heroFallback}>
                   <Text allowFontScaling={false} style={styles.heroFallbackLabel}>FLIGHT PATH</Text>
@@ -199,7 +214,7 @@ function FlightTimelineItem({ segment, index, isLast, accent }: { segment: TripS
           {formatSegmentTime(segment.depTime)} to {formatSegmentTime(segment.arrTime)}
         </Text>
         <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.flightMeta}>
-          {[segment.airline, segment.flightNumber].filter(Boolean).join(' ') || 'Airline pending'}
+          {formatAirlineFlight(segment.airline, segment.flightNumber)}
         </Text>
       </View>
     </View>
@@ -257,7 +272,7 @@ function uniqueRouteAirports(segments: TripSegmentSummary[]) {
 }
 
 function formatAirlines(trip: TripSummary) {
-  if (trip.airlines?.length) return trip.airlines.join(' / ');
+  if (trip.airlines?.length) return formatAirlineNames(trip.airlines);
   return `${trip.airlineCount} carrier${trip.airlineCount === 1 ? '' : 's'}`;
 }
 

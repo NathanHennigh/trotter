@@ -5,7 +5,13 @@ import time
 from app.services.parser import _extract_pnr, _extract_pnr_aliases, parse_email
 
 
-def _parse(subject: str, body: str, *, sender: str = "test@example.com"):
+def _parse(
+    subject: str,
+    body: str,
+    *,
+    sender: str = "test@example.com",
+    received_at: str = "Tue, 01 Jan 2019 12:00:00 +0000",
+):
     started = time.perf_counter()
     result = parse_email(
         html="",
@@ -13,7 +19,7 @@ def _parse(subject: str, body: str, *, sender: str = "test@example.com"):
         attachments=[],
         user_name="",
         aliases=[],
-        received_at="Tue, 01 Jan 2019 12:00:00 +0000",
+        received_at=received_at,
         subject=subject,
         from_email=sender,
     )
@@ -121,6 +127,86 @@ def test_southwest_receipt_sections_keep_wn_airline_code() -> None:
 
     assert _segments(result) == [
         ("WN18", "HOU", "DAL", "4JD5M8", "shape_southwest_itinerary_blocks"),
+    ]
+
+
+def test_alaska_trip_details_keep_every_connection() -> None:
+    body = """
+    Alaska Airlines Reservation
+    Confirmation code:
+    KONA26
+    Trip details
+
+    Flight 1 · Sat Aug 22
+    Alaska Airlines
+    AS 259 · Boeing 737-900 Passenger
+    KOA
+    SEA
+    Kona
+    Seattle
+    10:25 PM
+    7:20 AM
+    Sat Aug 22
+    Sun Aug 23
+
+    Next flight
+    Flight 2 · Sun Aug 23
+    Alaska Airlines
+    AS 340 · Boeing 737-900 Passenger
+    SEA
+    DFW
+    Seattle
+    Dallas/Fort Worth
+    8:40 AM
+    2:46 PM
+    Sun Aug 23
+    Sun Aug 23
+    Traveler(s):
+    Nathan Hennigh
+    """
+
+    result = _parse(
+        "Your flight is booked: KONA26 to Dallas/Fort Worth on 08/22/2026",
+        body,
+        sender="Alaska Airlines Reservation <reservation@email.alaskaair.com>",
+        received_at="Wed, 22 Jul 2026 21:27:35 +0000",
+    )
+
+    assert _segments(result) == [
+        ("AS259", "KOA", "SEA", "KONA26", "shape_alaska_trip_detail_blocks"),
+        ("AS340", "SEA", "DFW", "KONA26", "shape_alaska_trip_detail_blocks"),
+    ]
+
+
+def test_alaska_partner_award_trip_details_use_operating_airline() -> None:
+    body = """
+    Alaska Airlines Reservation
+    Confirmation code:
+    ATL26X
+    Trip details
+    Flight 1 · Thu Aug 27
+    American Airlines
+    AA 1008 · Boeing 737-800 Passenger
+    American Airlines
+    DFW
+    ATL
+    Dallas/Fort Worth
+    Atlanta
+    12:10 PM
+    3:20 PM
+    Thu Aug 27
+    Thu Aug 27
+    """
+
+    result = _parse(
+        "Your flight is booked: ATL26X to Atlanta on 08/27/2026",
+        body,
+        sender="Alaska Airlines Reservation <reservation@email.alaskaair.com>",
+        received_at="Tue, 11 Aug 2026 22:27:07 -0500",
+    )
+
+    assert _segments(result) == [
+        ("AA1008", "DFW", "ATL", "ATL26X", "shape_alaska_trip_detail_blocks"),
     ]
 
 

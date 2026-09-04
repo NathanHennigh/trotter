@@ -1,11 +1,11 @@
 import React from 'react';
 import {
+  FlatList,
   Image,
   ImageBackground,
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -64,6 +64,7 @@ export function TripsListScreen({
 
   const upcomingTrips = filteredTrips.filter(trip => trip.startDate >= today);
   const pastTrips = filteredTrips.filter(trip => trip.startDate < today);
+  const visibleTrips = [...upcomingTrips, ...pastTrips];
 
   return (
     <View style={styles.screen}>
@@ -77,60 +78,80 @@ export function TripsListScreen({
             />
           </View>
         ) : null}
-        <ScrollView
+        <FlatList
+          data={visibleTrips}
+          keyExtractor={(trip) => trip.id}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={status === 'loading' || status === 'refreshing' || status === 'syncing'} onRefresh={refresh} tintColor={colors.red} />}
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          updateCellsBatchingPeriod={80}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === 'android'}
           contentContainerStyle={{
             paddingTop: insets.top + 6,
             paddingBottom: insets.bottom + layout.bottomNavHeight + 28,
             width: visualWidth,
           }}
-        >
-          <TripsHeader screenPadding={screenPadding} contentWidth={contentWidth} />
-          <TripTabs
-            screenPadding={screenPadding}
-            totalTrips={trips.length}
-            currentYearTrips={currentYearTrips}
-            favoritesCount={favorites.size}
-            activeTab={activeTab}
-            onChangeTab={setActiveTab}
-          />
-          <SyncLine screenPadding={screenPadding} source={source} status={status} error={error} accountEmail={accountEmail} onRefresh={refresh} />
-
-          <View style={[styles.list, { paddingHorizontal: screenPadding, marginTop: 16 }]}>
-            {upcomingTrips.length > 0 && (
-              <>
-                <View style={styles.sectionHeader}>
-                  <Text allowFontScaling={false} style={styles.sectionLabel}>UPCOMING</Text>
-                  <View style={styles.sectionLine} />
-                  <Text allowFontScaling={false} style={styles.sectionCount}>{upcomingTrips.length}</Text>
-                </View>
-                {upcomingTrips.map((trip) => (
-                  <TripCard key={trip.id} trip={trip} width={contentWidth} favorite={favorites.has(trip.id)} upcoming onFavorite={() => toggleFavorite(trip.id)} onPress={() => onOpenTrip?.(trip)} />
-                ))}
-              </>
-            )}
-            {pastTrips.length > 0 && (
-              <>
-                <View style={[styles.sectionHeader, upcomingTrips.length > 0 && { marginTop: 16 }]}>
-                  <Text allowFontScaling={false} style={styles.sectionLabel}>PAST TRIPS</Text>
-                  <View style={styles.sectionLine} />
-                  <Text allowFontScaling={false} style={styles.sectionCount}>{pastTrips.length}</Text>
-                </View>
-                {pastTrips.map((trip, index) => (
-                  <TripCard key={trip.id} trip={trip} width={contentWidth} favorite={favorites.has(trip.id)} onFavorite={() => toggleFavorite(trip.id)} onPress={() => onOpenTrip?.(trip)} />
-                ))}
-              </>
-            )}
-          </View>
-
-          <View style={[styles.summaryRow, { marginHorizontal: screenPadding }]}>
-            <IconGlyph name="globe" color={colors.mutedInk} size={22} />
-            <Text maxFontSizeMultiplier={1.05} style={styles.summaryText}>
-              {trips.length} trips  -  {profile.flights} flights  -  {profile.miles.toLocaleString()} mi
-            </Text>
-          </View>
-        </ScrollView>
+          ListHeaderComponent={(
+            <>
+              <TripsHeader screenPadding={screenPadding} contentWidth={contentWidth} />
+              <TripTabs
+                screenPadding={screenPadding}
+                totalTrips={trips.length}
+                currentYearTrips={currentYearTrips}
+                favoritesCount={favorites.size}
+                activeTab={activeTab}
+                onChangeTab={setActiveTab}
+              />
+              <SyncLine screenPadding={screenPadding} source={source} status={status} error={error} accountEmail={accountEmail} onRefresh={refresh} />
+            </>
+          )}
+          renderItem={({ item: trip, index }) => {
+            const upcoming = index < upcomingTrips.length;
+            const startsUpcoming = upcoming && index === 0;
+            const startsPast = !upcoming && index === upcomingTrips.length;
+            return (
+              <View style={[styles.listItem, { paddingHorizontal: screenPadding }]}>
+                {startsUpcoming ? (
+                  <View style={[styles.sectionHeader, styles.firstSectionHeader]}>
+                    <Text allowFontScaling={false} style={styles.sectionLabel}>UPCOMING</Text>
+                    <View style={styles.sectionLine} />
+                    <Text allowFontScaling={false} style={styles.sectionCount}>{upcomingTrips.length}</Text>
+                  </View>
+                ) : null}
+                {startsPast ? (
+                  <View style={[styles.sectionHeader, styles.firstSectionHeader, upcomingTrips.length > 0 && styles.followingSectionHeader]}>
+                    <Text allowFontScaling={false} style={styles.sectionLabel}>PAST TRIPS</Text>
+                    <View style={styles.sectionLine} />
+                    <Text allowFontScaling={false} style={styles.sectionCount}>{pastTrips.length}</Text>
+                  </View>
+                ) : null}
+                <TripCard
+                  trip={trip}
+                  width={contentWidth}
+                  favorite={favorites.has(trip.id)}
+                  upcoming={upcoming}
+                  onFavorite={() => toggleFavorite(trip.id)}
+                  onPress={() => onOpenTrip?.(trip)}
+                />
+              </View>
+            );
+          }}
+          ListEmptyComponent={(
+            <View style={[styles.emptyState, { marginHorizontal: screenPadding }]}>
+              <Text maxFontSizeMultiplier={1.05} style={styles.emptyStateText}>No trips match this view.</Text>
+            </View>
+          )}
+          ListFooterComponent={(
+            <View style={[styles.summaryRow, { marginHorizontal: screenPadding }]}>
+              <IconGlyph name="globe" color={colors.mutedInk} size={22} />
+              <Text maxFontSizeMultiplier={1.05} style={styles.summaryText}>
+                {trips.length} trips  -  {profile.flights} flights  -  {profile.miles.toLocaleString()} mi
+              </Text>
+            </View>
+          )}
+        />
 
         <Pressable style={[styles.addButton, { left: visualWidth - screenPadding - 70, bottom: insets.bottom + layout.bottomNavHeight + 14 }]}>
           <IconGlyph name="plus" color={colors.paperSoft} size={36} />
@@ -474,8 +495,24 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     letterSpacing: 0.3,
   },
-  list: {
-    gap: CARD_GAP,
+  listItem: {
+    marginBottom: CARD_GAP,
+  },
+  firstSectionHeader: {
+    marginTop: 16,
+  },
+  followingSectionHeader: {
+    marginTop: 8,
+  },
+  emptyState: {
+    minHeight: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyStateText: {
+    color: colors.mutedInk,
+    fontFamily: fonts.sansSemi,
+    fontSize: 14,
   },
   sectionHeader: {
     flexDirection: 'row',

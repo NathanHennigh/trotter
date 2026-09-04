@@ -29,9 +29,11 @@ export function TripCard({ trip, width, favorite = false, upcoming = false, onFa
     : mapboxFlightImageUrl(origin, destination, 400, 320, accent);
   const imageSource = trip.destinationImage ?? (mapUrl ? { uri: mapUrl } : undefined);
   const [imageFailed, setImageFailed] = React.useState(false);
+  const [imageAttempt, setImageAttempt] = React.useState(0);
 
   React.useEffect(() => {
     setImageFailed(false);
+    setImageAttempt(0);
   }, [mapUrl, trip.destinationImage, trip.id]);
 
   return (
@@ -86,10 +88,17 @@ export function TripCard({ trip, width, favorite = false, upcoming = false, onFa
         <View style={[styles.photoFrame, { width: imageWidth, height: imageHeight }]}>
           {imageSource && !imageFailed ? (
             <Image
+              key={`trip-map-${trip.id}-${imageAttempt}`}
               source={imageSource}
               resizeMode="cover"
               style={StyleSheet.absoluteFillObject}
-              onError={() => setImageFailed(true)}
+              onError={() => {
+                if (mapUrl && !trip.destinationImage && imageAttempt < 2) {
+                  setImageAttempt((attempt) => attempt + 1);
+                  return;
+                }
+                setImageFailed(true);
+              }}
             />
           ) : (
             <RouteFallback origin={origin} destination={destination} accent={accent} />

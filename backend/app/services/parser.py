@@ -19,7 +19,7 @@ from ..models import MessageStatus
 from .parser_preprocess import prepare_parser_text
 
 logger = logging.getLogger(__name__)
-PARSER_VERSION = 22
+PARSER_VERSION = 23
 
 # ──────────────────────────── regex patterns ────────────────────────────────
 
@@ -1869,6 +1869,7 @@ def extract_shape_flights(
     flights.extend(_shape_labeled_depart_arrive_segments(text, pnr=pnr))
     flights.extend(_shape_ota_vertical_itinerary(text, pnr=pnr))
     flights.extend(_shape_compact_airline_flight_rows(text, pnr=pnr, received_at=received_at))
+    flights.extend(_shape_alaska_trip_detail_blocks(text, pnr=pnr, received_at=received_at))
     flights.extend(_shape_southwest_itinerary_blocks(text, pnr=pnr))
     flights.extend(_shape_jetblue_compact_itinerary(text, pnr=pnr, received_at=received_at))
     flights.extend(_shape_spirit_compact_itinerary(text, pnr=pnr))
@@ -2624,6 +2625,111 @@ def _shape_compact_airline_flight_rows(
             )
         )
     return flights
+
+
+def _shape_alaska_trip_detail_blocks(
+    text: str,
+    *,
+    pnr: Optional[str],
+    received_at: Optional[datetime],
+) -> list[ParsedFlight]:
+    """Parse Alaska confirmations with vertically stacked trip-detail rows."""
+    lower = text.lower()
+    if "alaska" not in lower or "trip details" not in lower or "confirmation code" not in lower:
+        return []
+
+    lines = _normalized_lines(text)
+    pnr = pnr or _extract_pnr("\n".join(lines).upper())
+    flight_header = re.compile(
+        r"Flight\s+\d+\s*(?:[·•:|\-–—]\s*)?"
+        r"(?P<date>(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\.?\s+"
+        r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})",
+        re.IGNORECASE,
+    )
+    flight_row = re.compile(
+        r"(?P<airline>[A-Z0-9]{2})\s+(?P<number>\d{1,4}[A-Z]?)\b"
+        r"(?:\s*[·•|\-–—]\s*.*)?",
+        re.IGNORECASE,
+    )
+    short_date = re.compile(
+        r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\.?,?\s+"
+        r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}",
+        re.IGNORECASE,
+    )
+    time_only = re.compile(r"\d{1,2}:\d{2}\s*[AP]M", re.IGNORECASE)
+    flights: list[ParsedFlight] = []
+
+    for index, line in enumerate(lines):
+        header_match = flight_header.fullmatch(line)
+        if not header_match:
+            continue
+        block_end = min(len(lines), index + 35)
+        for scan_index in range(index + 1, block_end):
+            if flight_header.fullmatch(lines[scan_index]):
+                block_end = scan_index
+                break
+
+        number_match = None
+        number_index = None
+        for scan_index in range(index + 1, min(block_end, index + 9)):
+            candidate = flight_row.fullmatch(lines[scan_index])
+            if candidate and candidate.group("airline").upper() in _KNOWN_AIRLINES:
+                number_match = candidate
+                number_index = scan_index
+                break
+        if number_match is None or number_index is None:
+            continue
+
+        route_index = None
+        dep_airport = arr_airport = None
+        for scan_index in range(number_index + 1, min(block_end - 1, number_index + 12)):
+            dep_candidate = _airport_token_from_line(lines[scan_index])
+            arr_candidate = _airport_token_from_line(lines[scan_index + 1])
+            if dep_candidate and arr_candidate and _valid_route(dep_candidate, arr_candidate):
+                dep_airport, arr_airport = dep_candidate, arr_candidate
+                route_index = scan_index
+                break
+        if route_index is None or dep_airport is None or arr_airport is None:
+            continue
+
+        timed_rows = [
+            (scan_index, lines[scan_index])
+            for scan_index in range(route_index + 2, min(block_end, route_index + 16))
+            if time_only.fullmatch(lines[scan_index])
+        ]
+        if len(timed_rows) < 2:
+            continue
+
+        date_rows = [
+            value
+            for value in lines[timed_rows[1][0] + 1 : min(block_end, timed_rows[1][0] + 8)]
+            if short_date.fullmatch(value)
+        ]
+        dep_date = date_rows[0] if date_rows else header_match.group("date")
+        arr_date = date_rows[1] if len(date_rows) > 1 else dep_date
+        dep_dt = _parse_partial_dow_month_day_time(dep_date, timed_rows[0][1], received_at)
+        arr_dt = _parse_partial_dow_month_day_time(arr_date, timed_rows[1][1], received_at)
+        if not dep_dt or not arr_dt:
+            continue
+        if arr_dt <= dep_dt:
+            arr_dt += timedelta(days=1)
+
+        airline = number_match.group("airline").upper()
+        number = number_match.group("number").upper().lstrip("0") or "0"
+        flights.append(
+            ParsedFlight(
+                dep_airport=dep_airport,
+                arr_airport=arr_airport,
+                dep_time=dep_dt,
+                arr_time=arr_dt,
+                airline=airline,
+                flight_number=f"{airline}{number}",
+                pnr=pnr,
+                source="shape_alaska_trip_detail_blocks",
+                confidence=97,
+            )
+        )
+    return _dedupe_flights(flights)
 
 
 def _shape_southwest_itinerary_blocks(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
@@ -6113,6 +6219,8 @@ def check_identity(
 # ──────────────────────────── helpers ───────────────────────────────────────
 
 _AIRLINE_NAME_TO_CODE = {
+    "alaska airlines": "AS",
+    "alaska": "AS",
     "american airlines": "AA",
     "american": "AA",
     "united airlines": "UA",
