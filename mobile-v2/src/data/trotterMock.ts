@@ -52,6 +52,7 @@ export type TripSummary = {
   routeLabel: string;
   miles: number;
   flightCount: number;
+  itineraryCount?: number;
   airlineCount: number;
   airlines?: string[];
   airports?: string[];
@@ -79,6 +80,7 @@ export type TripSegmentSummary = {
   arrTime: string;
   airline?: string;
   flightNumber?: string;
+  bookingReference?: string;
   distanceMiles?: number;
   confidence?: number;
   depPoint?: {

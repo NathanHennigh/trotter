@@ -19,6 +19,7 @@ import { accentColors, colors, fonts, layout, shadows, spacing } from '../theme/
 import { formatAirlineFlight, formatAirlineNames } from '../utils/airlines';
 import { mapboxFlightImageUrl, mapboxFlightImageUrlFromCoordinates } from '../utils/mapboxFlightImage';
 import { getMobileVisualWidth } from '../utils/mobileLayout';
+import { groupTripItineraries, TripItinerary } from '../utils/tripItineraries';
 
 const paperTexture = require('../../assets/textures/paper_texture_clean.png');
 
@@ -43,18 +44,19 @@ export function TripDetailScreen({
   const activeTrip = hydratedTrip?.id === trip.id ? hydratedTrip : trip;
   const accent = accentColors[activeTrip.accent];
   const segments = activeTrip.segments?.length ? activeTrip.segments : [fallbackSegment(activeTrip)];
+  const itineraries = groupTripItineraries(segments);
   const airports = activeTrip.airports?.length ? activeTrip.airports : uniqueRouteAirports(segments);
   const firstSegment = segments[0];
-  const lastSegment = segments[segments.length - 1];
-  const mapUrl = firstSegment.depPoint && lastSegment.arrPoint
+  const destinationSegment = findDestinationSegment(activeTrip, segments);
+  const mapUrl = firstSegment.depPoint && destinationSegment.arrPoint
     ? mapboxFlightImageUrlFromCoordinates(
         [firstSegment.depPoint.lon, firstSegment.depPoint.lat],
-        [lastSegment.arrPoint.lon, lastSegment.arrPoint.lat],
+        [destinationSegment.arrPoint.lon, destinationSegment.arrPoint.lat],
         720,
         420,
         accent,
       )
-    : mapboxFlightImageUrl(firstSegment.depAirport, lastSegment.arrAirport, 720, 420, accent);
+    : mapboxFlightImageUrl(firstSegment.depAirport, destinationSegment.arrAirport, 720, 420, accent);
   const heroSource = activeTrip.destinationImage ?? (mapUrl ? ({ uri: mapUrl } as ImageSourcePropType) : undefined);
   const [heroImageFailed, setHeroImageFailed] = React.useState(false);
   const [heroImageAttempt, setHeroImageAttempt] = React.useState(0);
@@ -123,7 +125,7 @@ export function TripDetailScreen({
                 <View style={styles.heroFallback}>
                   <Text allowFontScaling={false} style={styles.heroFallbackLabel}>FLIGHT PATH</Text>
                   <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.heroFallbackRoute}>
-                    {firstSegment.depAirport}  /  {lastSegment.arrAirport}
+                    {firstSegment.depAirport}  /  {destinationSegment.arrAirport}
                   </Text>
                 </View>
               )}
@@ -146,9 +148,20 @@ export function TripDetailScreen({
             <IconGlyph name="plane" color={accent} size={24} />
           </View>
 
-          <Section width={contentWidth} screenPadding={screenPadding} title="FLIGHT TIMELINE">
-            {segments.map((segment, index) => (
-              <FlightTimelineItem key={segment.id} segment={segment} index={index} isLast={index === segments.length - 1} accent={accent} />
+          <Section width={contentWidth} screenPadding={screenPadding} title={itineraries.length > 1 ? 'ITINERARIES' : 'FLIGHT TIMELINE'}>
+            {itineraries.length > 1 ? (
+              <Text maxFontSizeMultiplier={1.05} style={styles.itineraryIntro}>
+                {itineraries.length} separately booked itineraries make up this trip.
+              </Text>
+            ) : null}
+            {itineraries.map((itinerary, index) => (
+              <ItineraryGroup
+                key={itinerary.id}
+                itinerary={itinerary}
+                index={index}
+                count={itineraries.length}
+                accent={accent}
+              />
             ))}
           </Section>
 
@@ -157,7 +170,7 @@ export function TripDetailScreen({
               <SnapshotTile label="COUNTRY" value={activeTrip.country} />
               <SnapshotTile label="CITY" value={activeTrip.city ?? activeTrip.airportCode ?? activeTrip.countryCode ?? 'Recorded'} />
               <SnapshotTile label="AIRLINES" value={formatAirlines(activeTrip)} />
-              <SnapshotTile label="AIRPORTS" value={airports.join(' / ')} />
+              <SnapshotTile label="ITINERARIES" value={String(itineraries.length)} />
             </View>
           </Section>
 
@@ -221,6 +234,46 @@ function FlightTimelineItem({ segment, index, isLast, accent }: { segment: TripS
   );
 }
 
+function ItineraryGroup({
+  itinerary,
+  index,
+  count,
+  accent,
+}: {
+  itinerary: TripItinerary;
+  index: number;
+  count: number;
+  accent: string;
+}) {
+  const label = count === 2 ? (index === 0 ? 'OUTBOUND' : 'RETURN') : `ITINERARY ${index + 1}`;
+  return (
+    <View style={[styles.itineraryGroup, index > 0 && styles.itineraryGroupDivided]}>
+      <View style={styles.itineraryHeader}>
+        <View style={styles.itineraryHeaderCopy}>
+          <Text allowFontScaling={false} style={[styles.itineraryLabel, { color: accent }]}>{label}</Text>
+          <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.itineraryRoute}>
+            {itinerary.origin}{' -> '}{itinerary.destination}
+          </Text>
+        </View>
+        <View style={[styles.itineraryBadge, { borderColor: accent }]}>
+          <Text allowFontScaling={false} style={[styles.itineraryBadgeText, { color: accent }]}>
+            {itinerary.segments.length} {itinerary.segments.length === 1 ? 'FLIGHT' : 'FLIGHTS'}
+          </Text>
+        </View>
+      </View>
+      {itinerary.segments.map((segment, segmentIndex) => (
+        <FlightTimelineItem
+          key={segment.id}
+          segment={segment}
+          index={segmentIndex}
+          isLast={segmentIndex === itinerary.segments.length - 1}
+          accent={accent}
+        />
+      ))}
+    </View>
+  );
+}
+
 function SnapshotTile({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.snapshotTile}>
@@ -269,6 +322,14 @@ function uniqueRouteAirports(segments: TripSegmentSummary[]) {
     }
   }
   return airports;
+}
+
+function findDestinationSegment(trip: TripSummary, segments: TripSegmentSummary[]) {
+  if (trip.airportCode) {
+    const matchingArrival = segments.find((segment) => segment.arrAirport === trip.airportCode);
+    if (matchingArrival) return matchingArrival;
+  }
+  return segments[segments.length - 1];
 }
 
 function formatAirlines(trip: TripSummary) {
@@ -449,6 +510,54 @@ const styles = StyleSheet.create({
   },
   sectionPanel: {
     gap: spacing.sm,
+  },
+  itineraryIntro: {
+    color: colors.mutedInk,
+    fontFamily: fonts.sansRegular,
+    fontSize: 12,
+    lineHeight: 17,
+    paddingBottom: spacing.xs,
+  },
+  itineraryGroup: {
+    gap: spacing.xs,
+  },
+  itineraryGroupDivided: {
+    borderTopWidth: 1,
+    borderTopColor: colors.paperBorder,
+    marginTop: spacing.sm,
+    paddingTop: spacing.md,
+  },
+  itineraryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  itineraryHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  itineraryLabel: {
+    fontFamily: fonts.sansBold,
+    fontSize: 9,
+    letterSpacing: 1.1,
+  },
+  itineraryRoute: {
+    color: colors.ink,
+    fontFamily: fonts.mono,
+    fontSize: 17,
+    marginTop: 3,
+  },
+  itineraryBadge: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  itineraryBadgeText: {
+    fontFamily: fonts.sansBold,
+    fontSize: 8,
+    letterSpacing: 0.7,
   },
   flightRow: {
     flexDirection: 'row',

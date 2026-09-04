@@ -79,7 +79,9 @@ export function TripCard({ trip, width, favorite = false, upcoming = false, onFa
             {formatReadableDate(trip.startDate, trip.endDate)}
           </Text>
           <Text maxFontSizeMultiplier={1.05} numberOfLines={1} adjustsFontSizeToFit style={styles.metaText}>
-            {trip.flightCount} flights  •  {trip.miles.toLocaleString()} mi
+            {trip.itineraryCount && trip.itineraryCount > 1
+              ? `${trip.flightCount} flights  •  ${trip.itineraryCount} itineraries`
+              : `${trip.flightCount} flights  •  ${trip.miles.toLocaleString()} mi`}
           </Text>
         </View>
 

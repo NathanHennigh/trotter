@@ -5,6 +5,7 @@ import type { CountryIconKey, StampShapeKey } from '../components/trotter/stamps
 import { realTravelerProfile, realTravelTrips } from '../data/realTravelSnapshot';
 import type { TravelerProfile, TripSummary } from '../data/trotterMock';
 import type { TrotterAccent } from '../theme/trotterTheme';
+import { groupTripItineraries } from '../utils/tripItineraries';
 import { requestGoogleAuthToken } from './googleAuth';
 
 type ApiSegment = {
@@ -15,6 +16,7 @@ type ApiSegment = {
   arr_time: string;
   airline?: string | null;
   flight_number?: string | null;
+  pnr?: string | null;
   distance_km?: number | null;
   meta_json?: Record<string, unknown> | string | null;
 };
@@ -460,6 +462,8 @@ function mapApiTrips(apiTrips: ApiTrip[]): TripSummary[] {
 
 function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
   const segments = [...trip.segments].sort((a, b) => dateMs(a.dep_time) - dateMs(b.dep_time) || a.id - b.id);
+  const mappedSegments = segments.map(mapApiSegment);
+  const itineraryCount = groupTripItineraries(mappedSegments).length;
   const destination = pickDestination(trip.title, segments);
   const country = destination.info.country_name ?? destination.info.countryName ?? countryHint(trip.title) ?? trip.title ?? 'United States';
   const countryCode = destination.info.country_code ?? destination.info.countryCode ?? (country === 'United States' ? 'US' : undefined);
@@ -485,10 +489,11 @@ function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
     routeLabel: routeLabelFor(segments, destination.airport),
     miles: Math.round(segments.reduce((sum, segment) => sum + (segment.distance_km ?? 0), 0) * 0.621371),
     flightCount: segments.length,
+    itineraryCount,
     airlineCount: airlines.size,
     airlines: Array.from(airlines).sort() as string[],
     airports: uniqueAirports(segments),
-    segments: segments.map(mapApiSegment),
+    segments: mappedSegments,
     accent: ACCENTS[index % ACCENTS.length],
     stamp: {
       shape,
@@ -517,6 +522,7 @@ function mapApiSegment(segment: ApiSegment) {
     arrTime: segment.arr_time,
     airline: segment.airline ?? undefined,
     flightNumber: readFlightNumber(segment),
+    bookingReference: segment.pnr ?? undefined,
     distanceMiles: typeof segment.distance_km === 'number' ? Math.round(segment.distance_km * 0.621371) : undefined,
     confidence,
     depPoint: routePoint(segment.dep_airport, departure),
