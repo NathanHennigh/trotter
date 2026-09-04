@@ -1394,7 +1394,7 @@ def _segments_can_overlap_in_same_booking(current: list[Segment], segment: Segme
 def _infer_home_airport(segments: list[Segment]) -> Optional[str]:
     if segments:
         ordered = sorted(segments, key=_segment_sort_key)
-        if ordered[0].dep_airport == ordered[-1].arr_airport:
+        if _airports_are_near(ordered[0].dep_airport, ordered[-1].arr_airport):
             return ordered[0].dep_airport
     counts: Counter[str] = Counter()
     for segment in segments:
@@ -1422,6 +1422,61 @@ def _select_reusable_trip_id(cluster: list[Segment], used_trip_ids: set[int]) ->
     if not counts:
         return None
     return counts.most_common(1)[0][0]
+
+
+def infer_home_airport_for_segments(segments: list[Segment]) -> Optional[str]:
+    """Return the most likely home airport for a user's ordered flight history."""
+    return _infer_home_airport(list(segments))
+
+
+def trip_destination_airport(
+    segments: list[Segment],
+    *,
+    home_airport: Optional[str] = None,
+) -> Optional[str]:
+    """Classify the primary destination represented by a persisted trip."""
+    if not segments:
+        return None
+
+    ordered = sorted(segments, key=_segment_sort_key)
+    origin = ordered[0].dep_airport
+    final = ordered[-1].arr_airport
+
+    # An inbound-only record describes travel from the destination back home.
+    if (
+        len(ordered) == 1
+        and home_airport
+        and _airports_are_near(final, home_airport)
+        and not _airports_are_near(origin, home_airport)
+    ):
+        return origin
+
+    destination = _main_destination(ordered, origin, final, home_airport=home_airport)
+    if destination:
+        return destination
+    if final and final != origin:
+        return final
+    return origin or None
+
+
+def trip_route_label_for_segments(
+    segments: list[Segment],
+    *,
+    home_airport: Optional[str] = None,
+) -> Optional[str]:
+    """Return the display route to the classified destination, not a layover."""
+    if not segments:
+        return None
+
+    ordered = sorted(segments, key=_segment_sort_key)
+    origin = ordered[0].dep_airport
+    final = ordered[-1].arr_airport
+    destination = trip_destination_airport(ordered, home_airport=home_airport)
+    if not destination:
+        return f"{origin} -> {final}" if origin and final else None
+    if destination == origin and final and final != origin:
+        return f"{origin} -> {final}"
+    return f"{origin} -> {destination}"
 
 
 def _trip_title_for_segments(segments: list[Segment], home_airport: Optional[str] = None) -> Optional[str]:

@@ -14,6 +14,11 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..db import get_db
 from ..models import Segment, Trip, User
+from ..services.builder import (
+    infer_home_airport_for_segments,
+    trip_destination_airport,
+    trip_route_label_for_segments,
+)
 from .auth import get_current_user
 
 router = APIRouter(prefix="/trips", tags=["trips"])
@@ -44,6 +49,8 @@ class TripOut(BaseModel):
     title: Optional[str] = None
     start_ts: Optional[datetime] = None
     end_ts: Optional[datetime] = None
+    destination_airport: Optional[str] = None
+    route_label: Optional[str] = None
     segments: List[SegmentOut] = []
 
     class Config:
@@ -67,7 +74,9 @@ def list_trips(
     )
     for trip in trips:
         trip.segments.sort(key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
-    return trips
+    all_segments = [segment for trip in trips for segment in trip.segments]
+    home_airport = infer_home_airport_for_segments(all_segments)
+    return [_trip_out(trip, home_airport=home_airport) for trip in trips]
 
 
 @router.get("/segments", response_model=List[SegmentOut])
@@ -106,4 +115,24 @@ def get_trip(
     if not trip:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
     trip.segments.sort(key=lambda segment: (segment.dep_time, segment.arr_time, segment.id))
-    return trip
+    all_segments = (
+        db.query(Segment)
+        .join(Trip, Segment.trip_id == Trip.id)
+        .filter(Trip.user_id == current_user.id)
+        .all()
+    )
+    home_airport = infer_home_airport_for_segments(all_segments)
+    return _trip_out(trip, home_airport=home_airport)
+
+
+def _trip_out(trip: Trip, *, home_airport: Optional[str]) -> TripOut:
+    segments = list(trip.segments)
+    return TripOut(
+        id=trip.id,
+        title=trip.title,
+        start_ts=trip.start_ts,
+        end_ts=trip.end_ts,
+        destination_airport=trip_destination_airport(segments, home_airport=home_airport),
+        route_label=trip_route_label_for_segments(segments, home_airport=home_airport),
+        segments=segments,
+    )

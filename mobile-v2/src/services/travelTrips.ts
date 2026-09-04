@@ -26,10 +26,13 @@ type ApiTrip = {
   title?: string | null;
   start_ts?: string | null;
   end_ts?: string | null;
+  destination_airport?: string | null;
+  route_label?: string | null;
   segments: ApiSegment[];
 };
 
 type AirportInfo = {
+  name?: string;
   city?: string;
   country_code?: string;
   country_name?: string;
@@ -39,7 +42,6 @@ type AirportInfo = {
   longitude?: number;
 };
 
-const HOME_AIRPORTS = new Set(['IAH', 'DFW', 'HOU', 'DAL']);
 const ACCENTS: TrotterAccent[] = ['red', 'teal', 'mustard', 'blue', 'green'];
 const STAMP_COLORS = ['#B6543F', '#2F5E9E', '#52745A', '#9A5A32', '#C79A43'];
 const SHAPES: StampShapeKey[] = [
@@ -464,7 +466,7 @@ function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
   const segments = [...trip.segments].sort((a, b) => dateMs(a.dep_time) - dateMs(b.dep_time) || a.id - b.id);
   const mappedSegments = segments.map(mapApiSegment);
   const itineraryCount = groupTripItineraries(mappedSegments).length;
-  const destination = pickDestination(trip.title, segments);
+  const destination = pickDestination(trip.title, segments, trip.destination_airport);
   const country = destination.info.country_name ?? destination.info.countryName ?? countryHint(trip.title) ?? trip.title ?? 'United States';
   const countryCode = destination.info.country_code ?? destination.info.countryCode ?? (country === 'United States' ? 'US' : undefined);
   const city = cleanCity(destination.info.city) || trip.title || undefined;
@@ -486,7 +488,7 @@ function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
     startDate,
     endDate,
     firstCountryEntryDate: toDateOnly(destination.date),
-    routeLabel: routeLabelFor(segments, destination.airport),
+    routeLabel: trip.route_label?.trim() || routeLabelFor(segments, destination.airport),
     miles: Math.round(segments.reduce((sum, segment) => sum + (segment.distance_km ?? 0), 0) * 0.621371),
     flightCount: segments.length,
     itineraryCount,
@@ -558,7 +560,11 @@ function uniqueAirports(segments: ApiSegment[]) {
   return airports;
 }
 
-function pickDestination(title: string | null | undefined, segments: ApiSegment[]) {
+function pickDestination(
+  title: string | null | undefined,
+  segments: ApiSegment[],
+  preferredAirport?: string | null,
+) {
   const key = normalizeTitle(title);
   const airportHint = TITLE_AIRPORT_HINTS[key];
   const country = TITLE_COUNTRY_HINTS[key];
@@ -580,17 +586,27 @@ function pickDestination(title: string | null | undefined, segments: ApiSegment[
   ]);
   const first = segments[0];
   const last = segments[segments.length - 1];
+  const preferred = preferredAirport
+    ? candidates.find((candidate) => candidate.side === 'arrival' && candidate.airport === preferredAirport)
+      ?? candidates.find((candidate) => candidate.airport === preferredAirport)
+    : undefined;
+  const titleMatch = candidates.find((candidate) => (
+    candidate.side === 'arrival' && candidateMatchesTitle(candidate, key)
+  )) ?? candidates.find((candidate) => candidateMatchesTitle(candidate, key));
+  const longestStay = longestStayDestination(segments, candidates);
   const openEndedFinal = last?.arr_airport
-    && last.arr_airport !== first?.dep_airport
-    && !HOME_AIRPORTS.has(last.arr_airport)
+    && !airportsShareMetro(first?.dep_airport, last.arr_airport, candidates)
     ? candidates.find((candidate) => candidate.side === 'arrival' && candidate.airport === last.arr_airport)
     : undefined;
 
   return (
+    preferred ??
     candidates.find((candidate) => candidate.airport === airportHint) ??
-    candidates.find((candidate) => candidate.info.country_name === country && !HOME_AIRPORTS.has(candidate.airport)) ??
+    titleMatch ??
+    candidates.find((candidate) => candidateCountry(candidate) === country && candidate.airport !== first?.dep_airport) ??
+    longestStay ??
     openEndedFinal ??
-    candidates.find((candidate) => !HOME_AIRPORTS.has(candidate.airport)) ??
+    candidates.find((candidate) => candidate.side === 'arrival' && candidate.airport !== first?.dep_airport) ??
     candidates[0]
   );
 }
@@ -598,16 +614,80 @@ function pickDestination(title: string | null | undefined, segments: ApiSegment[
 function routeLabelFor(segments: ApiSegment[], destinationAirport: string) {
   const first = segments[0];
   const last = segments[segments.length - 1];
-  if (first.dep_airport === destinationAirport && HOME_AIRPORTS.has(first.arr_airport)) {
-    return `${first.dep_airport} -> ${first.arr_airport}`;
-  }
-  if (HOME_AIRPORTS.has(first.dep_airport)) {
-    return `${first.dep_airport} -> ${destinationAirport}`;
-  }
-  if (last.arr_airport && last.arr_airport !== destinationAirport) {
+  if (first.dep_airport === destinationAirport && last.arr_airport !== destinationAirport) {
     return `${first.dep_airport} -> ${last.arr_airport}`;
   }
   return `${first.dep_airport} -> ${destinationAirport}`;
+}
+
+type DestinationCandidate = {
+  segment: ApiSegment;
+  side: 'arrival' | 'departure';
+  airport: string;
+  date: string;
+  info: AirportInfo;
+};
+
+function candidateMatchesTitle(candidate: DestinationCandidate, normalizedTitle: string) {
+  if (!normalizedTitle) return false;
+  return [candidate.info.city, candidate.info.name, candidateCountry(candidate)]
+    .map(normalizePlaceName)
+    .filter((value) => value.length >= 3)
+    .some((value) => value === normalizedTitle || value.includes(normalizedTitle) || normalizedTitle.includes(value));
+}
+
+function candidateCountry(candidate: DestinationCandidate) {
+  return candidate.info.country_name ?? candidate.info.countryName;
+}
+
+function longestStayDestination(segments: ApiSegment[], candidates: DestinationCandidate[]) {
+  let best: DestinationCandidate | undefined;
+  let longestStayMs = 12 * 60 * 60 * 1000;
+
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index];
+    const nextSegment = segments[index + 1];
+    const stayMs = dateMs(nextSegment.dep_time) - dateMs(segment.arr_time);
+    if (stayMs < longestStayMs) continue;
+
+    const candidate = candidates.find((item) => (
+      item.side === 'arrival' && item.airport === segment.arr_airport && item.segment.id === segment.id
+    ));
+    if (!candidate) continue;
+    best = candidate;
+    longestStayMs = stayMs;
+  }
+
+  return best;
+}
+
+function airportsShareMetro(
+  firstAirport: string | undefined,
+  secondAirport: string | undefined,
+  candidates: DestinationCandidate[],
+) {
+  if (!firstAirport || !secondAirport) return false;
+  if (firstAirport === secondAirport) return true;
+
+  const first = candidates.find((candidate) => candidate.airport === firstAirport)?.info;
+  const second = candidates.find((candidate) => candidate.airport === secondAirport)?.info;
+  if (
+    typeof first?.latitude !== 'number'
+    || typeof first.longitude !== 'number'
+    || typeof second?.latitude !== 'number'
+    || typeof second.longitude !== 'number'
+  ) return false;
+
+  return haversineKm(first.latitude, first.longitude, second.latitude, second.longitude) <= 150;
+}
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const latDelta = radians(lat2 - lat1);
+  const lonDelta = radians(lon2 - lon1);
+  const value = Math.sin(latDelta / 2) ** 2
+    + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(lonDelta / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
 }
 
 function airportInfo(segment: ApiSegment, side: 'departure' | 'arrival'): AirportInfo {
@@ -654,7 +734,16 @@ function buildProfile(trips: TripSummary[]): TravelerProfile {
 }
 
 function normalizeTitle(title?: string | null) {
-  return (title ?? '').trim().toLowerCase();
+  return normalizePlaceName(title);
+}
+
+function normalizePlaceName(value?: string | null) {
+  return (value ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 function countryHint(title?: string | null) {

@@ -11,7 +11,10 @@ from app.services.builder import (
     build_segments_and_trips,
     build_segments_and_trips_detailed,
     cancel_segments_for_pnr,
+    infer_home_airport_for_segments,
     resolve_booking_relationships,
+    trip_destination_airport,
+    trip_route_label_for_segments,
 )
 
 
@@ -88,6 +91,56 @@ def test_rebuild_groups_return_with_different_booking_code():
         ("MGA", "MEX"),
         ("MEX", "DFW"),
     ]
+
+
+def test_multileg_coterminal_round_trip_classifies_the_stay_not_the_layover():
+    db, user = _session()
+
+    build_segments_and_trips(
+        db,
+        user.id,
+        [
+            _flight("DAL", "LAS", "2026-08-16T10:00:00", "2026-08-16T11:00:00", "WN", "WN184", "OUT123"),
+            _flight("LAS", "KOA", "2026-08-16T13:00:00", "2026-08-16T17:00:00", "WN", "WN4738", "OUT123"),
+        ],
+    )
+    build_segments_and_trips(
+        db,
+        user.id,
+        [
+            _flight("KOA", "SEA", "2026-08-22T22:25:00", "2026-08-23T07:20:00", "AS", "AS259", "BACK26"),
+            _flight("SEA", "DFW", "2026-08-23T08:40:00", "2026-08-23T14:46:00", "AS", "AS340", "BACK26"),
+        ],
+    )
+    db.commit()
+
+    [trip] = db.query(Trip).all()
+    segments = sorted(trip.segments, key=lambda segment: segment.dep_time)
+
+    assert infer_home_airport_for_segments(segments) == "DAL"
+    assert trip.title == "Kailua Kona"
+    assert trip_destination_airport(segments, home_airport="DAL") == "KOA"
+    assert trip_route_label_for_segments(segments, home_airport="DAL") == "DAL -> KOA"
+
+    from app.routers.trips import _trip_out
+
+    response = _trip_out(trip, home_airport="DAL")
+    assert response.destination_airport == "KOA"
+    assert response.route_label == "DAL -> KOA"
+
+
+def test_inbound_only_trip_keeps_its_actual_route_and_departure_destination():
+    db, user = _session()
+    build_segments_and_trips(
+        db,
+        user.id,
+        [_flight("BNA", "DFW", "2026-04-04T18:00:00", "2026-04-04T20:15:00", "AA", "AA100", "HOME26")],
+    )
+    db.commit()
+
+    [trip] = db.query(Trip).all()
+    assert trip_destination_airport(trip.segments, home_airport="DAL") == "BNA"
+    assert trip_route_label_for_segments(trip.segments, home_airport="DAL") == "BNA -> DFW"
 
 
 def test_rebuild_splits_new_home_departure_after_prior_trip_finished():
