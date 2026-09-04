@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View, Image } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   BottomNav,
@@ -9,13 +9,13 @@ import {
   PaperSurface,
   ScreenHeader,
   SplitFlapNumber,
-  Stamp,
 } from '../components/trotter/TrotterKit';
 import { PngStamp, StampShapeKey } from '../components/trotter/stamps/PngStamp';
 import { CountryIconAssetKey } from '../assets/generated/stampAssetManifest';
 import { BottomNavTab, TripSegmentSummary, TripSummary } from '../data/trotterMock';
 import { useTravelTrips } from '../services/travelTrips';
 import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
+import { getMobileVisualWidth } from '../utils/mobileLayout';
 
 const STAMP_TEST_BASE_WIDTH = 204.75;
 
@@ -243,23 +243,31 @@ function buildCountryStampPreview(entry: { country: string; icon: CountryIconAss
 
 const rosterCountryStampPreviews = buildVisitedCountryStampPreviews();
 
-export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab; onChange: (tab: BottomNavTab) => void }) {
+export function PassportStatsScreen({
+  active,
+  onChange,
+  onOpenCountries,
+}: {
+  active: BottomNavTab;
+  onChange: (tab: BottomNavTab) => void;
+  onOpenCountries?: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const screenPadding = width < 390 ? 16 : layout.screenPadding;
-  const contentWidth = width - screenPadding * 2;
+  const visualWidth = getMobileVisualWidth(width);
+  const screenPadding = visualWidth < 390 ? 16 : layout.screenPadding;
+  const contentWidth = visualWidth - screenPadding * 2;
   const cardWidth = (contentWidth - layout.cardGap) / 2;
   const { trips, profile, status, refresh } = useTravelTrips();
   const passportStats = React.useMemo(() => buildPassportStats(trips), [trips]);
   const countryStampPreviews = React.useMemo(() => buildTripCountryStampPreviews(trips), [trips]);
-  const countryCollectionPreview = countryStampPreviews[0];
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={status === 'loading' || status === 'refreshing' || status === 'syncing'} onRefresh={refresh} tintColor={colors.red} />}
-        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24, width: visualWidth }}
       >
         <ScreenHeader
           title="PASSPORT"
@@ -274,12 +282,13 @@ export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab
               <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.kicker}>TRAVELER</Text>
               <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.name}>{profile.name}</Text>
               <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.homeAirport}>{profile.homeAirport} / {profile.homeAirportName}</Text>
-              <Text maxFontSizeMultiplier={1.05} numberOfLines={2} style={styles.firstFlight}>FIRST DISCOVERED FLIGHT {profile.firstFlightDate}</Text>
+              <Text allowFontScaling={false} numberOfLines={1} style={styles.firstFlight}>FIRST FLIGHT / {formatPassportDate(profile.firstFlightDate)}</Text>
             </View>
           </View>
-          <View style={styles.stampRow}>
-            <Stamp type="circle" color={colors.red} title="ADVENTURE" subtitle={`${profile.flights} FLIGHTS`} footer="VERIFIED" size="sm" />
-            <Stamp type="rounded-immigration" color={colors.blue} title="ISSUED" subtitle="TROTTER APP" date="2026" size="sm" />
+          <View style={styles.credentialRow}>
+            <CredentialDetail label="HOME BASE" value={profile.homeAirport} />
+            <CredentialDetail label="TRAVELING SINCE" value={profile.firstFlightDate.slice(0, 4)} />
+            <CredentialDetail label="ACTIVE YEARS" value={String(passportStats.activeYears)} />
           </View>
           <View style={styles.statStrip}>
             <StripStat label="FLIGHTS" value={profile.flights} />
@@ -324,21 +333,29 @@ export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab
             width={cardWidth}
             title="COUNTRIES"
             value={`${profile.countries} / 195`}
-            onPress={() => onChange('profile')}
-            preview={<PngStamp {...countryCollectionPreview} size="md" variant="collection" rotate={countryCollectionPreview.rotate} scale={0.7} />}
+            icon="globe"
+            note="Arrival stamps"
+            onPress={onOpenCountries}
           />
-          <CollectionCard width={cardWidth} title="CONTINENTS" value={`${passportStats.continents} / 7`} preview={<Image source={require('../../assets/objects/globe.png')} style={{ width: 110, height: 110, resizeMode: 'contain' }} />} />
-          <CollectionCard width={cardWidth} title="AIRPORTS" value={`${profile.airports}`} preview={<Image source={require('../../assets/objects/airport.png')} style={{ width: 150, height: 150, resizeMode: 'contain' }} />} />
-          <CollectionCard width={cardWidth} title="AIRLINES" value={`${profile.airlines}`} preview={<Image source={require('../../assets/objects/airline.png')} style={{ width: 150, height: 150, resizeMode: 'contain' }} />} />
+          <CollectionCard width={cardWidth} title="CONTINENTS" value={`${passportStats.continents} / 7`} icon="crosshair" note="Regions reached" />
+          <CollectionCard width={cardWidth} title="AIRPORTS" value={`${profile.airports}`} icon="plane" note="Airports logged" />
+          <CollectionCard width={cardWidth} title="AIRLINES" value={`${profile.airlines}`} icon="tag" note="Carriers flown" />
         </View>
 
         <PaperSurface radius={14} padding={spacing.md} style={[styles.countryPreviewPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
           <View style={styles.countryPreviewHeader}>
-            <Text allowFontScaling={false} style={styles.countryPreviewTitle}>VISITED COUNTRY STAMPS</Text>
-            <Text allowFontScaling={false} style={styles.countryPreviewCount}>{countryStampPreviews.length} stamps</Text>
+            <View>
+              <Text allowFontScaling={false} style={styles.countryPreviewTitle}>LATEST ARRIVAL STAMPS</Text>
+              <Text allowFontScaling={false} style={styles.countryPreviewCount}>{countryStampPreviews.length} countries recorded</Text>
+            </View>
+            {onOpenCountries ? (
+              <Pressable onPress={onOpenCountries} style={styles.viewStampsButton}>
+                <Text allowFontScaling={false} style={styles.viewStampsText}>VIEW ALL</Text>
+              </Pressable>
+            ) : null}
           </View>
           <View style={styles.countryPreviewGrid}>
-            {countryStampPreviews.map((stamp) => {
+            {countryStampPreviews.slice(0, 4).map((stamp) => {
               const cellWidth = (contentWidth - spacing.md * 2 - spacing.sm) / 2;
               const stampScale = Math.max(0.5, Math.min(1, (cellWidth - 12) / STAMP_TEST_BASE_WIDTH));
               return (
@@ -358,21 +375,27 @@ export function PassportStatsScreen({ active, onChange }: { active: BottomNavTab
 function CollectionCard({
   title,
   value,
-  preview,
+  icon,
+  note,
   width,
   onPress,
 }: {
   title: string;
   value: string;
-  preview: React.ReactNode;
+  icon: string;
+  note: string;
   width: number;
   onPress?: () => void;
 }) {
   const content = (
       <PaperSurface radius={12} padding={spacing.md} style={styles.collectionCard}>
+        <View style={styles.collectionTop}>
+          <View style={styles.collectionIcon}><IconGlyph name={icon} color={colors.red} size={19} /></View>
+          {onPress ? <Text allowFontScaling={false} style={styles.collectionArrow}>{'>'}</Text> : null}
+        </View>
         <Text allowFontScaling={false} numberOfLines={1} style={styles.collectionTitle}>{title}</Text>
-        <Text allowFontScaling={false} numberOfLines={1} style={styles.collectionValue}>{value}</Text>
-        <View style={styles.collectionPreview}>{preview}</View>
+        <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.collectionValue}>{value}</Text>
+        <Text allowFontScaling={false} numberOfLines={1} style={styles.collectionNote}>{note}</Text>
       </PaperSurface>
   );
 
@@ -383,6 +406,15 @@ function CollectionCard({
   ) : (
     <View style={{ width }}>
       {content}
+    </View>
+  );
+}
+
+function CredentialDetail({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.credentialDetail}>
+      <Text allowFontScaling={false} numberOfLines={1} style={styles.credentialLabel}>{label}</Text>
+      <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.credentialValue}>{value}</Text>
     </View>
   );
 }
@@ -525,16 +557,27 @@ function buildPassportStats(trips: TripSummary[]) {
 }
 
 function buildTripCountryStampPreviews(trips: TripSummary[]) {
-  const firstVisitByCountry = new Map<string, string>();
+  const firstVisitByCountry = new Map<string, TripSummary>();
   for (const trip of trips) {
     const existing = firstVisitByCountry.get(trip.country);
     const visitDate = trip.firstCountryEntryDate ?? trip.startDate;
-    if (!existing || visitDate < existing) firstVisitByCountry.set(trip.country, visitDate);
+    const existingDate = existing ? existing.firstCountryEntryDate ?? existing.startDate : undefined;
+    if (!existing || !existingDate || visitDate < existingDate) firstVisitByCountry.set(trip.country, trip);
   }
 
-  const stamps = COUNTRY_ROSTER
-    .filter((entry) => firstVisitByCountry.has(entry.country))
-    .map((entry, index) => buildCountryStampPreview(entry, index, firstVisitByCountry.get(entry.country)));
+  const stamps = Array.from(firstVisitByCountry.values())
+    .sort((a, b) => (b.firstCountryEntryDate ?? b.startDate).localeCompare(a.firstCountryEntryDate ?? a.startDate))
+    .map((trip, index) => ({
+      shape: trip.stamp.shape,
+      icon: trip.stamp.icon,
+      color: trip.stamp.color,
+      country: COUNTRY_ABBREVIATIONS[trip.country] ?? trip.country,
+      city: trip.stamp.city ?? trip.city,
+      airportCode: trip.stamp.airportCode ?? trip.airportCode,
+      date: trip.firstCountryEntryDate ?? trip.stamp.date ?? trip.startDate,
+      footer: trip.stamp.footer,
+      rotate: index % 2 === 0 ? -2 : 2,
+    }));
 
   if (stamps.length > 0) return stamps;
   return rosterCountryStampPreviews.slice(0, 1);
@@ -581,6 +624,12 @@ function formatCompactMiles(miles: number) {
   return `${miles} mi`;
 }
 
+function formatPassportDate(value: string) {
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase();
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -594,8 +643,8 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   booklet: {
-    width: 106,
-    height: 150,
+    width: 92,
+    height: 142,
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#132136',
@@ -627,33 +676,54 @@ const styles = StyleSheet.create({
   name: {
     color: colors.ink,
     fontFamily: fonts.display,
-    fontSize: 29,
+    fontSize: 24,
     marginTop: 6,
   },
   homeAirport: {
     color: colors.mutedInk,
     fontFamily: fonts.sansBold,
-    fontSize: 13,
+    fontSize: 11.5,
     marginTop: 4,
   },
   firstFlight: {
     color: colors.mutedInk,
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 8,
     marginTop: 12,
   },
-  stampRow: {
+  credentialRow: {
     marginTop: spacing.md,
     flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  statStrip: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     borderTopWidth: 1,
     borderTopColor: colors.paperBorder,
-    paddingTop: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.paperBorder,
+    paddingVertical: spacing.sm,
+  },
+  credentialDetail: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: spacing.sm,
+    borderRightWidth: 1,
+    borderRightColor: colors.paperBorderSoft,
+  },
+  credentialLabel: {
+    color: colors.mutedInk,
+    fontFamily: fonts.sansBold,
+    fontSize: 7,
+    letterSpacing: 0.7,
+  },
+  credentialValue: {
+    color: colors.ink,
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    marginTop: 3,
+  },
+  statStrip: {
+    marginTop: spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: spacing.sm,
   },
   stripStat: {
     alignItems: 'center',
@@ -797,28 +867,48 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   collectionCard: {
+    height: 126,
+    alignItems: 'flex-start',
+  },
+  collectionTop: {
+    width: '100%',
+    flexDirection: 'row',
     alignItems: 'center',
-    height: 200,
+    justifyContent: 'space-between',
+  },
+  collectionIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.paperSoft,
+    borderWidth: 1,
+    borderColor: colors.paperBorder,
+  },
+  collectionArrow: {
+    color: colors.mutedInk,
+    fontFamily: fonts.sansBold,
+    fontSize: 17,
   },
   collectionTitle: {
-    color: colors.ink,
+    color: colors.mutedInk,
     fontFamily: fonts.sansBold,
-    fontSize: 12,
-    letterSpacing: 0.8,
+    fontSize: 9,
+    letterSpacing: 0.9,
+    marginTop: 8,
   },
   collectionValue: {
     color: colors.ink,
     fontFamily: fonts.display,
-    fontSize: 21,
-    marginTop: 3,
+    fontSize: 23,
+    lineHeight: 25,
   },
-  collectionPreview: {
-    flex: 1,
-    width: '100%',
-    marginTop: spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
+  collectionNote: {
+    color: colors.mutedInk,
+    fontFamily: fonts.sansRegular,
+    fontSize: 9,
+    marginTop: 1,
   },
   countryPreviewPanel: {
     marginTop: spacing.md,
@@ -827,7 +917,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
   countryPreviewTitle: {
     color: colors.red,
@@ -837,8 +927,22 @@ const styles = StyleSheet.create({
   },
   countryPreviewCount: {
     color: colors.mutedInk,
-    fontFamily: fonts.mono,
-    fontSize: 11,
+    fontFamily: fonts.sansRegular,
+    fontSize: 10,
+    marginTop: 2,
+  },
+  viewStampsButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.paperBorder,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  viewStampsText: {
+    color: colors.ink,
+    fontFamily: fonts.sansBold,
+    fontSize: 9,
+    letterSpacing: 0.5,
   },
   countryPreviewGrid: {
     flexDirection: 'row',
@@ -848,6 +952,10 @@ const styles = StyleSheet.create({
   },
   countryPreviewStamp: {
     minWidth: 0,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.paperBorderSoft,
+    backgroundColor: colors.paperSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -1,10 +1,9 @@
 import React from 'react';
 import { GestureResponderEvent, Image, ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native';
 import { TripSummary } from '../../data/trotterMock';
-import { accentColors, colors, fonts, radii, shadows } from '../../theme/trotterTheme';
-import { IconGlyph } from './TrotterKit';
+import { accentColors, colors, fonts, shadows } from '../../theme/trotterTheme';
 import Svg, { Path } from 'react-native-svg';
-import { mapboxFlightImageUrl } from '../../utils/mapboxFlightImage';
+import { mapboxFlightImageUrl, mapboxFlightImageUrlFromCoordinates } from '../../utils/mapboxFlightImage';
 
 const paperTexture = require('../../../assets/textures/paper_texture_clean.png');
 
@@ -18,14 +17,22 @@ type TripCardProps = {
 };
 
 export function TripCard({ trip, width, favorite = false, upcoming = false, onFavorite, onPress }: TripCardProps) {
-  const compact = width < 370;
+  const compact = width < 360;
   const accent = accentColors[trip.accent];
-  const cardHeight = compact ? 168 : 192;
-  const stripWidth = compact ? 48 : 54;
-  const imageWidth = compact ? 156 : 180;
-  const imageHeight = compact ? 112 : 130;
+  const cardHeight = compact ? 164 : 176;
+  const imageWidth = compact ? 124 : 138;
+  const imageHeight = compact ? 104 : 116;
   const [origin, destination] = splitRoute(trip.routeLabel);
-  const mapUrl = mapboxFlightImageUrl(origin, destination, 400, 320, accent);
+  const routeCoordinates = findRouteCoordinates(trip, origin, destination);
+  const mapUrl = routeCoordinates
+    ? mapboxFlightImageUrlFromCoordinates(routeCoordinates.origin, routeCoordinates.destination, 400, 320, accent)
+    : mapboxFlightImageUrl(origin, destination, 400, 320, accent);
+  const imageSource = trip.destinationImage ?? (mapUrl ? { uri: mapUrl } : undefined);
+  const [imageFailed, setImageFailed] = React.useState(false);
+
+  React.useEffect(() => {
+    setImageFailed(false);
+  }, [mapUrl, trip.destinationImage, trip.id]);
 
   return (
     <Pressable
@@ -39,16 +46,12 @@ export function TripCard({ trip, width, favorite = false, upcoming = false, onFa
         imageStyle={styles.paperTexture}
         style={[styles.card, { height: cardHeight }]}
       >
-        <View style={[styles.accentStrip, { width: stripWidth, backgroundColor: accent }]}>
-          <View style={styles.stripInset} />
-          <View style={styles.punchOuter}>
-            <View style={styles.punchInner} />
-          </View>
-        </View>
+        <View style={[styles.accentRail, { backgroundColor: accent }]} />
 
-        <View style={[styles.mainContent, { paddingLeft: compact ? 12 : 16, marginRight: imageWidth + 24 }]}>
+        <View style={[styles.mainContent, { marginRight: imageWidth + 18 }]}>
+          {upcoming ? <Text allowFontScaling={false} style={[styles.upcomingLabel, { color: accent }]}>UPCOMING</Text> : null}
           <View style={styles.titleRow}>
-            <Text maxFontSizeMultiplier={1.05} numberOfLines={1} adjustsFontSizeToFit style={[styles.title, compact && styles.titleCompact]}>
+            <Text maxFontSizeMultiplier={1.05} numberOfLines={2} adjustsFontSizeToFit style={[styles.title, compact && styles.titleCompact]}>
               {trip.title}
             </Text>
           </View>
@@ -56,9 +59,9 @@ export function TripCard({ trip, width, favorite = false, upcoming = false, onFa
           <View style={styles.routeRow}>
             <Text allowFontScaling={false} numberOfLines={1} style={[styles.airportCode, { color: accent }]}>{origin}</Text>
             <View style={styles.flightPathWrap}>
-              <Svg width="40" height="16" viewBox="0 0 40 16">
+              <Svg width="30" height="14" viewBox="0 0 30 14">
                 <Path
-                  d="M 2 13 Q 20 4 38 13"
+                  d="M 2 12 Q 15 3 28 12"
                   fill="none"
                   stroke={accent}
                   strokeWidth="1.5"
@@ -81,29 +84,22 @@ export function TripCard({ trip, width, favorite = false, upcoming = false, onFa
 
 
         <View style={[styles.photoFrame, { width: imageWidth, height: imageHeight }]}>
-          {trip.destinationImage ? (
-            <Image source={trip.destinationImage} resizeMode="cover" style={StyleSheet.absoluteFillObject} />
-          ) : mapUrl ? (
+          {imageSource && !imageFailed ? (
             <Image
-              source={{ uri: mapUrl }}
+              source={imageSource}
               resizeMode="cover"
               style={StyleSheet.absoluteFillObject}
+              onError={() => setImageFailed(true)}
             />
           ) : (
-            <View style={[styles.photoPlaceholder, { backgroundColor: getPhotoTone(trip.id) }]}>
-              <View style={styles.placeholderSun} />
-              <View style={styles.placeholderHorizon} />
-              <View style={styles.placeholderRidgeA} />
-              <View style={styles.placeholderRidgeB} />
-              <Text allowFontScaling={false} style={styles.placeholderCode}>{trip.countryCode}</Text>
-            </View>
+            <RouteFallback origin={origin} destination={destination} accent={accent} />
           )}
           <Pressable
             hitSlop={8}
             onPress={(event: GestureResponderEvent) => {
-            event.stopPropagation();
-            onFavorite?.();
-          }}
+              event.stopPropagation();
+              onFavorite?.();
+            }}
             style={styles.favoriteBubble}
           >
             <Text allowFontScaling={false} style={[styles.favoriteStar, favorite && styles.favoriteStarFilled]}>
@@ -116,18 +112,38 @@ export function TripCard({ trip, width, favorite = false, upcoming = false, onFa
   );
 }
 
+function findRouteCoordinates(trip: TripSummary, originCode: string, destinationCode: string) {
+  const points = (trip.segments ?? []).flatMap((segment) => [segment.depPoint, segment.arrPoint]).filter(Boolean);
+  const origin = points.find((point) => point?.code === originCode);
+  const destination = points.find((point) => point?.code === destinationCode);
+  if (!origin || !destination) return undefined;
+  return {
+    origin: [origin.lon, origin.lat] as [number, number],
+    destination: [destination.lon, destination.lat] as [number, number],
+  };
+}
+
+function RouteFallback({ origin, destination, accent }: { origin: string; destination: string; accent: string }) {
+  return (
+    <View style={styles.routeFallback}>
+      <Text allowFontScaling={false} style={styles.fallbackKicker}>FLIGHT PATH</Text>
+      <View style={styles.fallbackRoute}>
+        <Text allowFontScaling={false} style={styles.fallbackCode}>{origin}</Text>
+        <View style={styles.fallbackLine}>
+          <View style={[styles.fallbackDot, { borderColor: accent }]} />
+          <View style={[styles.fallbackTrack, { backgroundColor: accent }]} />
+          <View style={[styles.fallbackDot, { borderColor: accent }]} />
+        </View>
+        <Text allowFontScaling={false} style={styles.fallbackCode}>{destination}</Text>
+      </View>
+    </View>
+  );
+}
+
 function splitRoute(routeLabel: string) {
   const normalized = routeLabel.replace('→', '->');
   const [origin, destination] = normalized.split('->').map((part) => part.trim());
   return [origin || 'DFW', destination || '---'];
-}
-
-function formatVerticalDate(start: string, end: string) {
-  const startDate = new Date(`${start}T00:00:00`);
-  const endDate = new Date(`${end}T00:00:00`);
-  const startMonth = startDate.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-  const endMonth = endDate.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-  return `${startMonth} ${startDate.getDate()} – ${endMonth} ${endDate.getDate()}, ${endDate.getFullYear()}`;
 }
 
 function formatReadableDate(start: string, end: string) {
@@ -136,15 +152,6 @@ function formatReadableDate(start: string, end: string) {
   const startMonth = startDate.toLocaleString('en-US', { month: 'short' });
   const endMonth = endDate.toLocaleString('en-US', { month: 'short' });
   return `${startMonth} ${startDate.getDate()} – ${endMonth} ${endDate.getDate()}, ${endDate.getFullYear()}`;
-}
-
-function getPhotoTone(id: string) {
-  if (id.includes('tokyo')) return '#1D3940';
-  if (id.includes('paris')) return '#254A4C';
-  if (id.includes('denver')) return '#665436';
-  if (id.includes('cancun')) return '#2F6B66';
-  if (id.includes('barcelona')) return '#604637';
-  return '#40575A';
 }
 
 const styles = StyleSheet.create({
@@ -166,35 +173,9 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     opacity: 0.22,
   },
-  accentStrip: {
+  accentRail: {
+    width: 6,
     alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(64, 42, 20, 0.25)',
-  },
-  stripInset: {
-    ...StyleSheet.absoluteFillObject,
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(255, 246, 225, 0.24)',
-  },
-  punchOuter: {
-    width: 27,
-    height: 27,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-  },
-  punchInner: {
-    width: 17,
-    height: 17,
-    borderRadius: 9,
-    backgroundColor: colors.paper,
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
   },
 
   mainContent: {
@@ -202,9 +183,15 @@ const styles = StyleSheet.create({
     minWidth: 0,
     alignSelf: 'stretch',
     justifyContent: 'center',
-    paddingLeft: 12,
-    paddingRight: 2,
+    paddingLeft: 14,
+    paddingRight: 0,
     zIndex: 2,
+  },
+  upcomingLabel: {
+    fontFamily: fonts.sansBold,
+    fontSize: 8,
+    letterSpacing: 1.1,
+    marginBottom: 3,
   },
   titleRow: {
     flexDirection: 'row',
@@ -216,13 +203,13 @@ const styles = StyleSheet.create({
     minWidth: 0,
     color: colors.ink,
     fontFamily: 'Georgia',
-    fontSize: 28,
-    lineHeight: 32,
+    fontSize: 24,
+    lineHeight: 26,
     fontWeight: '500',
   },
   titleCompact: {
-    fontSize: 24,
-    lineHeight: 29,
+    fontSize: 21,
+    lineHeight: 23,
   },
   countryCode: {
     color: colors.ink,
@@ -237,101 +224,94 @@ const styles = StyleSheet.create({
   routeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 7,
+    marginTop: 6,
   },
   flightPathWrap: {
-    width: 40,
-    height: 16,
-    marginHorizontal: 8,
+    width: 30,
+    height: 14,
+    marginHorizontal: 5,
     alignItems: 'center',
     justifyContent: 'flex-start',
     marginTop: 2,
   },
   airportCode: {
     fontFamily: fonts.sansBold,
-    fontSize: 16,
-    letterSpacing: 1.2,
+    fontSize: 14,
+    letterSpacing: 1,
   },
   dateText: {
     color: colors.ink,
     fontFamily: fonts.sansRegular,
-    fontSize: 12.5,
+    fontSize: 11.5,
     marginTop: 6,
   },
   metaText: {
     color: colors.mutedInk,
     fontFamily: fonts.sansRegular,
-    fontSize: 12,
+    fontSize: 11.5,
     marginTop: 5,
   },
 
   photoFrame: {
     position: 'absolute',
-    right: 4,
-    top: 28,
-    borderWidth: 6,
+    right: 9,
+    top: 30,
+    borderWidth: 4,
     borderColor: colors.paperSoft,
     backgroundColor: colors.dashboard,
     overflow: 'hidden',
-    transform: [{ rotate: '4deg' }],
+    transform: [{ rotate: '2deg' }],
     zIndex: 3,
     ...shadows.paper,
   },
-  photoPlaceholder: {
+  routeFallback: {
     flex: 1,
-    overflow: 'hidden',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    backgroundColor: '#17262A',
   },
-  placeholderSun: {
-    position: 'absolute',
-    right: 13,
-    top: 11,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: 'rgba(248, 238, 219, 0.75)',
+  fallbackKicker: {
+    color: colors.subtleText,
+    fontFamily: fonts.sansBold,
+    fontSize: 7,
+    letterSpacing: 1,
+    textAlign: 'center',
+    marginBottom: 10,
   },
-  placeholderHorizon: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 22,
-    height: 1,
-    backgroundColor: 'rgba(248, 238, 219, 0.28)',
+  fallbackRoute: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 4,
   },
-  placeholderRidgeA: {
-    position: 'absolute',
-    left: -8,
-    bottom: 0,
-    width: 84,
-    height: 38,
-    backgroundColor: 'rgba(10, 12, 10, 0.26)',
-    transform: [{ rotate: '-10deg' }],
-  },
-  placeholderRidgeB: {
-    position: 'absolute',
-    right: -12,
-    bottom: 0,
-    width: 80,
-    height: 44,
-    backgroundColor: 'rgba(248, 238, 219, 0.16)',
-    transform: [{ rotate: '11deg' }],
-  },
-  placeholderCode: {
-    position: 'absolute',
-    left: 8,
-    bottom: 6,
-    color: 'rgba(248, 238, 219, 0.82)',
+  fallbackCode: {
+    color: colors.creamText,
     fontFamily: fonts.mono,
     fontSize: 11,
-    letterSpacing: 1.2,
+  },
+  fallbackLine: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  fallbackDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    borderWidth: 1.5,
+  },
+  fallbackTrack: {
+    flex: 1,
+    height: 1,
+    opacity: 0.8,
   },
   favoriteBubble: {
     position: 'absolute',
-    top: -8,
-    right: -8,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    top: 5,
+    right: 5,
+    width: 29,
+    height: 29,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.dashboard,
@@ -341,8 +321,8 @@ const styles = StyleSheet.create({
   },
   favoriteStar: {
     color: colors.brassSoft,
-    fontSize: 22,
-    lineHeight: 24,
+    fontSize: 18,
+    lineHeight: 20,
   },
   favoriteStarFilled: {
     color: colors.brassSoft,

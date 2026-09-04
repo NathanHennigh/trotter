@@ -1,272 +1,193 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  BottomNav,
-  IconButton,
-  IconGlyph,
-  PaperSurface,
-  ScreenHeader,
-  SegmentedFilterTabs,
-  Stamp,
-} from '../components/trotter/TrotterKit';
-import { BottomNavTab, CountryStamp, countryStamps } from '../data/trotterMock';
-import {
-  getMe,
-  getJobStatus,
-  listUnparsedCandidates,
-  requestDevToken,
-  runQueryComparison,
-  ScanJobStatus,
-  signInWithGoogle,
-  startGmailImport,
-} from '../services/scanControls';
-import { getApiBaseUrl, getStoredToken, hydrateStoredToken } from '../services/travelTrips';
+import { BottomNav, IconGlyph, PaperSurface, ScreenHeader } from '../components/trotter/TrotterKit';
+import { PngStamp } from '../components/trotter/stamps/PngStamp';
+import { BottomNavTab, TripSummary } from '../data/trotterMock';
+import { useTravelTrips } from '../services/travelTrips';
 import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
+import { getMobileVisualWidth } from '../utils/mobileLayout';
 
-export function CountryStampCollectionScreen({ active, onChange }: { active: BottomNavTab; onChange: (tab: BottomNavTab) => void }) {
+const STAMP_BASE_WIDTH = 204.75;
+
+type CountryArrival = {
+  country: string;
+  city?: string;
+  airportCode?: string;
+  firstVisitDate: string;
+  tripCount: number;
+  airportCount: number;
+  stamp: TripSummary['stamp'];
+};
+
+export function CountryStampCollectionScreen({
+  active,
+  onChange,
+  onBack,
+}: {
+  active: BottomNavTab;
+  onChange: (tab: BottomNavTab) => void;
+  onBack?: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const [tab, setTab] = React.useState('all');
-  const visited = countryStamps.filter((country) => country.visited).length;
-  const visibleCountries = countryStamps.filter((country) => tab === 'all' || (tab === 'visited' ? country.visited : !country.visited));
-  const screenPadding = width < 390 ? 16 : layout.screenPadding;
-  const contentWidth = width - screenPadding * 2;
+  const { trips, profile, status, refresh } = useTravelTrips();
+  const visualWidth = getMobileVisualWidth(width);
+  const screenPadding = visualWidth < 390 ? 16 : layout.screenPadding;
+  const contentWidth = visualWidth - screenPadding * 2;
   const cardWidth = (contentWidth - layout.cardGap) / 2;
+  const arrivals = React.useMemo(() => buildCountryArrivals(trips), [trips]);
+  const firstYear = arrivals.length ? arrivals[arrivals.length - 1].firstVisitDate.slice(0, 4) : '-';
+  const latestYear = arrivals.length ? arrivals[0].firstVisitDate.slice(0, 4) : '-';
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={status === 'loading' || status === 'refreshing'} onRefresh={refresh} tintColor={colors.red} />}
+        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24, width: visualWidth }}
+      >
         <ScreenHeader
-          title="COUNTRIES"
-          subtitle="STAMP COLLECTION"
-          leftAction={<IconButton variant="paper" shape="circle" icon={<IconGlyph name="globe" color={colors.ink} size={22} />} />}
-          rightActions={[<CountryProgressBadge key="progress" visited={visited} total={195} />]}
+          title="STAMPS"
+          subtitle="FIRST ARRIVALS"
+          leftAction={onBack ? <BackButton onPress={onBack} /> : undefined}
+          rightActions={[<CountryProgressBadge key="progress" visited={arrivals.length} />]}
         />
-        <SegmentedFilterTabs
-          activeKey={tab}
-          onChange={setTab}
-          tabs={[
-            { key: 'all', label: 'ALL', count: countryStamps.length },
-            { key: 'visited', label: 'VISITED', count: visited },
-            { key: 'unvisited', label: 'UNVISITED', count: countryStamps.length - visited },
-          ]}
-        />
-        <TemporaryScanPanel screenPadding={screenPadding} contentWidth={contentWidth} />
-        <CountrySummaryMapCard visited={visited} screenPadding={screenPadding} contentWidth={contentWidth} />
-        <View style={[styles.grid, { paddingHorizontal: screenPadding, gap: layout.cardGap }]}>
-          {visibleCountries.map((country) => <CountryStampCard key={country.country} country={country} width={cardWidth} />)}
-        </View>
-        <PaperSurface radius={14} padding={spacing.lg} style={[styles.banner, { marginHorizontal: screenPadding, width: contentWidth }]}>
-          <Text allowFontScaling={false} style={styles.bannerTitle}>COLLECT MORE STAMPS</Text>
-          <Text maxFontSizeMultiplier={1.1} style={styles.bannerText}>New countries unlock when imported flights include an arrival airport outside your existing travel archive.</Text>
+
+        <PaperSurface radius={16} padding={spacing.lg} style={[styles.summaryCard, { marginHorizontal: screenPadding, width: contentWidth }]}>
+          <View style={styles.summaryTop}>
+            <View>
+              <Text allowFontScaling={false} style={styles.summaryEyebrow}>YOUR TRAVEL ARCHIVE</Text>
+              <Text allowFontScaling={false} style={styles.summaryValue}>{arrivals.length} countries stamped</Text>
+              <Text allowFontScaling={false} style={styles.summarySub}>{firstYear} to {latestYear}</Text>
+            </View>
+            <IconGlyph name="globe" color={colors.tealDeep} size={38} />
+          </View>
+          <View style={styles.summaryMetrics}>
+            <SummaryMetric label="FLIGHTS" value={profile.flights.toLocaleString()} />
+            <SummaryMetric label="AIRPORTS" value={profile.airports.toLocaleString()} />
+            <SummaryMetric label="TRIPS" value={trips.length.toLocaleString()} />
+          </View>
         </PaperSurface>
+
+        <View style={[styles.sectionHeader, { marginHorizontal: screenPadding }]}>
+          <Text allowFontScaling={false} style={styles.sectionTitle}>ARRIVAL STAMPS</Text>
+          <Text allowFontScaling={false} style={styles.sectionHint}>Newest first</Text>
+        </View>
+
+        {arrivals.length ? (
+          <View style={[styles.grid, { paddingHorizontal: screenPadding, gap: layout.cardGap }]}>
+            {arrivals.map((arrival, index) => (
+              <CountryStampCard key={arrival.country} arrival={arrival} width={cardWidth} index={index} />
+            ))}
+          </View>
+        ) : (
+          <PaperSurface radius={14} padding={spacing.xl} style={[styles.emptyCard, { marginHorizontal: screenPadding, width: contentWidth }]}>
+            <Text allowFontScaling={false} style={styles.emptyTitle}>NO ARRIVAL STAMPS YET</Text>
+            <Text style={styles.emptyText}>Sync Gmail to build this collection from your recorded flights.</Text>
+          </PaperSurface>
+        )}
       </ScrollView>
       <BottomNav active={active} onChange={onChange} />
     </View>
   );
 }
 
-function TemporaryScanPanel({ screenPadding, contentWidth }: { screenPadding: number; contentWidth: number }) {
-  const [busy, setBusy] = React.useState<string | null>(null);
-  const [message, setMessage] = React.useState('Manual scanning only. Nothing here runs automatically.');
-  const [jobId, setJobId] = React.useState<string | null>(null);
-  const [job, setJob] = React.useState<ScanJobStatus | null>(null);
-  const [hasToken, setHasToken] = React.useState(() => Boolean(getStoredToken()));
-  const [accountEmail, setAccountEmail] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    hydrateStoredToken().then((token) => {
-      if (!token) return;
-      setHasToken(true);
-      getMe(token).then((user) => setAccountEmail(user.email)).catch(() => setAccountEmail(null));
-    });
-  }, []);
-
-  const runAction = async (label: string, action: () => Promise<string>) => {
-    setBusy(label);
-    try {
-      setMessage(await action());
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const startImport = () => runAction('import', async () => {
-    const response = await startGmailImport();
-    setJobId(response.job_id);
-    setJob(null);
-    return `Started Gmail import ${response.job_id.slice(0, 8)}. Use Poll Job to refresh counts.`;
-  });
-
-  const pollJob = () => runAction('poll', async () => {
-    if (!jobId) return 'No current job id. Start Gmail Import first.';
-    const status = await getJobStatus(jobId);
-    setJob(status);
-    return `Job ${status.state}: scanned ${status.scanned_count}, parsed ${status.parsed_count}, segments ${status.segment_count}.`;
-  });
-
+function BackButton({ onPress }: { onPress: () => void }) {
   return (
-    <PaperSurface radius={14} padding={spacing.md} style={[styles.scanPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
-      <View style={styles.scanHeader}>
-        <View>
-          <Text allowFontScaling={false} style={styles.scanTitle}>DEV SCANS</Text>
-          <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.scanSub}>{getApiBaseUrl()}</Text>
-        </View>
-        <View style={[styles.tokenPill, hasToken && styles.tokenPillReady]}>
-          <Text allowFontScaling={false} style={[styles.tokenText, hasToken && styles.tokenTextReady]}>{hasToken ? 'TOKEN' : 'NO TOKEN'}</Text>
-        </View>
-      </View>
-
-      <View style={styles.scanButtonGrid}>
-        <ScanButton
-          label="Google"
-          disabled={busy !== null}
-          busy={busy === 'google'}
-          onPress={() => runAction('google', async () => {
-            const user = await signInWithGoogle();
-            setHasToken(true);
-            setAccountEmail(user.email);
-            return `Connected Google for ${user.email}.`;
-          })}
-        />
-        <ScanButton
-          label="Dev Token"
-          disabled={busy !== null}
-          busy={busy === 'token'}
-          onPress={() => runAction('token', async () => {
-            const token = await requestDevToken();
-            setHasToken(true);
-            setAccountEmail(token.email);
-            return `Stored token for ${token.email}.`;
-          })}
-        />
-        <ScanButton label="Gmail Import" disabled={busy !== null} busy={busy === 'import'} onPress={startImport} />
-        <ScanButton label="Poll Job" disabled={busy !== null || !jobId} busy={busy === 'poll'} onPress={pollJob} />
-        <ScanButton
-          label="Query Test"
-          disabled={busy !== null}
-          busy={busy === 'queries'}
-          onPress={() => runAction('queries', async () => {
-            const result = await runQueryComparison();
-            return `v1 ${result.v1_count}, v2 ${result.v2_count}, v3 ${result.v3_count}. Parser comparison continues on backend.`;
-          })}
-        />
-        <ScanButton
-          label="Unparsed"
-          disabled={busy !== null}
-          busy={busy === 'unparsed'}
-          onPress={() => runAction('unparsed', async () => {
-            const result = await listUnparsedCandidates(25);
-            return `${result.total} review-required messages. Latest: ${result.candidates[0]?.subject ?? 'none'}`;
-          })}
-        />
-      </View>
-
-      {job ? (
-        <View style={styles.jobStrip}>
-          <DevMetric label="STATE" value={job.state} />
-          <DevMetric label="SCAN" value={String(job.scanned_count)} />
-          <DevMetric label="PARSE" value={String(job.parsed_count)} />
-          <DevMetric label="SEG" value={String(job.segment_count)} />
-        </View>
-      ) : null}
-      <Text maxFontSizeMultiplier={1.05} style={styles.scanMessage}>{accountEmail ? `Signed in as ${accountEmail}. ${message}` : message}</Text>
-    </PaperSurface>
-  );
-}
-
-function ScanButton({
-  label,
-  onPress,
-  disabled,
-  busy,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  busy?: boolean;
-}) {
-  return (
-    <Pressable onPress={onPress} disabled={disabled} style={[styles.scanButton, disabled && styles.scanButtonDisabled]}>
-      <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.scanButtonText}>{busy ? '...' : label}</Text>
+    <Pressable onPress={onPress} hitSlop={8} style={styles.backButton}>
+      <Text allowFontScaling={false} style={styles.backText}>{'<'}</Text>
     </Pressable>
   );
 }
 
-function DevMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.devMetric}>
-      <Text allowFontScaling={false} style={styles.devMetricLabel}>{label}</Text>
-      <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.devMetricValue}>{value}</Text>
-    </View>
-  );
-}
-
-function CountryProgressBadge({ visited, total }: { visited: number; total: number }) {
+function CountryProgressBadge({ visited }: { visited: number }) {
   return (
     <PaperSurface radius={999} padding={8} style={styles.badge}>
-      <Text allowFontScaling={false} style={styles.badgeValue}>{visited} / {total}</Text>
+      <Text allowFontScaling={false} style={styles.badgeValue}>{visited} / 195</Text>
       <Text allowFontScaling={false} style={styles.badgeLabel}>VISITED</Text>
     </PaperSurface>
   );
 }
 
-function CountrySummaryMapCard({ visited, screenPadding, contentWidth }: { visited: number; screenPadding: number; contentWidth: number }) {
+function SummaryMetric({ label, value }: { label: string; value: string }) {
   return (
-    <PaperSurface radius={16} padding={spacing.lg} style={[styles.mapCard, { marginHorizontal: screenPadding, width: contentWidth }]}>
-      <View style={styles.mapTop}>
-        <View>
-          <Text allowFontScaling={false} style={styles.mapTitle}>WORLD SUMMARY</Text>
-          <Text maxFontSizeMultiplier={1.05} style={styles.mapSub}>{visited} countries stamped</Text>
-        </View>
-        <IconGlyph name="globe" color={colors.tealDeep} size={34} />
-      </View>
-      <View style={styles.miniMap}>
-        <View style={[styles.landMass, styles.landA]} />
-        <View style={[styles.landMass, styles.landB]} />
-        <View style={[styles.landMass, styles.landC]} />
-        <View style={[styles.routeArc, styles.routeArcA]} />
-        <View style={[styles.routeArc, styles.routeArcB]} />
-      </View>
-      <View style={styles.legend}>
-        <LegendDot color={colors.green} label="visited" />
-        <LegendDot color={colors.paperBorder} label="not visited" />
-        <LegendDot color={colors.mustard} label="in transit" />
-      </View>
-    </PaperSurface>
-  );
-}
-
-function LegendDot({ color, label }: { color: string; label: string }) {
-  return (
-    <View style={styles.legendItem}>
-      <View style={[styles.legendDot, { backgroundColor: color }]} />
-      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.legendText}>{label}</Text>
+    <View style={styles.summaryMetric}>
+      <Text allowFontScaling={false} style={styles.summaryMetricValue}>{value}</Text>
+      <Text allowFontScaling={false} style={styles.summaryMetricLabel}>{label}</Text>
     </View>
   );
 }
 
-function CountryStampCard({ country, width }: { country: CountryStamp; width: number }) {
+function CountryStampCard({ arrival, width, index }: { arrival: CountryArrival; width: number; index: number }) {
+  const stampScale = Math.max(0.55, Math.min(0.76, (width - 18) / STAMP_BASE_WIDTH));
+  const airportLabel = arrival.airportCode ?? 'ARRIVAL';
   return (
-    <PaperSurface radius={12} padding={spacing.sm} style={[styles.countryCard, { width }, !country.visited && styles.countryCardMuted]}>
-      <Stamp
-        type={country.stampType}
-        color={country.color}
-        title={country.country.toUpperCase()}
-        subtitle={`${country.city}${country.airportCode ? ` (${country.airportCode})` : ''}`}
-        date={country.firstVisitDate}
-        footer={country.visited ? undefined : 'UNSTAMPED'}
-        landmark={country.landmark}
-        faded={!country.visited}
-        size={width < 160 ? 'sm' : 'md'}
-      />
-      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.countryName}>{country.country}</Text>
-      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.countryMeta}>{country.visited ? country.firstVisitDate : `${country.city} awaits`}</Text>
+    <PaperSurface radius={12} padding={spacing.sm} style={[styles.countryCard, { width }]}>
+      <View style={styles.stampWrap}>
+        <PngStamp
+          {...arrival.stamp}
+          city={arrival.city}
+          airportCode={arrival.airportCode}
+          date={arrival.firstVisitDate}
+          size="md"
+          variant="country-card"
+          rotate={index % 2 === 0 ? -2 : 2}
+          scale={stampScale}
+        />
+      </View>
+      <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.countryName}>{arrival.country}</Text>
+      <View style={styles.arrivalLine}>
+        <Text allowFontScaling={false} numberOfLines={1} style={styles.airportCode}>{airportLabel}</Text>
+        <Text allowFontScaling={false} numberOfLines={1} style={styles.countryMeta}>{formatStampDate(arrival.firstVisitDate)}</Text>
+      </View>
+      <Text allowFontScaling={false} numberOfLines={1} style={styles.tripCount}>
+        {arrival.tripCount} trip{arrival.tripCount === 1 ? '' : 's'} / {arrival.airportCount} airport{arrival.airportCount === 1 ? '' : 's'}
+      </Text>
     </PaperSurface>
   );
+}
+
+function buildCountryArrivals(trips: TripSummary[]): CountryArrival[] {
+  const arrivals = new Map<string, CountryArrival & { airports: Set<string> }>();
+  const chronologicalTrips = [...trips].sort((a, b) => (
+    (a.firstCountryEntryDate ?? a.startDate).localeCompare(b.firstCountryEntryDate ?? b.startDate)
+  ));
+
+  for (const trip of chronologicalTrips) {
+    if (!trip.country) continue;
+    const known = arrivals.get(trip.country);
+    const airportCodes = (trip.airports ?? []).filter(Boolean);
+    if (trip.airportCode) airportCodes.push(trip.airportCode);
+    if (known) {
+      known.tripCount += 1;
+      airportCodes.forEach((code) => known.airports.add(code));
+      known.airportCount = known.airports.size;
+      continue;
+    }
+
+    const airports = new Set(airportCodes);
+    arrivals.set(trip.country, {
+      country: trip.country,
+      city: trip.stamp.city ?? trip.city,
+      airportCode: trip.stamp.airportCode ?? trip.airportCode,
+      firstVisitDate: trip.firstCountryEntryDate ?? trip.stamp.date ?? trip.startDate,
+      tripCount: 1,
+      airportCount: airports.size,
+      stamp: trip.stamp,
+      airports,
+    });
+  }
+
+  return Array.from(arrivals.values())
+    .sort((a, b) => b.firstVisitDate.localeCompare(a.firstVisitDate))
+    .map(({ airports: _airports, ...arrival }) => arrival);
+}
+
+function formatStampDate(value: string) {
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 const styles = StyleSheet.create({
@@ -274,256 +195,164 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.paperSoft,
   },
-  badge: {
-    minWidth: 68,
-    alignItems: 'center',
-  },
-  badgeValue: {
-    color: colors.ink,
-    fontFamily: fonts.mono,
-    fontSize: 12,
-  },
-  badgeLabel: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 8,
-  },
-  mapCard: {
-    marginTop: spacing.md,
-  },
-  scanPanel: {
-    marginTop: spacing.md,
-  },
-  scanHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  scanTitle: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 13,
-    letterSpacing: 1,
-  },
-  scanSub: {
-    color: colors.mutedInk,
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    marginTop: 4,
-  },
-  tokenPill: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.red,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  tokenPillReady: {
-    borderColor: colors.green,
-  },
-  tokenText: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 9,
-  },
-  tokenTextReady: {
-    color: colors.green,
-  },
-  scanButtonGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  scanButton: {
-    minHeight: 38,
-    minWidth: 96,
-    flexGrow: 1,
-    flexBasis: '30%',
-    borderRadius: 8,
+  backButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.dashboard,
     borderWidth: 1,
     borderColor: colors.darkBorder,
-    paddingHorizontal: spacing.sm,
   },
-  scanButtonDisabled: {
-    opacity: 0.48,
-  },
-  scanButtonText: {
+  backText: {
     color: colors.creamText,
     fontFamily: fonts.sansBold,
-    fontSize: 11,
+    fontSize: 31,
+    lineHeight: 34,
+    marginTop: -3,
   },
-  jobStrip: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
+  badge: {
+    minWidth: 70,
+    alignItems: 'center',
   },
-  devMetric: {
-    flex: 1,
-    minWidth: 0,
-    padding: spacing.sm,
-    backgroundColor: colors.paperSoft,
-    borderRightWidth: 1,
-    borderRightColor: colors.paperBorder,
-  },
-  devMetricLabel: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 8,
-  },
-  devMetricValue: {
+  badgeValue: {
     color: colors.ink,
     fontFamily: fonts.mono,
-    fontSize: 12,
+    fontSize: 11,
+  },
+  badgeLabel: {
+    color: colors.red,
+    fontFamily: fonts.sansBold,
+    fontSize: 7,
+    letterSpacing: 0.6,
+  },
+  summaryCard: {
+    marginTop: spacing.sm,
+  },
+  summaryTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  summaryEyebrow: {
+    color: colors.red,
+    fontFamily: fonts.sansBold,
+    fontSize: 9,
+    letterSpacing: 1,
+  },
+  summaryValue: {
+    color: colors.ink,
+    fontFamily: fonts.display,
+    fontSize: 21,
     marginTop: 3,
   },
-  scanMessage: {
+  summarySub: {
     color: colors.mutedInk,
     fontFamily: fonts.sansRegular,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: spacing.md,
-  },
-  mapTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  mapTitle: {
-    color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 14,
-  },
-  mapSub: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansRegular,
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 2,
   },
-  miniMap: {
-    height: 132,
-    marginTop: spacing.md,
-    borderRadius: 10,
-    overflow: 'hidden',
-    backgroundColor: '#D8C7A6',
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
-  },
-  landMass: {
-    position: 'absolute',
-    backgroundColor: colors.green,
-    opacity: 0.72,
-  },
-  landA: {
-    left: 24,
-    top: 36,
-    width: 94,
-    height: 46,
-    borderRadius: 28,
-  },
-  landB: {
-    left: 132,
-    top: 42,
-    width: 72,
-    height: 38,
-    borderRadius: 20,
-  },
-  landC: {
-    right: 34,
-    top: 28,
-    width: 98,
-    height: 54,
-    borderRadius: 30,
-  },
-  routeArc: {
-    position: 'absolute',
-    borderTopWidth: 2,
-    borderColor: colors.red,
-    opacity: 0.75,
-  },
-  routeArcA: {
-    left: 82,
-    top: 32,
-    width: 164,
-    height: 80,
-    borderRadius: 100,
-    transform: [{ rotate: '-8deg' }],
-  },
-  routeArcB: {
-    left: 44,
-    top: 54,
-    width: 244,
-    height: 94,
-    borderRadius: 140,
-    transform: [{ rotate: '8deg' }],
-  },
-  legend: {
+  summaryMetrics: {
     flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.md,
-    flexWrap: 'wrap',
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.paperBorder,
   },
-  legendItem: {
-    flexDirection: 'row',
+  summaryMetric: {
+    flex: 1,
     alignItems: 'center',
-    gap: 5,
+    borderRightWidth: 1,
+    borderRightColor: colors.paperBorderSoft,
   },
-  legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  summaryMetricValue: {
+    color: colors.ink,
+    fontFamily: fonts.mono,
+    fontSize: 16,
   },
-  legendText: {
+  summaryMetricLabel: {
     color: colors.mutedInk,
     fontFamily: fonts.sansBold,
+    fontSize: 8,
+    letterSpacing: 0.7,
+    marginTop: 3,
+  },
+  sectionHeader: {
+    marginTop: spacing.xl,
+    marginBottom: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    color: colors.ink,
+    fontFamily: fonts.sansBold,
+    fontSize: 12,
+    letterSpacing: 1.1,
+  },
+  sectionHint: {
+    color: colors.mutedInk,
+    fontFamily: fonts.sansRegular,
     fontSize: 10,
   },
   grid: {
-    marginTop: spacing.lg,
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
   countryCard: {
-    height: 178,
+    height: 205,
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    overflow: 'hidden',
   },
-  countryCardMuted: {
-    backgroundColor: '#E9DCC4',
+  stampWrap: {
+    height: 122,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   countryName: {
+    maxWidth: '100%',
     color: colors.ink,
     fontFamily: fonts.sansBold,
     fontSize: 13,
-    marginTop: spacing.sm,
+  },
+  arrivalLine: {
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4,
+  },
+  airportCode: {
+    color: colors.redDeep,
+    fontFamily: fonts.mono,
+    fontSize: 10,
   },
   countryMeta: {
+    flexShrink: 1,
     color: colors.mutedInk,
     fontFamily: fonts.sansRegular,
-    fontSize: 11,
-    marginTop: 2,
+    fontSize: 9,
   },
-  banner: {
-    marginTop: spacing.lg,
+  tripCount: {
+    color: colors.mutedInk,
+    fontFamily: fonts.sansRegular,
+    fontSize: 8.5,
+    marginTop: 4,
   },
-  bannerTitle: {
-    color: colors.red,
+  emptyCard: {
+    alignItems: 'center',
+  },
+  emptyTitle: {
+    color: colors.ink,
     fontFamily: fonts.sansBold,
     fontSize: 13,
   },
-  bannerText: {
+  emptyText: {
     color: colors.mutedInk,
     fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    marginTop: 5,
+    fontSize: 12,
     lineHeight: 18,
+    textAlign: 'center',
+    marginTop: spacing.sm,
   },
 });

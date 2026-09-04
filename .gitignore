@@ -58,6 +58,7 @@ node_modules/
 .expo-shared/
 .expo-export-check/
 dist/
+/mobile-v2/dist-*/
 build/
 *.tsbuildinfo
 

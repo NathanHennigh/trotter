@@ -108,6 +108,12 @@ const US_STATES: Record<string, string> = {
   'Austin': 'TX',
   'Atlanta': 'GA',
   'Dulles': 'VA',
+  'Kailua-Kona': 'HI',
+  'New Orleans': 'LA',
+  'Pensacola': 'FL',
+  'Philadelphia': 'PA',
+  'Wilmington': 'NC',
+  'Valparaiso': 'FL',
 };
 
 const COUNTRY_ABBREVIATIONS: Record<string, string> = {
@@ -654,7 +660,7 @@ function displayTitle(title: string | null | undefined, country: string, country
   const primaryName = (city && city.toLowerCase() !== country.toLowerCase()) ? city : (cleanTitle || country);
 
   if (countryCode === 'US') {
-    const state = US_STATES[primaryName] || US_STATES[cleanTitle || ''];
+    const state = US_STATES[primaryName] || (primaryName === cleanTitle ? US_STATES[cleanTitle || ''] : undefined);
     if (state) return `${primaryName}, ${state}`;
     return primaryName;
   }

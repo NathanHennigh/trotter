@@ -16,6 +16,7 @@ import { BottomNavTab } from '../data/trotterMock';
 import { Dream, DreamItem, DreamItemCategory, useDreams } from '../services/dreams';
 import { getApiBaseUrl, getStoredToken } from '../services/travelTrips';
 import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
+import { getMobileVisualWidth } from '../utils/mobileLayout';
 
 type DreamsView =
   | { name: 'home' }
@@ -57,8 +58,9 @@ const fallbackCoverImage = require('../../assets/objects/globe.png');
 export function DreamsScreen({ active, onChange }: { active: BottomNavTab; onChange: (tab: BottomNavTab) => void }) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const screenPadding = width < 390 ? 16 : layout.screenPadding;
-  const contentWidth = width - screenPadding * 2;
+  const visualWidth = getMobileVisualWidth(width);
+  const screenPadding = visualWidth < 390 ? 16 : layout.screenPadding;
+  const contentWidth = visualWidth - screenPadding * 2;
   const dreamsStore = useDreams();
   const [view, setView] = React.useState<DreamsView>({ name: 'home' });
   const selectedDream = view.name === 'detail' ? dreamsStore.dreams.find((dream) => dream.id === view.dreamId) : undefined;
@@ -70,7 +72,7 @@ export function DreamsScreen({ active, onChange }: { active: BottomNavTab; onCha
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24, width: visualWidth }}
       >
         <ScreenHeader
           title={view.name === 'home' ? 'DREAMS' : view.name === 'review' ? 'REVIEW' : 'DREAM'}

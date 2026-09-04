@@ -9,6 +9,7 @@ import { CountryStampCollectionScreen } from './src/screens/CountryStampCollecti
 import { DreamsScreen } from './src/screens/DreamsScreen';
 import { HomeGlobeScreen } from './src/screens/HomeGlobeScreen';
 import { PassportStatsScreen } from './src/screens/PassportStatsScreen';
+import { ProfileScreen } from './src/screens/ProfileScreen';
 import { TripDetailScreen } from './src/screens/TripDetailScreen';
 import { TripsListScreen } from './src/screens/TripsListScreen';
 import { BottomNavTab } from './src/data/trotterMock';
@@ -61,6 +62,7 @@ export default function App() {
 function AppShell() {
   const [activeTab, setActiveTab] = React.useState<BottomNavTab>(getInitialTab);
   const [selectedTripId, setSelectedTripId] = React.useState<string | null>(null);
+  const [showCountryStamps, setShowCountryStamps] = React.useState(false);
   const { trips } = useTravelTrips();
   const { shareInstagramLink } = useDreams();
   const shareInstagramLinkRef = React.useRef(shareInstagramLink);
@@ -74,6 +76,7 @@ function AppShell() {
   const changeTab = (tab: BottomNavTab) => {
     setActiveTab(tab);
     if (tab !== 'trips') setSelectedTripId(null);
+    setShowCountryStamps(false);
   };
 
   const renderOverlayScreen = () => {
@@ -81,10 +84,25 @@ function AppShell() {
       return <TripDetailScreen trip={selectedTrip} active={activeTab} onBack={() => setSelectedTripId(null)} onChange={changeTab} />;
     }
     if (activeTab === 'trips') return <TripsListScreen active={activeTab} onChange={changeTab} onOpenTrip={(trip) => setSelectedTripId(trip.id)} />;
-    if (activeTab === 'passport') return <PassportStatsScreen active={activeTab} onChange={changeTab} />;
+    if (activeTab === 'passport' && showCountryStamps) {
+      return <CountryStampCollectionScreen active={activeTab} onChange={changeTab} onBack={() => setShowCountryStamps(false)} />;
+    }
+    if (activeTab === 'passport') {
+      return <PassportStatsScreen active={activeTab} onChange={changeTab} onOpenCountries={() => setShowCountryStamps(true)} />;
+    }
     if (activeTab === 'dreams') return <DreamsScreen active={activeTab} onChange={changeTab} />;
-    // Temporary: Countries is parked behind Profile until the final v2 nav IA adds a dedicated collection route.
-    if (activeTab === 'profile') return <CountryStampCollectionScreen active={activeTab} onChange={changeTab} />;
+    if (activeTab === 'profile') {
+      return (
+        <ProfileScreen
+          active={activeTab}
+          onChange={changeTab}
+          onOpenStamps={() => {
+            setActiveTab('passport');
+            setShowCountryStamps(true);
+          }}
+        />
+      );
+    }
     return null;
   };
 

@@ -179,8 +179,25 @@ function formatStampDate(date?: string) {
   return `${day} ${month} ${parsed.getFullYear()}`;
 }
 
-function getPlaceLine(city?: string, airportCode?: string, omitAirportCode?: boolean) {
+function getPlaceLine(city?: string) {
   return city;
+}
+
+function boxesOverlap(a: Box, b: Box) {
+  return !(
+    a.left + a.width <= b.left ||
+    b.left + b.width <= a.left ||
+    a.top + a.height <= b.top ||
+    b.top + b.height <= a.top
+  );
+}
+
+function resolveAirportBox(template: StampTemplate): TextBox {
+  if (!boxesOverlap(template.date, template.airport)) return template.airport;
+
+  const gap = 0.012;
+  const top = Math.min(0.985 - template.airport.height, template.date.top + template.date.height + gap);
+  return { ...template.airport, top };
 }
 
 function fitToLimit(value: string | undefined, maxChars: number) {
@@ -450,10 +467,10 @@ export function PngStamp({
   const template = templateOverride || resolveTemplate(shape, upperCountry.length);
   const width = config.width * scale;
   const height = config.height * scale;
-  const omitAirportCode = variant === 'collection' || variant === 'country-card';
   const countryLabel = fitToLimit(upperCountry, template.maxCountryChars) ?? upperCountry.slice(0, template.maxCountryChars);
-  const placeLine = fitToLimit(getPlaceLine(city, airportCode, omitAirportCode)?.toUpperCase(), template.maxPlaceChars);
+  const placeLine = fitToLimit(getPlaceLine(city)?.toUpperCase(), template.maxPlaceChars);
   const stampDate = formatStampDate(date);
+  const airportBox = resolveAirportBox(template);
   const iconSource = resolveIcon(icon);
   const shapeSource = shapeAssets[shapeAssetKeyMap[shape]];
   const textColor = faded ? colors.mutedInk : color;
@@ -564,7 +581,7 @@ export function PngStamp({
       />
       <StampText
         text={airportCode?.toUpperCase()}
-        box={template.airport}
+        box={airportBox}
         rootWidth={width}
         rootHeight={height}
         baseSize={config.airport * scale}

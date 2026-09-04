@@ -145,6 +145,7 @@ rsync -a --delete --delete-excluded \
   --exclude .expo \
   --exclude .gradle \
   --exclude dist \
+  --exclude 'dist-*' \
   --exclude build \
   --exclude qa-screens \
   --exclude assets/photo-candidates \

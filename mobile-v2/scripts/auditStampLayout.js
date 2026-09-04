@@ -44,7 +44,7 @@ function resolveTemplate(shape, length) {
   if (!preset) return { name: shape, ...def };
   const o = preset.overrides || {};
   const merged = { name: shape, ...def, ...o };
-  for (const grp of ['frame', 'country', 'icon', 'place', 'date', 'footer']) {
+  for (const grp of ['frame', 'country', 'icon', 'place', 'date', 'airport']) {
     merged[grp] = { ...def[grp], ...(o[grp] || {}) };
   }
   return merged;
@@ -85,6 +85,13 @@ function rectsOverlap(a, b, slackY = 0) {
   return !(aRight <= b.left || bRight <= a.left || aBottom <= b.top || bBottom <= a.top);
 }
 
+function resolveAirportBox(template) {
+  if (!rectsOverlap(template.date, template.airport)) return template.airport;
+  const gap = 0.012;
+  const top = Math.min(0.985 - template.airport.height, template.date.top + template.date.height + gap);
+  return { ...template.airport, top };
+}
+
 const templates = {};
 for (const s of SHAPES) templates[s] = parseTemplate(s);
 
@@ -100,17 +107,18 @@ function fail(msg) { console.error('  ✗ ' + msg); failures += 1; }
 console.log('=== Template structural checks ===');
 for (const t of Object.values(templates)) {
   console.log(`\n[${t.name}]`);
-  for (const key of ['country', 'icon', 'place', 'date', 'footer']) {
-    const b = t[key];
+  const rendered = { ...t, airport: resolveAirportBox(t) };
+  for (const key of ['country', 'icon', 'place', 'date', 'airport']) {
+    const b = rendered[key];
     if (!b) { fail(`${key} missing`); continue; }
     if (b.left < 0 || b.top < 0 || b.left + b.width > 1.001 || b.top + b.height > 1.001) {
       fail(`${key} out of bounds: ${JSON.stringify(b)}`);
     }
   }
-  // No overlap between country/icon, country/date, date/footer (small slack at borders ok)
-  const pairs = [['country', 'icon'], ['country', 'date'], ['icon', 'date'], ['date', 'footer']];
+  // No overlap between country/icon, country/date, or the dated airport line.
+  const pairs = [['country', 'icon'], ['country', 'date'], ['icon', 'date'], ['date', 'airport']];
   for (const [a, b] of pairs) {
-    if (rectsOverlap(t[a], t[b], 0.005)) fail(`${a} overlaps ${b}`);
+    if (rectsOverlap(rendered[a], rendered[b], 0.005)) fail(`${a} overlaps ${b}`);
   }
 }
 

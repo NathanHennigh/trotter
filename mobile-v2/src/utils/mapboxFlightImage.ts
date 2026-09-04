@@ -11,6 +11,8 @@ const AIRPORT_COORDS: Record<string, [number, number]> = {
   EWR: [-74.1745, 40.6895], MIA: [-80.2906, 25.7959], SEA: [-122.3088, 47.4502], SFO: [-122.3789, 37.6213],
   BOS: [-71.0052, 42.3643], DEN: [-104.6737, 39.8561], LAS: [-115.1523, 36.0840], PHX: [-112.0078, 33.4373],
   CLT: [-80.9431, 35.2140], MCO: [-81.3090, 28.4312], BWI: [-76.6682, 39.1754], DCA: [-77.0377, 38.8521],
+  FLL: [-80.1527, 26.0726], ILM: [-77.9051, 34.2723], KOA: [-156.0456, 19.7388], LGA: [-73.8726, 40.7772],
+  PHL: [-75.2411, 39.8719], PNS: [-87.1866, 30.4727], VPS: [-86.5158, 30.4813],
   IAD: [-77.4565, 38.9531], BNA: [-86.6774, 36.1263], SAN: [-117.1896, 32.7338], TPA: [-82.5332, 27.9755],
   PDX: [-122.5973, 45.5887], STL: [-90.3700, 38.7487], AUS: [-97.6699, 30.1975], SLC: [-111.9779, 40.7884],
   MSP: [-93.2218, 44.8848], RDU: [-78.7875, 35.8776], MSY: [-90.2580, 29.9934], OKC: [-97.6007, 35.3931],
@@ -26,15 +28,17 @@ const AIRPORT_COORDS: Record<string, [number, number]> = {
   DUB: [-6.2700, 53.4213], LIS: [-9.1354, 38.7813], ATH: [23.9445, 37.9364], IST: [28.7498, 41.2753],
   WAW: [14.1621, 52.1657], PRG: [14.2632, 50.1008], BUD: [19.2611, 47.4298], KEF: [-22.6056, 63.9850],
   RAK: [-8.0363, 31.6069], CAI: [31.4056, 30.1219], ADD: [38.7993, 8.9779], NBO: [36.9275, -1.3192],
-  JNB: [28.2460, -26.1367], CMN: [-7.5899, 33.3675], LOS: [3.3213, 6.5774],
+  JNB: [28.2460, -26.1367], CMN: [-7.5899, 33.3675], LOS: [3.3213, 6.5774], HGA: [44.0835, 9.5141],
+  TNG: [-5.9215, 35.7317], TUN: [10.2272, 36.8510],
   DXB: [55.3647, 25.2532], AUH: [54.6511, 24.4330], DOH: [51.5681, 25.2732], TLV: [34.8854, 32.0114],
   BOM: [72.8679, 19.0896], DEL: [77.1025, 28.5562], BKK: [100.7501, 13.6811], HAN: [105.8067, 21.2187],
   KUL: [101.7098, 2.7456], SIN: [103.9915, 1.3644], MNL: [121.0197, 14.5086], CGK: [106.6558, -6.1256],
+  KLO: [122.3760, 11.6794], MPH: [121.9540, 11.9245],
   DPS: [115.1670, -8.7482], REP: [103.8127, 13.4107],
   PVG: [121.8050, 31.1434], PEK: [116.5977, 40.0799], ICN: [126.4505, 37.4602],
   NRT: [140.3864, 35.7720], HND: [139.7811, 35.5494], KIX: [135.2440, 34.4347],
   TPE: [121.2330, 25.0777], HKG: [113.9145, 22.3080],
-  SYD: [151.1772, -33.9399], MEL: [144.8410, -37.6690], AKL: [174.7922, -37.0082],
+  SYD: [151.1772, -33.9399], MEL: [144.8410, -37.6690], AKL: [174.7922, -37.0082], PMI: [2.7388, 39.5517],
 };
 
 /** Raw great-circle points — longitudes in -180..180 */
@@ -173,6 +177,17 @@ export function mapboxFlightImageUrl(originCode: string, destCode: string, w = 4
   const origin = AIRPORT_COORDS[originCode.toUpperCase()];
   const dest   = AIRPORT_COORDS[destCode.toUpperCase()];
   if (!origin || !dest) return null;
+
+  return mapboxFlightImageUrlFromCoordinates(origin, dest, w, h, lineColor);
+}
+
+export function mapboxFlightImageUrlFromCoordinates(
+  origin: [number, number],
+  dest: [number, number],
+  w = 400,
+  h = 240,
+  lineColor = '#f7e87a',
+): string {
 
   // Compute raw path then unwrap so longitudes are continuous (handles antimeridian)
   const raw      = rawGcPoints(origin, dest, 64); // dense sampling so projected dashes follow the arc smoothly

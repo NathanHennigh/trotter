@@ -17,6 +17,7 @@ import { TripCard } from '../components/trotter/TripCard';
 import { BottomNavTab, TripSummary } from '../data/trotterMock';
 import { useTravelTrips } from '../services/travelTrips';
 import { colors, fonts, layout, shadows, spacing } from '../theme/trotterTheme';
+import { getMobileVisualWidth } from '../utils/mobileLayout';
 
 const paperTexture = require('../../assets/textures/paper_texture_clean.png');
 const tripsReferenceImage = require('../../docs/references/screens/trips-list-reference.png');
@@ -38,9 +39,7 @@ export function TripsListScreen({
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { trips, profile, source, status, error, accountEmail, refresh } = useTravelTrips();
-  const visualWidth = Platform.OS === 'web'
-    ? Math.min(getViewportWidth(width), 393)
-    : Math.min(width, MAX_CONTENT_WIDTH);
+  const visualWidth = Math.min(getMobileVisualWidth(width), MAX_CONTENT_WIDTH);
   const screenPadding = SCREEN_PADDING;
   const contentWidth = visualWidth - screenPadding * 2;
   const currentYear = new Date().getFullYear();
@@ -133,7 +132,7 @@ export function TripsListScreen({
           </View>
         </ScrollView>
 
-        <Pressable style={[styles.addButton, { right: screenPadding + 2, bottom: insets.bottom + layout.bottomNavHeight + 14 }]}>
+        <Pressable style={[styles.addButton, { left: visualWidth - screenPadding - 70, bottom: insets.bottom + layout.bottomNavHeight + 14 }]}>
           <IconGlyph name="plus" color={colors.paperSoft} size={36} />
         </Pressable>
         <BottomNav active={active} onChange={onChange} />
@@ -174,11 +173,6 @@ function SyncLine({
       </Text>
     </Pressable>
   );
-}
-
-function getViewportWidth(fallbackWidth: number) {
-  const viewportWidth = (globalThis as { innerWidth?: number }).innerWidth;
-  return typeof viewportWidth === 'number' && viewportWidth > 0 ? viewportWidth : fallbackWidth;
 }
 
 function TripsHeader({ screenPadding, contentWidth }: { screenPadding: number; contentWidth: number }) {

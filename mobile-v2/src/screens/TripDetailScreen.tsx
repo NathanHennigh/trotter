@@ -16,7 +16,8 @@ import { PngStamp } from '../components/trotter/stamps/PngStamp';
 import { BottomNavTab, TripSegmentSummary, TripSummary } from '../data/trotterMock';
 import { useTravelTrips } from '../services/travelTrips';
 import { accentColors, colors, fonts, layout, shadows, spacing } from '../theme/trotterTheme';
-import { mapboxFlightImageUrl } from '../utils/mapboxFlightImage';
+import { mapboxFlightImageUrl, mapboxFlightImageUrlFromCoordinates } from '../utils/mapboxFlightImage';
+import { getMobileVisualWidth } from '../utils/mobileLayout';
 
 const paperTexture = require('../../assets/textures/paper_texture_clean.png');
 
@@ -35,15 +36,30 @@ export function TripDetailScreen({
   const { loadTripDetail } = useTravelTrips();
   const [hydratedTrip, setHydratedTrip] = React.useState<TripSummary | undefined>();
   const { width } = useWindowDimensions();
-  const screenPadding = width < 390 ? 16 : layout.screenPadding;
-  const visualWidth = Math.min(width, 430);
+  const visualWidth = getMobileVisualWidth(width);
+  const screenPadding = visualWidth < 390 ? 16 : layout.screenPadding;
   const contentWidth = visualWidth - screenPadding * 2;
   const activeTrip = hydratedTrip?.id === trip.id ? hydratedTrip : trip;
   const accent = accentColors[activeTrip.accent];
   const segments = activeTrip.segments?.length ? activeTrip.segments : [fallbackSegment(activeTrip)];
   const airports = activeTrip.airports?.length ? activeTrip.airports : uniqueRouteAirports(segments);
-  const mapUrl = mapboxFlightImageUrl(segments[0].depAirport, segments[segments.length - 1].arrAirport, 720, 420, accent);
+  const firstSegment = segments[0];
+  const lastSegment = segments[segments.length - 1];
+  const mapUrl = firstSegment.depPoint && lastSegment.arrPoint
+    ? mapboxFlightImageUrlFromCoordinates(
+        [firstSegment.depPoint.lon, firstSegment.depPoint.lat],
+        [lastSegment.arrPoint.lon, lastSegment.arrPoint.lat],
+        720,
+        420,
+        accent,
+      )
+    : mapboxFlightImageUrl(firstSegment.depAirport, lastSegment.arrAirport, 720, 420, accent);
   const heroSource = activeTrip.destinationImage ?? (mapUrl ? ({ uri: mapUrl } as ImageSourcePropType) : undefined);
+  const [heroImageFailed, setHeroImageFailed] = React.useState(false);
+
+  React.useEffect(() => {
+    setHeroImageFailed(false);
+  }, [activeTrip.destinationImage, mapUrl, activeTrip.id]);
 
   React.useEffect(() => {
     setHydratedTrip(undefined);
@@ -86,7 +102,16 @@ export function TripDetailScreen({
 
           <PaperSurface radius={14} padding={0} style={[styles.heroCard, { marginHorizontal: screenPadding, width: contentWidth }]}>
             <View style={styles.heroImage}>
-              {heroSource ? <Image source={heroSource} resizeMode="cover" style={StyleSheet.absoluteFillObject} /> : null}
+              {heroSource && !heroImageFailed ? (
+                <Image source={heroSource} resizeMode="cover" style={StyleSheet.absoluteFillObject} onError={() => setHeroImageFailed(true)} />
+              ) : (
+                <View style={styles.heroFallback}>
+                  <Text allowFontScaling={false} style={styles.heroFallbackLabel}>FLIGHT PATH</Text>
+                  <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.heroFallbackRoute}>
+                    {firstSegment.depAirport}  /  {lastSegment.arrAirport}
+                  </Text>
+                </View>
+              )}
               <View style={styles.heroScrim} />
               <View style={styles.heroStats}>
                 <HeroMetric label="MILES" value={activeTrip.miles.toLocaleString()} />
@@ -329,6 +354,26 @@ const styles = StyleSheet.create({
   heroImage: {
     height: 222,
     backgroundColor: colors.dashboard,
+  },
+  heroFallback: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#17262A',
+  },
+  heroFallbackLabel: {
+    color: colors.subtleText,
+    fontFamily: fonts.sansBold,
+    fontSize: 10,
+    letterSpacing: 1.4,
+  },
+  heroFallbackRoute: {
+    maxWidth: '82%',
+    color: colors.creamText,
+    fontFamily: fonts.mono,
+    fontSize: 27,
+    letterSpacing: 2,
+    marginTop: 8,
   },
   heroScrim: {
     ...StyleSheet.absoluteFillObject,

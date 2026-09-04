@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomNavTab, LandmarkKey, StampData, StampType, TripSummary } from '../../data/trotterMock';
 import { accentColors, colors, fonts, layout, radii, shadows, spacing } from '../../theme/trotterTheme';
+import { getMobileVisualWidth } from '../../utils/mobileLayout';
 import { PngStamp } from './stamps/PngStamp';
 
 const paperTexture = require('../../../assets/textures/paper_texture_clean.png');
@@ -210,8 +211,8 @@ export function SyncStatusPill({ lastSyncedLabel, sourceLabel = 'Gmail' }: { las
   return (
     <DarkPanel padding={spacing.sm} radius={radii.sm} style={styles.syncPill}>
       <View style={styles.greenDot} />
-      <Text numberOfLines={1} style={styles.syncText}>{lastSyncedLabel}</Text>
-      <Text style={styles.sourceText}>{sourceLabel}</Text>
+      <Text allowFontScaling={false} numberOfLines={1} style={styles.syncText}>{lastSyncedLabel}</Text>
+      <Text allowFontScaling={false} numberOfLines={1} style={styles.sourceText}>{sourceLabel}</Text>
     </DarkPanel>
   );
 }
@@ -241,21 +242,26 @@ export function ScreenHeader({
   rightActions?: React.ReactNode[];
 }) {
   const { width } = useWindowDimensions();
-  const screenPadding = width < 390 ? 16 : layout.screenPadding;
-  const contentWidth = width - screenPadding * 2;
-  const titleFontSize = title.length >= 9 ? 40 : title.length >= 8 ? 44 : 52;
-  const titleSpacing = title.length >= 8 ? 3 : 5;
+  const visualWidth = getMobileVisualWidth(width);
+  const screenPadding = visualWidth < 390 ? 16 : layout.screenPadding;
+  const contentWidth = visualWidth - screenPadding * 2;
+  const actionInset = Math.max(leftAction ? 58 : 0, rightActions?.length ? 76 : 0);
+  const hasSideActions = actionInset > 0;
+  const titleFontSize = hasSideActions
+    ? title.length >= 9 ? 26 : title.length >= 8 ? 29 : 38
+    : title.length >= 9 ? 36 : title.length >= 8 ? 40 : 48;
+  const titleSpacing = hasSideActions && title.length >= 8 ? 1.2 : title.length >= 8 ? 2.2 : 4;
 
   return (
     <View style={[styles.screenHeader, { paddingHorizontal: screenPadding }]}>
       <View pointerEvents="box-none" style={[styles.headerAction, { left: screenPadding }]}>{leftAction}</View>
-      <View style={[styles.headerTitleWrap, { width: contentWidth }]}>
+      <View style={[styles.headerTitleWrap, { width: contentWidth, paddingHorizontal: actionInset }]}>
         <Text
           allowFontScaling={false}
           maxFontSizeMultiplier={1}
           numberOfLines={1}
           adjustsFontSizeToFit
-          minimumFontScale={0.78}
+          minimumFontScale={0.8}
           style={[styles.screenTitle, { fontSize: titleFontSize, letterSpacing: titleSpacing }]}
         >
           {title}
@@ -281,7 +287,8 @@ export function SegmentedFilterTabs({
   onChange: (key: string) => void;
 }) {
   const { width } = useWindowDimensions();
-  const screenPadding = width < 390 ? 16 : layout.screenPadding;
+  const visualWidth = getMobileVisualWidth(width);
+  const screenPadding = visualWidth < 390 ? 16 : layout.screenPadding;
 
   return (
     <View style={[styles.tabs, { marginHorizontal: screenPadding }]}>
@@ -440,6 +447,7 @@ export function NewFlightsBanner({
   eyebrow = 'NEW FLIGHTS FOUND',
   title,
   actionLabel = 'REVIEW',
+  disabled = false,
 }: {
   count: number;
   sourceLabel: string;
@@ -447,6 +455,7 @@ export function NewFlightsBanner({
   eyebrow?: string;
   title?: string;
   actionLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <PaperSurface radius={radii.md} padding={spacing.sm} style={styles.newFlights}>
@@ -458,7 +467,9 @@ export function NewFlightsBanner({
         <Text style={styles.newTitle}>{title ?? `${count} new flights added`}</Text>
         <Text style={styles.newSub}>from {sourceLabel}</Text>
       </View>
-      <Pressable onPress={onReview} style={styles.reviewButton}><Text style={styles.reviewText}>{actionLabel}</Text></Pressable>
+      <Pressable disabled={disabled} onPress={onReview} style={[styles.reviewButton, disabled && styles.reviewButtonDisabled]}>
+        <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.reviewText}>{actionLabel}</Text>
+      </Pressable>
     </PaperSurface>
   );
 }
@@ -629,19 +640,20 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.creamText,
     fontFamily: fonts.sansRegular,
-    fontSize: 12,
+    fontSize: 11,
   },
   sourceText: {
+    flexShrink: 0,
     color: colors.creamText,
     fontFamily: fonts.sansBold,
-    fontSize: 12,
+    fontSize: 11,
   },
   headerTag: {
     minHeight: 78,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    transform: [{ rotate: '-2deg' }],
+    transform: [{ rotate: '-1deg' }],
   },
   headerYear: {
     color: colors.ink,
@@ -657,8 +669,8 @@ const styles = StyleSheet.create({
   wordmark: {
     color: colors.ink,
     fontFamily: fonts.display,
-    fontSize: 29,
-    letterSpacing: 5,
+    fontSize: 27,
+    letterSpacing: 4,
   },
   tagline: {
     color: colors.red,
@@ -955,6 +967,9 @@ const styles = StyleSheet.create({
     borderColor: colors.paperBorder,
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  reviewButtonDisabled: {
+    opacity: 0.5,
   },
   reviewText: {
     color: colors.ink,
