@@ -1,9 +1,10 @@
-"""Rebuild a user's canonical flight segments and trips from known Gmail messages.
+"""Reconcile known Gmail booking evidence without clearing existing travel.
 
 This is a local repair tool for development data. It re-fetches message bodies
 from Gmail by provider message ID, reparses with the current deterministic
-parser, and can replace the user's saved flight graph with freshly clustered
-canonical segments.
+parser, and applies the same scoped ownership/cancellation policy as normal sync.
+Unfetched, unresolved, and unrelated legacy travel stays intact. Existing graph
+backups and the immutable booking ledger preserve the evidence behind changes.
 
 Usage:
     cd backend
@@ -18,8 +19,8 @@ import argparse
 import json
 import os
 import sys
+from contextlib import ExitStack
 from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,12 +31,9 @@ sys.path.insert(0, os.getcwd())
 
 from app.db import SessionLocal
 from app.models import Account, Message, MessageStatus, Segment, Trip, User
-from app.services.builder import (
-    build_segments_and_trips_detailed,
-    cancel_segments_for_pnr,
-    rebuild_user_trips,
-)
+from app.services.booking_import import apply_booking_message, set_message_outcome
 from app.services.enrichment import enrich_user_segments
+from app.services.import_lock import user_import_lock
 from app.services.gmail import (
     build_gmail_service,
     extract_attachments,
@@ -45,20 +43,7 @@ from app.services.gmail import (
 )
 from app.services.flight_query_v2 import looks_like_flight_email
 from app.services.parse_audit import assess_parse_miss
-from app.services.parser import PARSER_VERSION, _extract_pnr, parse_email
-from app.tasks.import_tasks import _looks_like_cancellation_notice
-
-
-def _parse_received_at(value: str | None):
-    if not value:
-        return None
-    try:
-        parsed = parsedate_to_datetime(value)
-    except (TypeError, ValueError, IndexError):
-        return None
-    if parsed.tzinfo is None:
-        return parsed
-    return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+from app.services.parser import PARSER_VERSION, parse_email
 
 
 def _json_default(value: Any) -> str:
@@ -117,14 +102,6 @@ def _backup_graph(db, user_id: int) -> Path:
     return path
 
 
-def _clear_graph(db, user_id: int) -> None:
-    trip_ids = [row.id for row in db.query(Trip.id).filter(Trip.user_id == user_id).all()]
-    if trip_ids:
-        db.query(Segment).filter(Segment.trip_id.in_(trip_ids)).delete(synchronize_session=False)
-    db.query(Trip).filter(Trip.user_id == user_id).delete(synchronize_session=False)
-    db.flush()
-
-
 def _message_sort_key(message: Message):
     return (
         message.internal_ts or message.created_at or datetime.min,
@@ -134,10 +111,13 @@ def _message_sort_key(message: Message):
 
 def rebuild(user_email: str, *, apply: bool, limit: int | None, progress_every: int) -> dict[str, Any]:
     db = SessionLocal()
+    locks = ExitStack()
     try:
         user = db.query(User).filter(User.email == user_email).first()
         if not user:
             raise SystemExit(f"User not found: {user_email}")
+        if apply:
+            locks.enter_context(user_import_lock(db.get_bind(), user.id))
         account = (
             db.query(Account)
             .filter(Account.user_id == user.id, Account.provider == "google")
@@ -162,8 +142,7 @@ def rebuild(user_email: str, *, apply: bool, limit: int | None, progress_every: 
         backup_file = None
         if apply:
             backup_file = _backup_graph(db, user.id)
-            _clear_graph(db, user.id)
-            db.commit()
+        touched_segment_ids: set[int] = set()
 
         report = {
             "mode": "apply" if apply else "dry-run",
@@ -181,6 +160,9 @@ def rebuild(user_email: str, *, apply: bool, limit: int | None, progress_every: 
             "skipped_segments": 0,
             "canceled_segments": 0,
             "review_candidates": 0,
+            "held_other": 0,
+            "held_unknown": 0,
+            "blocked_cancellation": 0,
             "fetch_errors": 0,
             "after_trips": before_trips,
             "after_segments": before_segments,
@@ -214,14 +196,13 @@ def rebuild(user_email: str, *, apply: bool, limit: int | None, progress_every: 
             body_for_filter = plain_text if plain_text.strip() else html
             subject = headers.get("subject") or message.subject or ""
             sender = headers.get("from") or message.from_email or ""
-            pnr = _extract_pnr(f"{subject}\n{body_for_filter}".upper())
 
             parse_result = parse_email(
                 html=html,
                 plain_text=plain_text,
                 attachments=attachments,
                 user_name=user_name,
-                aliases=[],
+                aliases=list(user.travel_name_aliases or []),
                 received_at=headers.get("date"),
                 subject=subject,
                 from_email=sender,
@@ -233,20 +214,23 @@ def rebuild(user_email: str, *, apply: bool, limit: int | None, progress_every: 
             if not apply:
                 continue
 
-            if pnr and _looks_like_cancellation_notice(subject, body_for_filter):
-                canceled = cancel_segments_for_pnr(db, user.id, pnr, received_at=_parse_received_at(headers.get("date")))
-                report["canceled_segments"] += canceled
-                message.status = MessageStatus.ACCEPTED
-                message.parse_error = "cancellation_notice"
-                message.parse_evidence = {"reason": "cancellation_notice", "pnr": pnr, "canceled_segments": canceled}
-            elif parse_result.flights:
-                result = build_segments_and_trips_detailed(db, user.id, parse_result.flights)
+            applied = apply_booking_message(
+                db, user.id, parse_result, source_message_id=message.provider_msg_id,
+                subject=subject, plain_text=plain_text, html=html, received_at=headers.get("date"),
+            )
+            if parse_result.flights or applied.is_cancellation:
+                result = applied.build
                 report["inserted_segments"] += result.inserted
                 report["updated_segments"] += result.updated
                 report["skipped_segments"] += result.skipped
-                message.status = MessageStatus.ACCEPTED
-                message.parse_error = None
-                message.parse_evidence = None
+                report["canceled_segments"] += applied.canceled
+                report["held_other"] += result.held_other
+                report["held_unknown"] += result.held_unknown
+                report["blocked_cancellation"] += result.blocked_cancellation
+                touched_segment_ids.update(result.affected_segment_ids)
+                set_message_outcome(message, applied, source=parse_result.source, tier="repair_script")
+                if message.status == MessageStatus.REVIEW_REQUIRED:
+                    report["review_candidates"] += 1
             else:
                 if not looks_like_flight_email(subject=subject, sender=sender, body=body_for_filter):
                     message.status = MessageStatus.ACCEPTED
@@ -281,15 +265,16 @@ def rebuild(user_email: str, *, apply: bool, limit: int | None, progress_every: 
                 print(f"rebuilt {index}/{len(messages)} candidate_segments={report['candidate_segments']}", flush=True)
 
         if apply:
-            enriched = enrich_user_segments(db, user.id, include_weather=True)
+            enriched = enrich_user_segments(db, user.id, include_weather=True, segment_ids=touched_segment_ids)
             report["enriched_segments"] = enriched
-            report["after_trips"] = rebuild_user_trips(db, user.id)
+            report["after_trips"] = db.query(Trip).filter(Trip.user_id == user.id).count()
             report["after_segments"] = db.query(Segment).join(Trip).filter(Trip.user_id == user.id).count()
             db.commit()
 
         return report
     finally:
         db.close()
+        locks.close()
 
 
 def main() -> None:

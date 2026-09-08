@@ -13,13 +13,18 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Optional
 
 from bs4 import BeautifulSoup
-from rapidfuzz import fuzz
 
 from ..models import MessageStatus
 from .parser_preprocess import prepare_parser_text
+from .passenger_identity import (
+    apply_passenger_identity,
+    jsonld_passenger_evidence,
+    merge_passenger_evidence,
+    names_match,
+)
 
 logger = logging.getLogger(__name__)
-PARSER_VERSION = 23
+PARSER_VERSION = 24
 
 # ──────────────────────────── regex patterns ────────────────────────────────
 
@@ -1161,6 +1166,9 @@ class ParsedFlight:
     aircraft: Optional[dict] = None
     source_received_at: Optional[datetime] = None
     pnr_aliases: list[str] = field(default_factory=list)
+    passenger_names: list[str] = field(default_factory=list)
+    passenger_evidence: list[dict] = field(default_factory=list)
+    ownership: str = "unknown"
 
 
 @dataclass
@@ -1192,6 +1200,54 @@ class _HtmlTableBlock:
 # ──────────────────────────── public API ────────────────────────────────────
 
 def parse_email(
+    html: str,
+    plain_text: str,
+    attachments: list[tuple[str, bytes]],
+    user_name: str,
+    aliases: list[str],
+    received_at: Optional[datetime] = None,
+    subject: Optional[str] = None,
+    from_email: Optional[str] = None,
+    diagnostics: Optional[dict[str, Any]] = None,
+) -> ParseResult:
+    """Extract all flight evidence, then resolve each flight's traveler ownership.
+
+    A mixed message remains reviewable; callers must use each flight's ownership
+    rather than treating the first traveler's identity as the whole itinerary.
+    """
+    result = _parse_email_flights(
+        html=html, plain_text=plain_text, attachments=attachments, user_name=user_name,
+        aliases=aliases, received_at=received_at, subject=subject,
+        from_email=from_email, diagnostics=diagnostics,
+    )
+    # Some airline tables supply only a numeric flight number. Their own sender
+    # supplies the missing airline code; agency senders provide no such hint.
+    sender_airline = _infer_airline_from_context(from_email or "")
+    if sender_airline:
+        for flight in result.flights:
+            if not flight.airline and re.fullmatch(r"\d{1,4}", flight.flight_number or ""):
+                flight.airline = sender_airline
+                flight.flight_number = sender_airline + flight.flight_number
+    if any(not flight.pnr for flight in result.flights):
+        reference_text = "\n".join([plain_text or "", _html_to_parser_text(html) if html else ""])
+        references = _airline_confirmation_codes_from_lines(_normalized_lines(reference_text))
+        for flight in result.flights:
+            airline = flight.airline or (flight.flight_number or "")[:2]
+            if not flight.pnr and airline in references:
+                flight.pnr = references[airline]
+    apply_passenger_identity(
+        result.flights, html=html, plain_text=plain_text, user_name=user_name, aliases=aliases,
+    )
+    result.passenger_name = result.flights[0].passenger_name if result.flights else None
+    result.status = (
+        MessageStatus.ACCEPTED
+        if result.flights and all(flight.ownership == "self" for flight in result.flights)
+        else MessageStatus.REVIEW_REQUIRED
+    )
+    return result
+
+
+def _parse_email_flights(
     html: str,
     plain_text: str,
     attachments: list[tuple[str, bytes]],
@@ -1664,10 +1720,9 @@ def _reservation_to_flight(item: dict) -> Optional[ParsedFlight]:
 
     pnr = item.get("reservationNumber", "").upper().strip() or None
 
-    under_name = item.get("underName", {})
-    passenger_name: Optional[str] = None
-    if isinstance(under_name, dict):
-        passenger_name = under_name.get("name", "").strip() or None
+    passenger_evidence = jsonld_passenger_evidence(item)
+    passenger_names = list(dict.fromkeys(evidence["name"] for evidence in passenger_evidence))
+    passenger_name = passenger_names[0] if passenger_names else None
 
     return ParsedFlight(
         dep_airport=dep,
@@ -1678,6 +1733,8 @@ def _reservation_to_flight(item: dict) -> Optional[ParsedFlight]:
         flight_number=flight_number,
         pnr=pnr,
         passenger_name=passenger_name,
+        passenger_names=passenger_names,
+        passenger_evidence=passenger_evidence,
         source="jsonld",
     )
 
@@ -2204,6 +2261,9 @@ def _merge_same_flight_continuations(flights: list[ParsedFlight]) -> list[Parsed
             merged
             and merged[-1].flight_number
             and flight.flight_number == merged[-1].flight_number
+            and flight.pnr == merged[-1].pnr
+            and set(flight.passenger_names or ([flight.passenger_name] if flight.passenger_name else []))
+                == set(merged[-1].passenger_names or ([merged[-1].passenger_name] if merged[-1].passenger_name else []))
             and flight.dep_airport == merged[-1].arr_airport
             and flight.dep_time >= merged[-1].arr_time
             and flight.dep_time - merged[-1].arr_time <= timedelta(hours=3)
@@ -2217,6 +2277,9 @@ def _merge_same_flight_continuations(flights: list[ParsedFlight]) -> list[Parsed
                 flight_number=merged[-1].flight_number,
                 pnr=merged[-1].pnr or flight.pnr,
                 passenger_name=merged[-1].passenger_name or flight.passenger_name,
+                passenger_names=list(dict.fromkeys([*merged[-1].passenger_names, *flight.passenger_names])),
+                passenger_evidence=merge_passenger_evidence(merged[-1].passenger_evidence, flight.passenger_evidence),
+                ownership=merged[-1].ownership if merged[-1].ownership == flight.ownership else "unknown",
                 source=merged[-1].source,
                 confidence=max(merged[-1].confidence or 0, flight.confidence or 0),
             )
@@ -3608,29 +3671,39 @@ def _shape_ota_multi_confirmation(
 
 
 def _airline_confirmation_codes_from_lines(lines: list[str]) -> dict[str, str]:
-    codes: dict[str, str] = {}
+    codes: dict[str, set[str]] = {}
     in_section = False
     captured_any = False
     for index, line in enumerate(lines):
         clean = line.lstrip("> ").strip()
         lower = clean.lower()
-        if "confirmation codes" in lower or "confirmation code" in lower:
+        if ("confirmation codes" in lower or "confirmation code" in lower
+                or re.fullmatch(r"cancelled|canceled", lower)):
             in_section = True
             continue
         if not in_section:
             continue
-        if captured_any and re.search(r"\b(manage|flight|fare|payment|receipt|itinerar)", lower):
+        if captured_any and re.search(r"\b(manage|outbound|inbound|return|fare|payment|receipt|itinerar)", lower):
             break
-        airline = _airline_code_from_name(clean)
+        inline = re.fullmatch(r"(?P<airline>[A-Za-z .&'-]+?)\s*(?:\||:)\s*(?P<pnr>[A-Z0-9]{5,8})", clean)
+        if inline is None:
+            inline = re.fullmatch(r"(?P<airline>[A-Za-z .&'-]+?)\s+(?P<pnr>[A-Z0-9]{5,8})", clean)
+        airline_name = inline.group("airline").strip() if inline else clean
+        # An exact airline label prevents route headings or agency names from
+        # lending their adjacent reference to the wrong carrier.
+        airline = _AIRLINE_NAME_TO_CODE.get(airline_name.lower())
         if not airline:
             continue
-        for candidate_line in lines[index + 1 : index + 4]:
-            candidate = re.sub(r"[^A-Z0-9]", "", candidate_line.upper())
-            if 5 <= len(candidate) <= 8 and candidate not in _PNR_STOPWORDS and candidate not in _KNOWN_AIRLINES:
-                codes[airline] = candidate
+        candidates = [inline.group("pnr")] if inline else lines[index + 1:index + 4]
+        for candidate_line in candidates:
+            candidate = candidate_line.strip(" *:|#")
+            if re.fullmatch(r"[A-Z0-9]{5,8}", candidate) and candidate not in _PNR_STOPWORDS and candidate not in _KNOWN_AIRLINES:
+                codes.setdefault(airline, set()).add(candidate)
                 captured_any = True
                 break
-    return codes
+            if not re.fullmatch(r"(?:airline\s+)?confirmation(?:\s+(?:code|number))?[:#]?", candidate, re.I):
+                break
+    return {airline: next(iter(values)) for airline, values in codes.items() if len(values) == 1}
 
 
 def _nearest_prior_date_line(lines: list[str], index: int) -> Optional[str]:
@@ -4144,6 +4217,8 @@ def _city_time_segment_from_lines(
 def _v5_compact_route_rows(text: str) -> list[_FlightEvidence]:
     rows: list[_FlightEvidence] = []
     previous_arrival: Optional[datetime] = None
+    previous_end = 0
+    seen_routes: set[tuple[str, str, str]] = set()
     for match in _COMPACT_ROUTE_SEGMENT.finditer(text):
         airline = match.group("airline").upper()
         dep_airport = match.group("dep_airport").upper()
@@ -4151,6 +4226,15 @@ def _v5_compact_route_rows(text: str) -> list[_FlightEvidence]:
         if airline not in _KNOWN_AIRLINES or not _valid_route(dep_airport, arr_airport):
             continue
 
+        route_key = (dep_airport, arr_airport, airline + match.group("number").upper())
+        preceding_section = text[previous_end:match.start()]
+        fresh_date = _nearest_prior_full_date(preceding_section, len(preceding_section), max_lookback=260)
+        previous_end = match.end()
+        if route_key in seen_routes and not fresh_date:
+            # Repeated policy/receipt copies cannot borrow the previous leg's
+            # date to manufacture a second journey on the same flight number.
+            continue
+        seen_routes.add(route_key)
         section_date = _nearest_prior_full_date(text, match.start(), max_lookback=260)
         if not section_date and previous_arrival:
             section_date = previous_arrival
@@ -6200,17 +6284,13 @@ def check_identity(
     user_name: str,
     aliases: list[str],
 ) -> MessageStatus:
-    """Return ACCEPTED if passenger_name fuzzy-matches user (token_set_ratio >= 85)."""
+    """Compatibility helper for conservative matching of one traveler name."""
     if not passenger_name:
         return MessageStatus.REVIEW_REQUIRED
 
     candidates = [c for c in [user_name] + aliases if c]
-    if not candidates:
-        return MessageStatus.ACCEPTED  # nothing to check against
-
     for candidate in candidates:
-        score = fuzz.token_set_ratio(passenger_name.lower(), candidate.lower())
-        if score >= 85:
+        if names_match(passenger_name, candidate):
             return MessageStatus.ACCEPTED
 
     return MessageStatus.REVIEW_REQUIRED
@@ -6466,22 +6546,24 @@ def _compact_space(value: str) -> str:
 
 
 def _dedupe_flights(flights: list[ParsedFlight]) -> list[ParsedFlight]:
-    by_key: dict[tuple[str, str, str, str], ParsedFlight] = {}
+    by_key: dict[tuple[str, ...], ParsedFlight] = {}
     for flight in flights:
         key = (
             flight.dep_airport,
             flight.arr_airport,
             flight.dep_time.isoformat(),
             flight.flight_number or "",
+            flight.pnr or "",
         )
         by_key[key] = _better_flight(by_key.get(key), flight)
 
-    by_identity: dict[tuple[str, str, str], ParsedFlight] = {}
+    by_identity: dict[tuple[str, ...], ParsedFlight] = {}
     for flight in by_key.values():
         if not flight.flight_number:
-            identity = (flight.dep_airport, flight.arr_airport, flight.dep_time.isoformat())
+            identity = (flight.dep_airport, flight.arr_airport, flight.dep_time.isoformat(), flight.pnr or "")
         else:
-            identity = (flight.dep_airport, flight.arr_airport, flight.flight_number)
+            identity = (flight.dep_airport, flight.arr_airport, flight.flight_number,
+                        flight.dep_time.date().isoformat(), flight.pnr or "")
         by_identity[identity] = _better_flight(by_identity.get(identity), flight)
 
     return sorted(by_identity.values(), key=lambda item: item.dep_time)
@@ -6502,11 +6584,19 @@ def _better_flight(current: Optional[ParsedFlight], candidate: ParsedFlight) -> 
             -flight.dep_time.timestamp(),
         )
 
-    return candidate if quality(candidate) > quality(current) else current
+    winner = candidate if quality(candidate) > quality(current) else current
+    names = [*current.passenger_names, *candidate.passenger_names]
+    names.extend(name for name in (current.passenger_name, candidate.passenger_name) if name)
+    winner.passenger_names = list(dict.fromkeys(names))
+    winner.passenger_name = winner.passenger_names[0] if winner.passenger_names else None
+    winner.passenger_evidence = merge_passenger_evidence(current.passenger_evidence, candidate.passenger_evidence)
+    if current.ownership != candidate.ownership:
+        winner.ownership = "unknown"
+    return winner
 
 
 def _dedupe_repeated_flight_copies(flights: list[ParsedFlight]) -> list[ParsedFlight]:
-    by_key: dict[tuple[str, str, str, str], ParsedFlight] = {}
+    by_key: dict[tuple[str, ...], ParsedFlight] = {}
     for flight in sorted(flights, key=lambda item: item.dep_time):
         key = (
             flight.dep_airport,
@@ -6514,7 +6604,7 @@ def _dedupe_repeated_flight_copies(flights: list[ParsedFlight]) -> list[ParsedFl
             flight.flight_number or "",
             flight.pnr or "",
         )
-        by_key.setdefault(key, flight)
+        by_key[key] = _better_flight(by_key.get(key), flight)
     return sorted(by_key.values(), key=lambda item: item.dep_time)
 
 

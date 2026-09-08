@@ -34,6 +34,7 @@ def _flight(
     source_received_at: str | None = None,
     pnr_aliases: list[str] | None = None,
     nonstop: bool = False,
+    ownership: str = "unknown",
 ):
     return SimpleNamespace(
         dep_airport=dep,
@@ -47,6 +48,7 @@ def _flight(
         source_received_at=_dt(source_received_at) if source_received_at else None,
         pnr_aliases=pnr_aliases or [],
         nonstop=nonstop,
+        ownership=ownership,
     )
 
 
@@ -952,6 +954,7 @@ def test_cancellation_marks_surviving_similar_booking_as_replacement_candidate()
                 "UA546",
                 "DZ9KZ1",
                 source_received_at="2025-01-03T01:01:49",
+                ownership="self",
             ),
             _flight(
                 "DCA",
@@ -962,6 +965,7 @@ def test_cancellation_marks_surviving_similar_booking_as_replacement_candidate()
                 "UA1274",
                 "DZ9KZ1",
                 source_received_at="2025-01-03T01:01:49",
+                ownership="self",
             ),
         ],
     )
@@ -978,6 +982,7 @@ def test_cancellation_marks_surviving_similar_booking_as_replacement_candidate()
                 "UA546",
                 "DZYJCJ",
                 source_received_at="2025-01-03T01:04:02",
+                ownership="self",
             ),
             _flight(
                 "DCA",
@@ -988,6 +993,7 @@ def test_cancellation_marks_surviving_similar_booking_as_replacement_candidate()
                 "UA1808",
                 "DZYJCJ",
                 source_received_at="2025-01-03T01:04:02",
+                ownership="self",
             ),
         ],
     )
@@ -998,7 +1004,7 @@ def test_cancellation_marks_surviving_similar_booking_as_replacement_candidate()
     segments = db.query(Segment).order_by(Segment.dep_time).all()
     assert [segment.pnr for segment in segments] == ["DZYJCJ", "DZYJCJ"]
     outbound_meta = segments[0].meta_json or {}
-    assert "DZ9KZ1" in outbound_meta.get("pnr_aliases", [])
+    assert "DZ9KZ1" not in outbound_meta.get("pnr_aliases", [])
     assert any(
         item.get("type") == "surviving_replacement_candidate"
         and item.get("replaces_pnr") == "DZ9KZ1"

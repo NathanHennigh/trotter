@@ -20,6 +20,7 @@ COPY backend/alembic.ini ./alembic.ini
 COPY backend/alembic ./alembic
 COPY backend/app ./app
 COPY backend/scripts/migrate_sqlite_to_postgres.py ./scripts/migrate_sqlite_to_postgres.py
+COPY backend/scripts/backfill_travel_inbox.py ./scripts/backfill_travel_inbox.py
 COPY backend/docker-entrypoint.sh /usr/local/bin/trotter-entrypoint
 COPY domains.csv ./domains.csv
 

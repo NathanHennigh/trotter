@@ -7,6 +7,7 @@ import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from hashlib import sha256
@@ -432,7 +433,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
     global _ACTIVE_PROGRESS_PHASE
     _ACTIVE_PROGRESS_PHASE = None
     # Lazy imports so the module loads without the optional heavy packages installed
-    from app.services.builder import build_segments_and_trips_detailed, cancel_segments_for_pnr, rebuild_user_trips
+    from app.services.booking_import import apply_booking_message, set_message_outcome
+    from app.services.import_lock import user_import_lock
     from app.services.enrichment import enrich_user_segments
     from app.services.gmail import (
         batch_get_messages,
@@ -471,12 +473,16 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
     updated_segments = 0
     skipped_segments = 0
     canceled_segments = 0
+    touched_segment_ids: set[int] = set()
+    import_guards = ExitStack()
     limit_reached = False
     try:
-        job = db.query(SyncJob).filter(SyncJob.id == job_id).first()
+        job = db.query(SyncJob).filter(SyncJob.id == job_id, SyncJob.user_id == user_id).first()
         if not job:
             logger.error("SyncJob %s not found", job_id)
             return {"error": "job_not_found"}
+
+        import_guards.enter_context(user_import_lock(db.get_bind(), user_id))
 
         job.state = "running"
         job.started_at = datetime.now(timezone.utc)
@@ -500,8 +506,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             return {"error": "no_google_account"}
 
         user = db.query(User).filter(User.id == user_id).first()
-        user_name = (user.name or user.email) if user else ""
-        aliases: list[str] = []
+        user_name = (user.name or "") if user else ""
+        aliases = list(getattr(user, "travel_name_aliases", None) or []) if user else []
         fetch_batch_size = _env_int("TROTTER_GMAIL_BATCH_SIZE", 50) or 50
         parse_workers = _env_int("TROTTER_PARSE_WORKERS", 4) or 4
 
@@ -628,6 +634,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 "parse_result": parse_result,
                 "parse_seconds": parse_seconds,
                 "pnr": pnr,
+                "plain_text": plain_text,
+                "html": html,
             }
 
         def mark_resolved_ignored(
@@ -758,8 +766,14 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
                 return
 
-            if pnr and _looks_like_cancellation_notice(subject, body_for_filter):
-                canceled_count = cancel_segments_for_pnr(db, user_id, pnr, received_at=_parse_received_at(headers.get("date")))
+            applied = apply_booking_message(
+                db, user_id, parse_result, source_message_id=msg_id,
+                subject=subject, plain_text=payload.get("plain_text", ""),
+                html=payload.get("html", ""), received_at=headers.get("date"),
+            )
+            touched_segment_ids.update(applied.build.affected_segment_ids)
+            if applied.is_cancellation:
+                canceled_count = applied.canceled
                 canceled_segments += canceled_count
                 from_domain = from_email.split("@")[-1].rstrip(">").strip() if "@" in from_email else ""
                 from_domain_hash = sha256(from_domain.encode()).hexdigest()[:64] if from_domain else None
@@ -786,6 +800,9 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     "resolved": True,
                     "tier": candidate.tier,
                 }
+                set_message_outcome(existing_msg, applied, source=parse_result.source, tier=candidate.tier)
+                job.segment_count += applied.build.inserted
+                updated_segments += applied.build.updated
                 reporter.count(candidate.tier, "cancellation")
                 job.updated_at = datetime.now(timezone.utc)
                 db.commit()
@@ -936,7 +953,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             job.parsed_count += 1
             record_flight_discovery_signals(db, user_id, headers)
 
-            build_result = build_segments_and_trips_detailed(db, user_id, parse_result.flights)
+            build_result = applied.build
+            set_message_outcome(existing_msg, applied, source=parse_result.source, tier=candidate.tier)
             new_segs = build_result.inserted
             updated_segments += build_result.updated
             skipped_segments += build_result.skipped
@@ -1141,12 +1159,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 .first()
             )
             skipped_count = job.scanned_count - job.parsed_count
-            existing_parse_version = (getattr(existing_msg, "parse_version", 0) or 0) if existing_msg else 0
-            if (
-                existing_msg
-                and existing_msg.status != MessageStatus.PENDING
-                and existing_parse_version >= PARSER_VERSION
-            ):
+            if _message_skip_reason(existing_msg, PARSER_VERSION):
                 flush_progress()
                 _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
                 continue
@@ -1198,8 +1211,14 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 from_email=headers.get("from"),
             )
             pnr = _extract_pnr(f"{subject}\n{body_for_filter}".upper())
-            if pnr and _looks_like_cancellation_notice(subject, body_for_filter):
-                canceled_count = cancel_segments_for_pnr(db, user_id, pnr, received_at=_parse_received_at(headers.get("date")))
+            applied = apply_booking_message(
+                db, user_id, parse_result, source_message_id=msg_id,
+                subject=subject, plain_text=plain_text, html=html,
+                received_at=headers.get("date"),
+            )
+            touched_segment_ids.update(applied.build.affected_segment_ids)
+            if applied.is_cancellation:
+                canceled_count = applied.canceled
                 canceled_segments += canceled_count
                 from_domain = from_email.split("@")[-1].rstrip(">").strip() if "@" in from_email else ""
                 from_domain_hash = sha256(from_domain.encode()).hexdigest()[:64] if from_domain else None
@@ -1224,6 +1243,9 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     "pnr": pnr,
                     "canceled_segments": canceled_count,
                 }
+                set_message_outcome(existing_msg, applied, source=parse_result.source, tier=candidate.tier)
+                job.segment_count += applied.build.inserted
+                updated_segments += applied.build.updated
                 job.updated_at = datetime.now(timezone.utc)
                 db.commit()
                 skipped_count = job.scanned_count - job.parsed_count
@@ -1313,9 +1335,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             snippet = full_msg.get("snippet", "")
             snippet_hash = sha256(snippet.encode()).hexdigest()[:64] if snippet else None
 
-            # Always import flights from personal Gmail — identity check is advisory only.
-            # Mark as ACCEPTED so this email is not re-processed on future syncs.
-            effective_status = MessageStatus.ACCEPTED
+            # Ownership is resolved per flight, including shared bookings.
+            effective_status = applied.status
 
             if not existing_msg:
                 existing_msg = _get_or_create_message(
@@ -1337,7 +1358,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             job.parsed_count += 1
             record_flight_discovery_signals(db, user_id, headers)
 
-            build_result = build_segments_and_trips_detailed(db, user_id, parse_result.flights)
+            build_result = applied.build
+            set_message_outcome(existing_msg, applied, source=parse_result.source, tier=candidate.tier)
             new_segs = build_result.inserted
             updated_segments += build_result.updated
             skipped_segments += build_result.skipped
@@ -1449,8 +1471,14 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 sender=stale_sender,
                 subject=stale_subject,
             )
-            if stale_pnr and _looks_like_cancellation_notice(stale_subject, body_for_filter):
-                canceled_count = cancel_segments_for_pnr(db, user_id, stale_pnr, received_at=_parse_received_at(headers.get("date")))
+            applied = apply_booking_message(
+                db, user_id, parse_result, source_message_id=stale_msg.provider_msg_id,
+                subject=stale_subject, plain_text=plain_text, html=html,
+                received_at=headers.get("date"),
+            )
+            touched_segment_ids.update(applied.build.affected_segment_ids)
+            if applied.is_cancellation:
+                canceled_count = applied.canceled
                 canceled_segments += canceled_count
                 stale_msg.status = MessageStatus.ACCEPTED
                 stale_msg.parse_error = "cancellation_notice"
@@ -1462,6 +1490,9 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     "tier": "stale_reparse",
                 }
                 stale_msg.parse_version = PARSER_VERSION
+                set_message_outcome(stale_msg, applied, source=parse_result.source, tier="stale_reparse")
+                job.segment_count += applied.build.inserted
+                updated_segments += applied.build.updated
                 job.updated_at = datetime.now(timezone.utc)
                 db.commit()
                 skipped_count = job.scanned_count - job.parsed_count
@@ -1471,7 +1502,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             if parse_result.flights:
                 job.parsed_count += 1
                 record_flight_discovery_signals(db, user_id, headers)
-                build_result = build_segments_and_trips_detailed(db, user_id, parse_result.flights)
+                build_result = applied.build
                 new_segs = build_result.inserted
                 updated_segments += build_result.updated
                 skipped_segments += build_result.skipped
@@ -1486,6 +1517,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     "source": parse_result.source,
                     "tier": "stale_reparse",
                 }
+                set_message_outcome(stale_msg, applied, source=parse_result.source, tier="stale_reparse")
                 reporter.parsed_flight(
                     "stale_reparse",
                     segments=new_segs,
@@ -1562,9 +1594,9 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             discovery_state.updated_at = datetime.now(timezone.utc)
         _ACTIVE_PROGRESS_PHASE = "enrich"
         reporter.tier_started("enrich", "enriching saved segments")
-        enriched_segments = enrich_user_segments(db, user_id, include_weather=True)
-        if enriched_segments:
-            rebuild_user_trips(db, user_id)
+        enriched_segments = enrich_user_segments(
+            db, user_id, include_weather=True, segment_ids=touched_segment_ids,
+        )
         job.state = "completed"
         job.updated_at = datetime.now(timezone.utc)
         db.commit()
@@ -1602,6 +1634,10 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
         logger.exception("Gmail import failed for job %s: %s", job_id, exc)
         print(f"\n{RED}✘  Sync failed: {exc}{RESET}\n")
         try:
+            # Persist the failure only after discarding this message's partial
+            # projection, observations and history. Earlier complete messages
+            # were committed together and are safe to replay.
+            db.rollback()
             job = db.query(SyncJob).filter(SyncJob.id == job_id).first()
             if job:
                 job.state = "failed"
@@ -1613,3 +1649,4 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
     finally:
         _ACTIVE_PROGRESS_PHASE = None
         db.close()
+        import_guards.close()

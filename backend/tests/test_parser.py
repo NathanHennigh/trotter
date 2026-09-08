@@ -200,12 +200,12 @@ class TestCheckIdentity:
 
         assert check_identity("", "Nathan Hennigh", []) == MessageStatus.REVIEW_REQUIRED
 
-    def test_no_user_name_accepted(self):
-        """If there's no user info to match against, accept the message."""
+    def test_no_user_name_requires_review(self):
+        """Missing account identity cannot establish that a traveler is the user."""
         from app.models import MessageStatus
         from app.services.parser import check_identity
 
-        assert check_identity("Any Name", "", []) == MessageStatus.ACCEPTED
+        assert check_identity("Any Name", "", []) == MessageStatus.REVIEW_REQUIRED
 
 
 # ─────────────────────────── Heuristic parser tests ──────────────────────────

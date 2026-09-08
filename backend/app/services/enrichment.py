@@ -33,18 +33,26 @@ def enrich_user_segments(
     include_provider_lookup: bool = True,
     max_weather_segments: Optional[int] = DEFAULT_MAX_WEATHER_PER_RUN,
     max_provider_lookups: Optional[int] = DEFAULT_MAX_PROVIDER_LOOKUPS_PER_RUN,
+    segment_ids: Optional[set[int]] = None,
 ) -> int:
     """Enrich saved flight segments for a user.
 
     Returns the number of segment rows whose metadata changed.
     """
-    segments = (
+    query = (
         db.query(Segment)
         .join(Trip, Segment.trip_id == Trip.id)
         .filter(Trip.user_id == user_id)
-        .order_by(Segment.dep_time.asc(), Segment.id.asc())
-        .all()
     )
+    if segment_ids is not None:
+        query = query.filter(Segment.id.in_(segment_ids))
+    segments = query.order_by(Segment.dep_time.asc(), Segment.id.asc()).all()
+    if not segments:
+        return 0
+    from .booking_ledger import snapshot_user_itinerary
+    snapshot_user_itinerary(db, user_id, reason="before_segment_enrichment",
+                            segment_ids={segment.id for segment in segments},
+                            trip_ids={segment.trip_id for segment in segments})
     updated = 0
     weather_attempts = 0
     provider_attempts = 0
@@ -70,6 +78,10 @@ def enrich_user_segments(
         if changed:
             updated += 1
     if updated:
+        # Provider schedule enrichment can alter event times. Update only those
+        # trips' boundaries, without invoking legacy global cleanup heuristics.
+        from .builder import rebuild_affected_trips
+        rebuild_affected_trips(db, user_id, {segment.trip_id for segment in segments})
         db.commit()
     return updated
 

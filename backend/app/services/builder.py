@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
@@ -14,6 +14,14 @@ from sqlalchemy.orm import Session
 
 from ..models import Segment, Trip
 from .enrichment import enrich_segment
+from .booking_ledger import (
+    cancellation_blocks_flight,
+    flight_scope,
+    has_verified_self_observation,
+    record_cancellation,
+    record_flight_observations,
+    snapshot_user_itinerary,
+)
 
 if TYPE_CHECKING:
     from .parser import ParsedFlight
@@ -115,6 +123,12 @@ class BuildSegmentsResult:
     skipped: int = 0
     deduped: int = 0
     trips: int = 0
+    held: int = 0
+    held_other: int = 0
+    held_unknown: int = 0
+    blocked_cancellation: int = 0
+    removed_other: int = 0
+    affected_segment_ids: set[int] = field(default_factory=set)
 
 
 # ──────────────────────────── geometry helpers ───────────────────────────────
@@ -175,11 +189,31 @@ def build_segments_and_trips(
 
 
 def build_segments_and_trips_detailed(
-    db: Session, user_id: int, flights: "list[ParsedFlight]"
+    db: Session, user_id: int, flights: "list[ParsedFlight]", *,
+    source_message_id: Optional[str] = None, source_event_at=None, force_review: bool = False,
 ) -> BuildSegmentsResult:
     """Upsert Trips and Segments for parsed flights and return insert/update counts."""
     result = BuildSegmentsResult()
     if not flights:
+        return result
+
+    snapshot_user_itinerary(db, user_id, reason="before_booking_import")
+    decision = record_flight_observations(
+        db, user_id, flights, source_message_id=source_message_id, source_event_at=source_event_at,
+        force_review=force_review,
+    )
+    result.held_other = decision.held_other
+    result.held_unknown = decision.held_unknown
+    result.blocked_cancellation = decision.blocked_cancellation
+    result.removed_other = decision.removed_other
+    result.held = decision.held_other + decision.held_unknown + decision.blocked_cancellation
+    result.skipped = result.held
+    affected_trip_ids = set(decision.affected_trip_ids)
+    flights = decision.flights
+    if not flights:
+        if result.removed_other:
+            result.trips = (rebuild_affected_trips(db, user_id, affected_trip_ids)
+                            if source_message_id else rebuild_user_trips(db, user_id))
         return result
 
     sorted_flights = sorted(flights, key=lambda f: _db_datetime(f.dep_time))
@@ -187,6 +221,7 @@ def build_segments_and_trips_detailed(
 
     for group in trip_groups:
         trip = _find_or_create_trip(db, user_id, group)
+        affected_trip_ids.add(trip.id)
         for flight in group:
             action = _upsert_segment(db, trip.id, user_id, flight)
             if action == "inserted":
@@ -196,12 +231,23 @@ def build_segments_and_trips_detailed(
             else:
                 result.skipped += 1
 
-    result.trips = rebuild_user_trips(db, user_id)
-    resolve_booking_relationships(db, user_id)
+    if source_message_id:
+        observation_ids = {getattr(flight, "observation_id", None) for flight in flights}
+        for segment in db.query(Segment).join(Trip).filter(Trip.user_id == user_id).all():
+            if observation_ids.intersection((segment.meta_json or {}).get("observation_ids") or []):
+                affected_trip_ids.add(segment.trip_id)
+                result.affected_segment_ids.add(segment.id)
+        result.trips = rebuild_affected_trips(db, user_id, affected_trip_ids)
+    else:
+        result.trips = rebuild_user_trips(db, user_id)
+        resolve_booking_relationships(db, user_id)
     return result
 
 
-def cancel_segments_for_pnr(db: Session, user_id: int, pnr: str, *, received_at=None) -> int:
+def cancel_segments_for_pnr(
+    db: Session, user_id: int, pnr: str, *, received_at=None,
+    source_message_id: Optional[str] = None, source_event_at=None, flights=None,
+) -> int:
     """Remove stored flight segments for a canceled booking code.
 
     When the cancellation has a source timestamp, preserve segments backed by a
@@ -210,7 +256,14 @@ def cancel_segments_for_pnr(db: Session, user_id: int, pnr: str, *, received_at=
     pnr = _normalize_pnr(pnr)
     if not pnr:
         return 0
-    cancellation_time = _db_datetime(received_at)
+    snapshot_user_itinerary(db, user_id, reason="before_booking_cancellation")
+    cancellation_time = _db_datetime(source_event_at or received_at)
+    cancellation = record_cancellation(
+        db, user_id, pnr, source_message_id=source_message_id,
+        source_event_at=cancellation_time, flights=flights,
+    )
+    if not cancellation.scopes:
+        return 0
     segments = (
         db.query(Segment)
         .join(Trip)
@@ -219,14 +272,22 @@ def cancel_segments_for_pnr(db: Session, user_id: int, pnr: str, *, received_at=
     )
     removable = []
     affected = 0
+    affected_trip_ids = set()
     for segment in segments:
+        if not cancellation_blocks_flight(db, user_id, segment, source_event_at=_segment_source_received_at(segment)):
+            continue
         source_time = _segment_source_received_at(segment)
         if cancellation_time and source_time and source_time > cancellation_time:
             continue
-        alias = _first_active_pnr_alias(segment, pnr)
+        snapshot_user_itinerary(db, user_id, reason="canceled_booking",
+                                segment_ids={segment.id}, trip_ids={segment.trip_id})
+        affected_trip_ids.add(segment.trip_id)
+        alias = _first_active_pnr_alias(db, user_id, segment, pnr)
         if alias:
             segment.pnr = alias
-            _add_pnr_alias(segment, pnr, reason="canceled_primary_pnr")
+            meta = dict(segment.meta_json or {})
+            meta["pnr_aliases"] = [value for value in meta.get("pnr_aliases", []) if value not in {pnr, alias}]
+            segment.meta_json = meta
             _add_booking_relationship(
                 segment,
                 {
@@ -239,14 +300,18 @@ def cancel_segments_for_pnr(db: Session, user_id: int, pnr: str, *, received_at=
             affected += 1
             continue
         removable.append(segment)
-    _mark_cancellation_replacements(db, user_id, pnr, removable, cancellation_time)
+    if not source_message_id:
+        _mark_cancellation_replacements(db, user_id, pnr, removable, cancellation_time)
     count = affected + len(removable)
     for segment in removable:
         db.delete(segment)
     if count:
         db.flush()
-        rebuild_user_trips(db, user_id)
-        resolve_booking_relationships(db, user_id)
+        if source_message_id:
+            rebuild_affected_trips(db, user_id, affected_trip_ids)
+        else:
+            rebuild_user_trips(db, user_id)
+            resolve_booking_relationships(db, user_id)
     return count
 
 
@@ -257,6 +322,7 @@ def resolve_booking_relationships(db: Session, user_id: int) -> None:
     evidence relationships that matter later: aliases, likely replacement
     bookings, and reused/credit-linked PNRs that appear on unrelated trips.
     """
+    snapshot_user_itinerary(db, user_id, reason="before_booking_relationship_resolution")
     segments = (
         db.query(Segment)
         .join(Trip)
@@ -279,6 +345,7 @@ def rebuild_user_trips(db: Session, user_id: int) -> int:
     an itinerary. Rebuilding from the user's complete segment graph prevents
     stale one-email groupings from surviving after better data arrives.
     """
+    snapshot_user_itinerary(db, user_id, reason="before_trip_rebuild")
     segments = (
         db.query(Segment)
         .join(Trip)
@@ -287,6 +354,10 @@ def rebuild_user_trips(db: Session, user_id: int) -> int:
         .all()
     )
     if not segments:
+        snapshot_user_itinerary(db, user_id, reason="empty_trip_after_segment_removal")
+        for trip in db.query(Trip).filter(Trip.user_id == user_id).all():
+            db.delete(trip)
+        db.flush()
         return 0
 
     segments = _prune_duplicate_segments(db, segments)
@@ -318,6 +389,72 @@ def rebuild_user_trips(db: Session, user_id: int) -> int:
     for trip in db.query(Trip).filter(Trip.user_id == user_id).all():
         segment_count = db.query(func.count(Segment.id)).filter(Segment.trip_id == trip.id).scalar()
         if trip.id not in used_trip_ids and segment_count == 0:
+            db.delete(trip)
+    db.flush()
+    return len(clusters)
+
+
+def rebuild_affected_trips(db: Session, user_id: int, affected_trip_ids: set[int]) -> int:
+    """Recluster only changed trips and connected, verified imported travel.
+
+    Production imports never run the legacy global duplicate/route heuristics.
+    Unrelated legacy segments, trip memberships, titles, and metadata stay intact.
+    """
+    affected_trip_ids = set(affected_trip_ids)
+    if not affected_trip_ids:
+        return 0
+    all_segments = db.query(Segment).join(Trip).filter(Trip.user_id == user_id).all()
+    home_airport = _infer_home_airport(all_segments)
+    changed = True
+    while changed:
+        changed = False
+        selected = [segment for segment in all_segments if segment.trip_id in affected_trip_ids]
+        for candidate in all_segments:
+            if candidate.trip_id in affected_trip_ids:
+                continue
+            meta = candidate.meta_json or {}
+            if meta.get("ownership") != "self" or not meta.get("observation_ids"):
+                continue
+            for segment in selected:
+                earlier, later = sorted((candidate, segment), key=_segment_sort_key)
+                gap = _segment_dep_time(later) - _segment_arr_time(earlier)
+                if (
+                    earlier.arr_airport == later.dep_airport
+                    and earlier.arr_airport != home_airport
+                    and timedelta(0) <= gap <= timedelta(days=14)
+                ):
+                    affected_trip_ids.add(candidate.trip_id)
+                    changed = True
+                    break
+    segments = [segment for segment in all_segments if segment.trip_id in affected_trip_ids]
+    trips = {trip.id: trip for trip in db.query(Trip).filter(
+        Trip.user_id == user_id, Trip.id.in_(affected_trip_ids),
+    ).all()}
+    snapshot_user_itinerary(db, user_id, reason="recluster_changed_booking_trips",
+                            segment_ids={segment.id for segment in segments}, trip_ids=affected_trip_ids)
+    clusters = _cluster_saved_segments(segments, home_airport)
+    used_ids = set()
+    for cluster in clusters:
+        reusable = _select_reusable_trip_id(cluster, used_ids)
+        trip = trips.get(reusable) if reusable else None
+        if trip is None:
+            trip = Trip(user_id=user_id)
+            db.add(trip)
+            db.flush()
+        used_ids.add(trip.id)
+        ordered = sorted(cluster, key=_segment_sort_key)
+        trip.start_ts = min(_segment_dep_time(segment) for segment in ordered)
+        trip.end_ts = max(_segment_arr_time(segment) for segment in ordered)
+        trip.title = _trip_title_for_segments(ordered, home_airport=home_airport)
+        for segment in ordered:
+            segment.trip_id = trip.id
+    db.flush()
+    empty = [trip for trip in trips.values() if trip.id not in used_ids and
+             not db.query(Segment.id).filter(Segment.trip_id == trip.id).first()]
+    if empty:
+        snapshot_user_itinerary(db, user_id, reason="empty_trip_after_booking_reconciliation",
+                                segment_ids=set(), trip_ids={trip.id for trip in empty})
+        for trip in empty:
             db.delete(trip)
     db.flush()
     return len(clusters)
@@ -380,7 +517,7 @@ def _prune_duplicate_segments(db: Session, segments: list[Segment]) -> list[Segm
         ).append(segment)
     mark_duplicates(exact_groups)
 
-    same_flight_groups: dict[tuple[str, str, str, str, str], list[Segment]] = {}
+    same_flight_groups: dict[tuple[str, str, str, str, str, object], list[Segment]] = {}
     for segment in segments:
         if not segment.flight_number or not segment.pnr:
             continue
@@ -391,6 +528,7 @@ def _prune_duplicate_segments(db: Session, segments: list[Segment]) -> list[Segm
                 segment.airline or "",
                 _normalize_flight_number(segment.flight_number) or "",
                 segment.pnr,
+                _segment_dep_time(segment).date(),
             ),
             [],
         ).append(segment)
@@ -1116,6 +1254,13 @@ def _merge_duplicate_segment(keep: Segment, duplicate: Segment) -> None:
         keep.geom = duplicate.geom
     meta = dict(keep.meta_json or {})
     duplicate_meta = duplicate.meta_json or {}
+    for key in ("observation_ids", "source_message_ids"):
+        values = list(meta.get(key) or [])
+        for value in duplicate_meta.get(key) or []:
+            if value not in values:
+                values.append(value)
+        if values:
+            meta[key] = values
     if duplicate_meta.get("source") and "source" not in meta:
         meta["source"] = duplicate_meta["source"]
     if duplicate_meta.get("enrichment") and "enrichment" not in meta:
@@ -1246,14 +1391,18 @@ def _mark_cancellation_replacements(
                     "cancellation_received_at": cancellation_time.isoformat() if cancellation_time else None,
                 },
             )
-            _add_pnr_alias(candidate, canceled_pnr, reason="canceled_similar_booking")
 
 
-def _first_active_pnr_alias(segment: Segment, canceled_pnr: str) -> Optional[str]:
+def _first_active_pnr_alias(db: Session, user_id: int, segment: Segment, canceled_pnr: str) -> Optional[str]:
     aliases = (segment.meta_json or {}).get("pnr_aliases") or []
     for alias in aliases:
         normalized = _normalize_pnr(alias)
-        if normalized and normalized != canceled_pnr:
+        if (
+            normalized and normalized != canceled_pnr
+            and has_verified_self_observation(db, user_id, normalized, flight_scope(segment))
+            and not cancellation_blocks_flight(db, user_id, segment, pnr=normalized,
+                                              source_event_at=_segment_source_received_at(segment))
+        ):
             return normalized
     return None
 
@@ -1875,7 +2024,13 @@ def _find_supersedable_segment(db: Session, user_id: int, flight) -> Optional[Se
     from app.models import Trip
 
     q = db.query(Segment).join(Trip).filter(Trip.user_id == user_id, Segment.pnr == pnr)
-    candidates = q.all()
+    incoming_dep = _db_datetime(flight.dep_time)
+    candidates = [segment for segment in q.all()
+                  if (
+                      _db_datetime(segment.dep_time).date() == incoming_dep.date()
+                      if getattr(flight, "source_message_id", None)
+                      else abs(_db_datetime(segment.dep_time) - incoming_dep) <= timedelta(hours=36)
+                  )]
     if not candidates:
         return None
 
@@ -1900,8 +2055,10 @@ def _find_supersedable_segment(db: Session, user_id: int, flight) -> Optional[Se
 def _incoming_is_newer_or_equal(segment: Segment, flight) -> bool:
     incoming = _db_datetime(getattr(flight, "source_received_at", None))
     current = _segment_source_received_at(segment)
-    if not incoming or not current:
+    if not current:
         return True
+    if not incoming:
+        return False
     return incoming >= current
 
 
@@ -1946,7 +2103,7 @@ def _segment_source_received_at(segment: Segment):
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).replace(tzinfo=None)
+        return _db_datetime(datetime.fromisoformat(value.replace("Z", "+00:00")))
     except ValueError:
         return None
 
@@ -1991,12 +2148,14 @@ def _refresh_existing_segment(db: Session, segment: Segment, flight, *, allow_ov
     if route_changed:
         segment.distance_km, segment.geom = _segment_geometry(db, segment.dep_airport, segment.arr_airport)
     meta = dict(segment.meta_json or {})
-    if flight.source:
+    incoming_is_current = _incoming_is_newer_or_equal(segment, flight)
+    if flight.source and incoming_is_current:
         meta["source"] = flight.source
-    if getattr(flight, "confidence", None) is not None:
+    if getattr(flight, "confidence", None) is not None and incoming_is_current:
         meta["confidence"] = flight.confidence
-    if getattr(flight, "source_received_at", None) is not None:
+    if getattr(flight, "source_received_at", None) is not None and incoming_is_current:
         meta["source_received_at"] = flight.source_received_at.isoformat()
+    _merge_flight_provenance(meta, flight, incoming_is_current=incoming_is_current)
     if getattr(flight, "nonstop", False):
         meta["nonstop"] = True
     segment.meta_json = meta
@@ -2094,6 +2253,7 @@ def _segment_geometry(db: Optional[Session], dep_airport: str, arr_airport: str)
 
 def _segment_meta(flight) -> dict:
     meta = {"source": flight.source}
+    _merge_flight_provenance(meta, flight, incoming_is_current=True)
     if getattr(flight, "confidence", None) is not None:
         meta["confidence"] = flight.confidence
     aircraft = getattr(flight, "aircraft", None)
@@ -2116,3 +2276,28 @@ def _segment_meta(flight) -> dict:
                 {"type": "pnr_alias", "pnr": alias, "reason": "source_message_alias"},
             )
     return meta
+
+
+def _merge_flight_provenance(meta: dict, flight, *, incoming_is_current: bool) -> None:
+    for attribute, key in (("observation_id", "observation_ids"), ("source_message_id", "source_message_ids")):
+        value = getattr(flight, attribute, None)
+        if value is not None:
+            values = list(meta.get(key) or [])
+            if value not in values:
+                values.append(value)
+            meta[key] = values
+    ownership = getattr(flight, "ownership", "unknown")
+    if ownership == "self" or incoming_is_current and meta.get("ownership") != "self":
+        meta["ownership"] = ownership
+        names = list(meta.get("passenger_names") or [])
+        for name in getattr(flight, "passenger_names", []) or []:
+            if name not in names:
+                names.append(name)
+        meta["passenger_names"] = names
+        current_evidence = meta.get("passenger_evidence") or []
+        incoming_evidence = getattr(flight, "passenger_evidence", None) or []
+        evidence = list(current_evidence) if isinstance(current_evidence, list) else [current_evidence]
+        for item in incoming_evidence if isinstance(incoming_evidence, list) else [incoming_evidence]:
+            if item not in evidence:
+                evidence.append(item)
+        meta["passenger_evidence"] = evidence
