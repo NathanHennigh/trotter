@@ -50,6 +50,16 @@ export function DreamEditor({
   onRetry: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const mounted = React.useRef(true), closed = React.useRef(false), running = React.useRef(false);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const close = () => {
+    if (closed.current) return;
+    closed.current = true;
+    onClose();
+  };
   const [editing, setEditing] = React.useState(false),
     [confirmDelete, setConfirmDelete] = React.useState(false),
     [busy, setBusy] = React.useState(false),
@@ -78,19 +88,23 @@ export function DreamEditor({
     [points, point?.lat, point?.lon, item.id],
   );
   const run = async (action: () => Promise<void>) => {
+    if (running.current || closed.current) return;
+    running.current = true;
     setBusy(true);
     setError(undefined);
     try {
       await action();
-      onClose();
+      if (mounted.current && !closed.current) close();
     } catch (caught) {
+      if (!mounted.current || closed.current) return;
       setError(
         caught instanceof Error
           ? caught.message
           : "Your changes could not be saved.",
       );
     } finally {
-      setBusy(false);
+      running.current = false;
+      if (mounted.current && !closed.current) setBusy(false);
     }
   };
   const open = async (value?: string) => {
@@ -99,7 +113,7 @@ export function DreamEditor({
     try {
       await Linking.openURL(url);
     } catch {
-      setError("This link could not be opened.");
+      if (mounted.current && !closed.current) setError("This link could not be opened.");
     }
   };
   const saved = /^\d+$/.test(item.id),
@@ -109,9 +123,7 @@ export function DreamEditor({
       visible
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={() => {
-        if (!busy) onClose();
-      }}
+      onRequestClose={close}
     >
       <KeyboardAvoidingView
         style={[s.screen, { paddingTop: insets.top }]}
@@ -123,8 +135,7 @@ export function DreamEditor({
             <Pressable
               accessibilityLabel="Close place"
               accessibilityRole="button"
-              disabled={busy}
-              onPress={onClose}
+              onPress={close}
               style={s.icon}
             >
               <WWIcon name="close" />
@@ -138,6 +149,7 @@ export function DreamEditor({
             paddingBottom: insets.bottom + 32,
           }}
         >
+          {busy ? <Text accessibilityLiveRegion="polite" style={s.review}>This request can finish after you close this view.</Text> : null}
           {!editing ? (
             <>
               <View style={s.photo}>
@@ -204,7 +216,7 @@ export function DreamEditor({
                       label="Retry save"
                       onPress={() => {
                         onRetry();
-                        onClose();
+                        close();
                       }}
                     />
                   )}
@@ -213,13 +225,14 @@ export function DreamEditor({
             </>
           ) : (
             <>
-              <Field label="Place name" value={name} onChange={setName} />
+              <Field disabled={busy} label="Place name" value={name} onChange={setName} />
               <View style={s.fields}>
                 <View style={s.fieldColumn}>
-                  <Field label="City" value={city} onChange={setCity} />
+                  <Field disabled={busy} label="City" value={city} onChange={setCity} />
                 </View>
                 <View style={s.fieldColumn}>
                   <Field
+                    disabled={busy}
                     label="Country"
                     value={country}
                     onChange={setCountry}
@@ -227,6 +240,7 @@ export function DreamEditor({
                 </View>
               </View>
               <Field
+                disabled={busy}
                 label="Neighborhood / region"
                 value={region}
                 onChange={setRegion}
@@ -236,7 +250,8 @@ export function DreamEditor({
                 {categories.map((value) => (
                   <Pressable
                     accessibilityRole="radio"
-                    accessibilityState={{ checked: category === value }}
+                    disabled={busy}
+                    accessibilityState={{ checked: category === value, disabled: busy }}
                     key={value}
                     onPress={() => setCategory(value)}
                     style={[
@@ -256,18 +271,21 @@ export function DreamEditor({
                 ))}
               </View>
               <Field
+                disabled={busy}
                 label="Notes"
                 value={summary}
                 onChange={setSummary}
                 multiline
               />
               <Field
+                disabled={busy}
                 label="Tags, separated by commas"
                 value={tags}
                 onChange={setTags}
               />
-              <Field label="Maps link" value={maps} onChange={setMaps} url />
+              <Field disabled={busy} label="Maps link" value={maps} onChange={setMaps} url />
               <Pressable
+                disabled={busy}
                 onPress={() => setPlacing(!placing)}
                 style={s.pinAction}
               >
@@ -292,7 +310,7 @@ export function DreamEditor({
                     selectedId={point?.id}
                     placing
                     onPlace={(lat, lon) =>
-                      setMaps(
+                      !busy && setMaps(
                         `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`,
                       )
                     }
@@ -374,12 +392,14 @@ function Field({
   onChange,
   multiline = false,
   url = false,
+  disabled = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   multiline?: boolean;
   url?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <View style={s.field}>
@@ -387,6 +407,7 @@ function Field({
       <TextInput
         accessibilityLabel={label}
         value={value}
+        editable={!disabled}
         onChangeText={onChange}
         multiline={multiline}
         autoCapitalize={url ? "none" : "sentences"}

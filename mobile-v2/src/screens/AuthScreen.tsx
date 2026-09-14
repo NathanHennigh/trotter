@@ -17,8 +17,14 @@ import { colors, fonts } from "../theme/trotterTheme";
 export function AuthScreen() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const { authStatus, status, error, signIn, signOut, refresh } =
+  const { authStatus, status, error, signIn, signOut, signOutPending, refresh } =
     useTravelTrips();
+  const [clearing, setClearing] = React.useState(false);
+  const retrySignOut = async () => {
+    if (clearing) return;
+    setClearing(true);
+    try { await signOut(); } finally { setClearing(false); }
+  };
   const busy = authStatus === "loading";
   return (
     <ScrollView
@@ -61,7 +67,18 @@ export function AuthScreen() {
             {error}
           </Text>
         ) : null}
-        {busy ? (
+        {signOutPending ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: clearing, busy: clearing }}
+            disabled={clearing}
+            onPress={() => void retrySignOut()}
+            style={({ pressed }) => [styles.googleButton, pressed && styles.pressed]}
+          >
+            {clearing ? <ActivityIndicator color={colors.blue} /> : null}
+            <Text style={styles.googleLabel}>{clearing ? "Finishing sign out…" : "Retry sign out"}</Text>
+          </Pressable>
+        ) : busy ? (
           <View accessibilityLiveRegion="polite" style={styles.loading}>
             <ActivityIndicator color={colors.blue} />
             <Text style={styles.loadingText}>Connecting your account…</Text>
@@ -79,7 +96,7 @@ export function AuthScreen() {
             <Text style={styles.googleLabel}>Continue with Google</Text>
           </Pressable>
         )}
-        {busy ? (
+        {signOutPending ? null : busy ? (
           <Pressable
             accessibilityRole="button"
             onPress={() => void signOut()}

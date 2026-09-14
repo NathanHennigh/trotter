@@ -141,12 +141,16 @@ function useDreamsState() {
   const inFlightUrlsRef = React.useRef(new Set<string>());
   const mounted = React.useRef(true);
   const refreshSequence = React.useRef(0);
+  const activeRefresh = React.useRef<{ revision: number; promise: Promise<void> } | undefined>(undefined);
+  const mutationIds = React.useRef(new Set<string>());
   const pendingSequence = React.useRef(0);
   React.useEffect(() => {
     mounted.current = true;
     const unsubscribe = subscribeAuthToken(() => {
       refreshSequence.current += 1;
       inFlightUrlsRef.current.clear();
+      mutationIds.current.clear();
+      activeRefresh.current = undefined;
       itemsRef.current = [];
       setItems([]); setLiveDreams(undefined); setError(undefined); setStatus('idle');
     });
@@ -162,25 +166,40 @@ function useDreamsState() {
     itemsRef.current = items;
   }, [items]);
 
-  const refresh = React.useCallback(async (mode: 'loading' | 'refreshing' = 'refreshing') => {
-    const sequence = ++refreshSequence.current, revision = getAuthRevision();
-    setStatus(mode);
-    try {
-      const [apiDreams, apiItems] = await Promise.all([dreamsApiFetch<ApiDream[]>('/dreams'), dreamsApiFetch<ApiDreamItem[]>('/dream-items')]);
-      if (!mounted.current || sequence !== refreshSequence.current || revision !== getAuthRevision()) return;
-      const mappedDreams = apiDreams.map(mapApiDream);
-      const mappedItems = apiItems.map(mapApiDreamItem);
-      setLiveDreams(mappedDreams);
-      setItems(current => [...current.filter(item => item.id.startsWith('dream-item-') && !mappedItems.some(remote => remote.sourceUrl === item.sourceUrl)), ...mappedItems]);
-      setSource('api');
-      setError(undefined);
-      setStatus('idle');
-    } catch (caught) {
-      if (!mounted.current || sequence !== refreshSequence.current || revision !== getAuthRevision()) return;
-      setSource((current) => current === 'api' ? 'api' : 'local');
-      setError(caught instanceof Error ? caught.message : String(caught));
-      setStatus('error');
-    }
+  const refresh = React.useCallback((mode: 'loading' | 'refreshing' = 'refreshing'): Promise<void> => {
+    const revision = getAuthRevision();
+    if (activeRefresh.current?.revision === revision) return activeRefresh.current.promise;
+    const run = async () => {
+      const sequence = ++refreshSequence.current;
+      setStatus(mode);
+      try {
+        // A failing endpoint must not leave its sibling running behind the next
+        // poll. Both requests are bounded and this refresh owns both until settled.
+        const [dreamsResult, itemsResult] = await Promise.allSettled([dreamsApiFetch<ApiDream[]>('/dreams'), dreamsApiFetch<ApiDreamItem[]>('/dream-items')]);
+        if (dreamsResult.status === 'rejected') throw dreamsResult.reason;
+        if (itemsResult.status === 'rejected') throw itemsResult.reason;
+        const apiDreams = dreamsResult.value, apiItems = itemsResult.value;
+        if (!mounted.current || sequence !== refreshSequence.current || revision !== getAuthRevision()) return;
+        const mappedDreams = apiDreams.map(mapApiDream);
+        const mappedItems = apiItems.map(mapApiDreamItem);
+        setLiveDreams(mappedDreams);
+        setItems(current => [...current.filter(item => item.id.startsWith('dream-item-') && !mappedItems.some(remote => remote.sourceUrl === item.sourceUrl)), ...mappedItems]);
+        setSource('api');
+        setError(undefined);
+        setStatus('idle');
+      } catch (caught) {
+        if (!mounted.current || sequence !== refreshSequence.current || revision !== getAuthRevision()) return;
+        setSource((current) => current === 'api' ? 'api' : 'local');
+        setError(caught instanceof Error ? caught.message : String(caught));
+        setStatus('error');
+      }
+    };
+    const task = { revision, promise: Promise.resolve() };
+    task.promise = run().finally(() => {
+      if (activeRefresh.current === task) activeRefresh.current = undefined;
+    });
+    activeRefresh.current = task;
+    return task.promise;
   }, []);
 
   React.useEffect(() => {
@@ -189,8 +208,14 @@ function useDreamsState() {
 
   React.useEffect(() => {
     if (!processingItems.length) return;
-    const timer = setInterval(() => { void refresh(); }, 5000);
-    return () => clearInterval(timer);
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      await refresh();
+      if (!disposed) timer = setTimeout(() => void poll(), 5000);
+    };
+    timer = setTimeout(() => void poll(), 5000);
+    return () => { disposed = true; clearTimeout(timer); };
   }, [processingItems.length, refresh]);
 
   const shareInstagramLink = React.useCallback((sourceUrl: string, caption?: string) => {
@@ -247,18 +272,28 @@ function useDreamsState() {
 
   const updateItem = React.useCallback(async (id: string, patch: Partial<DreamItem>) => {
     if (!/^\d+$/.test(id)) throw new Error('Wait for this place to finish saving before editing.');
+    if (mutationIds.current.has(id)) throw new Error('This place is still saving. Wait for it to finish before making another change.');
     const revision = getAuthRevision();
-    const fields: Partial<Record<keyof DreamItem, string>> = { placeName: 'place_name', city: 'city', country: 'country', regionOrNeighborhood: 'region_or_neighborhood', summary: 'summary', category: 'category', tags: 'tags_json', googleMapsUrl: 'google_maps_url' };
-    const edits = Object.fromEntries(Object.entries(patch).filter(([key]) => fields[key as keyof DreamItem]).map(([key, value]) => [fields[key as keyof DreamItem], value ?? null]));
-    const response = await dreamsAuthenticatedFetch(`/dream-items/${id}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: patch.needsReview ? 'needs_review' : 'confirm', edits }) });
-    const data = await readJson(response);
-    if (!response.ok) throw new Error(readError(data, 'Your changes could not be saved.'));
-    if (!mounted.current || revision !== getAuthRevision()) return;
+    mutationIds.current.add(id);
     refreshSequence.current += 1;
-    const updated = mapApiDreamItem(data as ApiDreamItem);
-    setItems(current => current.map(item => item.id === id ? updated : item));
-    setLiveDreams(undefined);
-    setStatus('idle'); setError(undefined);
+    try {
+      const fields: Partial<Record<keyof DreamItem, string>> = { placeName: 'place_name', city: 'city', country: 'country', regionOrNeighborhood: 'region_or_neighborhood', summary: 'summary', category: 'category', tags: 'tags_json', googleMapsUrl: 'google_maps_url' };
+      const edits = Object.fromEntries(Object.entries(patch).filter(([key]) => fields[key as keyof DreamItem]).map(([key, value]) => [fields[key as keyof DreamItem], value ?? null]));
+      const response = await dreamsAuthenticatedFetch(`/dream-items/${id}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: patch.needsReview ? 'needs_review' : 'confirm', edits }) });
+      const data = await readJson(response);
+      if (!response.ok) throw new Error(readError(data, 'Your changes could not be saved.'));
+      if (!mounted.current || revision !== getAuthRevision()) return;
+      refreshSequence.current += 1;
+      const updated = mapApiDreamItem(data as ApiDreamItem);
+      setItems(current => current.map(item => item.id === id ? updated : item));
+      setLiveDreams(undefined);
+      setStatus('idle'); setError(undefined);
+    } catch (caught) {
+      if (mounted.current && revision === getAuthRevision()) {
+        setStatus('error'); setError(caught instanceof Error ? caught.message : String(caught));
+      }
+      throw caught;
+    } finally { if (revision === getAuthRevision()) mutationIds.current.delete(id); }
   }, []);
 
   const confirmItem = React.useCallback((id: string) => {
@@ -270,16 +305,26 @@ function useDreamsState() {
   }, [updateItem]);
 
   const deleteItem = React.useCallback(async (id: string) => {
+    if (mutationIds.current.has(id)) throw new Error('This place is still saving. Wait for it to finish before making another change.');
     const revision = getAuthRevision();
-    if (/^\d+$/.test(id)) {
-      const response = await dreamsAuthenticatedFetch(`/dream-items/${id}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error(readError(await readJson(response), 'This place could not be deleted.'));
-    }
-    if (!mounted.current || revision !== getAuthRevision()) return;
+    mutationIds.current.add(id);
     refreshSequence.current += 1;
-    setItems((current) => current.filter((item) => item.id !== id));
-    setLiveDreams(undefined);
-    setStatus('idle'); setError(undefined);
+    try {
+      if (/^\d+$/.test(id)) {
+        const response = await dreamsAuthenticatedFetch(`/dream-items/${id}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error(readError(await readJson(response), 'This place could not be deleted.'));
+      }
+      if (!mounted.current || revision !== getAuthRevision()) return;
+      refreshSequence.current += 1;
+      setItems((current) => current.filter((item) => item.id !== id));
+      setLiveDreams(undefined);
+      setStatus('idle'); setError(undefined);
+    } catch (caught) {
+      if (mounted.current && revision === getAuthRevision()) {
+        setStatus('error'); setError(caught instanceof Error ? caught.message : String(caught));
+      }
+      throw caught;
+    } finally { if (revision === getAuthRevision()) mutationIds.current.delete(id); }
   }, []);
 
   return {
@@ -317,17 +362,48 @@ async function shareInstagramLinkRemote(sourceUrl: string, caption?: string) {
   if (!response.ok) throw new Error(readError(data, `Dream save failed: ${response.status}`));
 }
 
-async function dreamsAuthenticatedFetch(path: string, init?: RequestInit) {
+type DreamsResponse = Pick<Response, 'status' | 'ok' | 'text'>;
+async function dreamsAuthenticatedFetch(path: string, init?: RequestInit): Promise<DreamsResponse> {
+  const initialRevision = getAuthRevision();
   const token = getStoredToken() ?? await hydrateStoredToken();
   if (!token) throw new Error('Sign in to access your saved places.');
+  if (initialRevision !== getAuthRevision()) throw new Error('Your account changed.');
   const revision = getAuthRevision();
-  const response = await fetch(`${getApiBaseUrl()}${path}`, withAuth(init, token));
-  if (revision !== getAuthRevision() || token !== getStoredToken()) throw new Error('Your account changed.');
-  if (response.status === 401) {
-    await clearAuthToken();
-    throw new Error('Your session expired. Sign in again.');
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let unsubscribe = () => {};
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(init?.method && init.method !== 'GET'
+        ? 'The request timed out. The change may still finish on the server. Refresh saved places before retrying.'
+        : 'Saved places took too long to load. Check your connection and retry.'));
+      controller.abort();
+    }, 30000);
+    unsubscribe = subscribeAuthToken(() => {
+      reject(new Error('Your account changed.'));
+      controller.abort();
+    });
+  });
+  try {
+    const request = (async () => {
+      const response = await fetch(`${getApiBaseUrl()}${path}`, withAuth({ ...init, signal: controller.signal }, token));
+      if (revision !== getAuthRevision() || token !== getStoredToken()) throw new Error('Your account changed.');
+      if (response.status === 401) {
+        // Remove our listener before invalidating the account so the useful
+        // expiry message wins over this request's generic account-change error.
+        unsubscribe();
+        await clearAuthToken();
+        throw new Error('Your session expired. Sign in again.');
+      }
+      const body = await response.text();
+      if (revision !== getAuthRevision() || token !== getStoredToken()) throw new Error('Your account changed.');
+      return { status: response.status, ok: response.ok, text: async () => body };
+    })();
+    return await Promise.race([request, deadline]);
+  } finally {
+    clearTimeout(timer);
+    unsubscribe();
   }
-  return response;
 }
 
 function withAuth(init: RequestInit | undefined, token: string): RequestInit {
@@ -341,7 +417,7 @@ function withAuth(init: RequestInit | undefined, token: string): RequestInit {
   };
 }
 
-async function readJson(response: Response) {
+async function readJson(response: DreamsResponse) {
   const text = await response.text();
   if (!text) return {};
   try {

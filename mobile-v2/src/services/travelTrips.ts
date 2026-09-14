@@ -124,7 +124,10 @@ const COUNTRY_ABBREVIATIONS: Record<string, string> = {
 
 const AUTH_TOKEN_STORAGE_KEY = 'trotter.auth.v2';
 const LEGACY_TOKEN_STORAGE_KEY = 'trotterAuthToken';
+const AUTH_CLEAR_PENDING_KEY = 'trotter.auth.clear-pending';
+const AUTH_CLEAR_ERROR = 'Saved sign-in could not be cleared. Retry sign out to finish removing this account from the device.';
 let memoryAuthToken: string | undefined;
+let pendingAuthClear = false;
 let authRevision = 0;
 let storageQueue: Promise<unknown> = Promise.resolve();
 const authListeners = new Set<() => void>();
@@ -132,6 +135,7 @@ const authListeners = new Set<() => void>();
 export type TravelTripsSource = 'api';
 export type TravelTripsStatus = 'idle' | 'loading' | 'refreshing' | 'syncing' | 'error';
 export type TravelAuthStatus = 'loading' | 'signed-out' | 'signed-in';
+export type GmailSyncStatus = 'unknown' | 'syncing' | 'synced' | 'error';
 type AccountIdentity = { user_id: number; email: string; name?: string | null };
 type TravelTripsContextValue = {
   trips: TripSummary[];
@@ -139,6 +143,10 @@ type TravelTripsContextValue = {
   source: TravelTripsSource;
   status: TravelTripsStatus;
   authStatus: TravelAuthStatus;
+  signOutPending: boolean;
+  gmailSyncStatus: GmailSyncStatus;
+  gmailSyncError?: string;
+  lastGmailSyncedAt?: string;
   error?: string;
   accountId?: number;
   accountEmail?: string;
@@ -175,25 +183,40 @@ function useTravelTripsState(): TravelTripsContextValue {
   const [status, setStatus] = React.useState<TravelTripsStatus>('loading');
   const [error, setError] = React.useState<string>();
   const [lastSyncedAt, setLastSyncedAt] = React.useState<string>();
+  const [signOutPending, setSignOutPending] = React.useState(pendingAuthClear);
+  const [gmailSyncStatus, setGmailSyncStatus] = React.useState<GmailSyncStatus>('unknown');
+  const [gmailSyncError, setGmailSyncError] = React.useState<string>();
+  const [lastGmailSyncedAt, setLastGmailSyncedAt] = React.useState<string>();
   const tripsRef = React.useRef(trips);
   tripsRef.current = trips;
   const accountRef = React.useRef<AccountIdentity | undefined>(undefined);
   const mounted = React.useRef(true);
   const requestSequence = React.useRef(0);
+  // Order reads by when they began, including independent detail requests.
+  const readSequence = React.useRef(0);
+  const fullReadApplied = React.useRef(0);
+  const tripReads = React.useRef(new Map<number, number>());
   const authAttempt = React.useRef(0);
-  const syncRunning = React.useRef(false);
+  const syncRunning = React.useRef<{ revision: number } | undefined>(undefined);
   const current = (revision: number) => mounted.current && revision === getAuthRevision();
   const resetAccount = React.useCallback(() => {
     accountRef.current = undefined;
     setAccount(undefined);
     setTrips([]);
+    tripsRef.current = [];
+    tripReads.current.clear();
+    fullReadApplied.current = 0;
     setLastSyncedAt(undefined);
+    setGmailSyncStatus('unknown');
+    setGmailSyncError(undefined);
+    setLastGmailSyncedAt(undefined);
   }, []);
 
   const loadTrips = React.useCallback(async (mode: 'loading' | 'refreshing' | 'silent' = 'refreshing') => {
     const token = getStoredToken();
     const revision = getAuthRevision();
     const sequence = ++requestSequence.current;
+    const read = ++readSequence.current;
     const relevant = () => current(revision) && sequence === requestSequence.current;
     if (!token) {
       resetAccount();
@@ -226,7 +249,16 @@ function useTravelTripsState(): TravelTripsContextValue {
       if (!relevant()) return;
       if (!tripsResponse.ok) throw new Error(`Your trips could not be loaded (${tripsResponse.status}). Pull to retry.`);
       if (!Array.isArray(payload)) throw new Error('Trips returned an unexpected response. Please retry.');
-      setTrips(mapApiTrips(payload as ApiTrip[]));
+      const mapped = mapApiTrips(payload as ApiTrip[]);
+      const newerDetails = tripsRef.current.filter(trip => trip.backendId !== undefined && (tripReads.current.get(trip.backendId) ?? 0) > read);
+      const newerIds = new Set(newerDetails.map(trip => trip.backendId));
+      const newerById = new Map(newerDetails.map(trip => [trip.backendId, trip]));
+      const mappedIds = new Set(mapped.map(trip => trip.backendId));
+      const next = [...mapped.map(trip => newerById.get(trip.backendId) ?? trip), ...newerDetails.filter(trip => !mappedIds.has(trip.backendId))];
+      fullReadApplied.current = read;
+      for (const trip of mapped) if (trip.backendId !== undefined && !newerIds.has(trip.backendId)) tripReads.current.set(trip.backendId, read);
+      tripsRef.current = next;
+      setTrips(next);
       setLastSyncedAt(new Date().toISOString());
       setError(undefined);
       if (mode !== 'silent') setStatus('idle');
@@ -244,9 +276,10 @@ function useTravelTripsState(): TravelTripsContextValue {
       if (!mounted.current) return;
       requestSequence.current += 1;
       resetAccount();
-      setError(undefined);
+      setSignOutPending(pendingAuthClear);
+      setError(pendingAuthClear ? AUTH_CLEAR_ERROR : undefined);
       setAuthStatus(getStoredToken() ? 'loading' : 'signed-out');
-      setStatus(getStoredToken() ? 'loading' : 'idle');
+      setStatus(pendingAuthClear ? 'error' : getStoredToken() ? 'loading' : 'idle');
       if (getStoredToken()) void loadTrips('loading');
     });
     void (async () => {
@@ -261,6 +294,7 @@ function useTravelTripsState(): TravelTripsContextValue {
         resetAccount();
         setAuthStatus('signed-out');
         setStatus('error');
+        setSignOutPending(pendingAuthClear);
         setError(friendlyError(caught));
       }
     })();
@@ -268,6 +302,7 @@ function useTravelTripsState(): TravelTripsContextValue {
   }, [loadTrips, resetAccount]);
 
   const signIn = React.useCallback(async () => {
+    if (pendingAuthClear) { setError(AUTH_CLEAR_ERROR); setSignOutPending(true); return; }
     const attempt = ++authAttempt.current;
     setError(undefined);
     setAuthStatus('loading');
@@ -293,12 +328,13 @@ function useTravelTripsState(): TravelTripsContextValue {
     setStatus('idle');
     setError(undefined);
     try { await clearAuthToken(); }
-    catch { if (mounted.current) setError('Could not clear saved sign-in. Please try signing out again.'); }
+    catch { if (mounted.current) { setSignOutPending(true); setStatus('error'); setError(AUTH_CLEAR_ERROR); } }
   }, [resetAccount]);
 
   const loadTripDetail = React.useCallback(async (backendId: number) => {
     const token = getStoredToken();
     const revision = getAuthRevision();
+    const read = ++readSequence.current;
     if (!token || !accountRef.current) return undefined;
     const response = await authFetch(`/trips/${backendId}`, undefined, token);
     if (!current(revision)) return undefined;
@@ -309,14 +345,20 @@ function useTravelTripsState(): TravelTripsContextValue {
     }
     const data = await readJson(response) as ApiTrip;
     if (!current(revision)) return undefined;
+    if (read < fullReadApplied.current || read < (tripReads.current.get(backendId) ?? 0)) {
+      return tripsRef.current.find(trip => trip.backendId === backendId);
+    }
     if (!response.ok || !Array.isArray(data.segments) || data.id !== backendId) {
       throw new Error('This trip could not be loaded. Please retry.');
     }
     if (!data.segments.length) return undefined;
     const existingIndex = Math.max(0, tripsRef.current.findIndex(trip => trip.backendId === backendId));
     const mapped = mapApiTrip(data, existingIndex);
-    setTrips(existing => existing.some(trip => trip.backendId === backendId)
-      ? existing.map(trip => trip.backendId === backendId ? mapped : trip) : [...existing, mapped]);
+    tripReads.current.set(backendId, read);
+    const next = tripsRef.current.some(trip => trip.backendId === backendId)
+      ? tripsRef.current.map(trip => trip.backendId === backendId ? mapped : trip) : [...tripsRef.current, mapped];
+    tripsRef.current = next;
+    setTrips(next);
     setError(undefined);
     setLastSyncedAt(new Date().toISOString());
     return mapped;
@@ -325,9 +367,12 @@ function useTravelTripsState(): TravelTripsContextValue {
   const syncFromGmail = React.useCallback(async () => {
     const token = getStoredToken();
     const revision = getAuthRevision();
-    if (syncRunning.current || !token || !accountRef.current) return;
-    syncRunning.current = true;
+    if (syncRunning.current?.revision === revision || !token || !accountRef.current) return;
+    const running = { revision };
+    syncRunning.current = running;
     setStatus('syncing');
+    setGmailSyncStatus('syncing');
+    setGmailSyncError(undefined);
     setError(undefined);
     try {
       const response = await authFetch('/ingest/gmail/import', { method: 'POST' }, token);
@@ -340,20 +385,27 @@ function useTravelTripsState(): TravelTripsContextValue {
         await loadTrips('silent');
         if (current(revision)) setStatus('syncing');
       });
-      if (current(revision)) await loadTrips('refreshing');
+      if (current(revision)) {
+        setGmailSyncStatus('synced');
+        setLastGmailSyncedAt(new Date().toISOString());
+        await loadTrips('refreshing');
+      }
     } catch (caught) {
       if (!current(revision)) return;
       if (caught instanceof SessionExpired) {
         await clearAuthToken();
         if (mounted.current && !getStoredToken()) setError('Your session expired. Sign in with Google again.');
       } else {
+        setGmailSyncStatus('error');
+        setGmailSyncError(friendlyError(caught));
         setError(friendlyError(caught));
         setStatus('error');
       }
-    } finally { syncRunning.current = false; }
+    } finally { if (syncRunning.current === running) syncRunning.current = undefined; }
   }, [loadTrips]);
 
   return { trips, profile: buildProfile(trips, account), source: 'api', status, authStatus,
+    signOutPending, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt,
     error, accountId: account?.user_id, accountEmail: account?.email, lastSyncedAt,
     signIn, signOut, refresh: () => loadTrips('refreshing'), loadTripDetail, syncFromGmail };
 }
@@ -395,12 +447,33 @@ async function purgeLegacyToken() {
   browserStorage('localStorage')?.removeItem(LEGACY_TOKEN_STORAGE_KEY);
   await AsyncStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
 }
+async function readClearPending() {
+  return Platform.OS === 'web'
+    ? browserStorage('localStorage')?.getItem(AUTH_CLEAR_PENDING_KEY) === '1'
+    : (await AsyncStorage.getItem(AUTH_CLEAR_PENDING_KEY)) === '1';
+}
+async function writeClearPending(pending: boolean) {
+  // This marker contains no token or account identity. It only prevents a failed
+  // credential deletion from being silently undone by the next app launch.
+  if (Platform.OS === 'web') {
+    const storage = browserStorage('localStorage');
+    if (!storage) throw new Error(AUTH_CLEAR_ERROR);
+    if (pending) storage.setItem(AUTH_CLEAR_PENDING_KEY, '1');
+    else storage.removeItem(AUTH_CLEAR_PENDING_KEY);
+  } else if (pending) await AsyncStorage.setItem(AUTH_CLEAR_PENDING_KEY, '1');
+  else await AsyncStorage.removeItem(AUTH_CLEAR_PENDING_KEY);
+}
 export async function storeAuthToken(token: string) {
   if (!token || /\s/.test(token)) throw new Error('Invalid sign-in token.');
+  if (pendingAuthClear) throw new Error(AUTH_CLEAR_ERROR);
+  const revision = getAuthRevision();
   const serialized = JSON.stringify({ token, apiBaseUrl: getApiBaseUrl() });
-  changeMemoryToken(token);
   try {
     await queueStorage(async () => {
+      if (pendingAuthClear || await readClearPending()) {
+        if (!pendingAuthClear) { pendingAuthClear = true; changeMemoryToken(undefined); }
+        throw new Error(AUTH_CLEAR_ERROR);
+      }
       if (Platform.OS === 'web') {
         const storage = browserStorage('sessionStorage');
         if (!storage) throw new Error('Session storage is unavailable.');
@@ -410,24 +483,39 @@ export async function storeAuthToken(token: string) {
       }
       await purgeLegacyToken();
     });
+    if (!pendingAuthClear && revision === getAuthRevision()) changeMemoryToken(token);
   } catch {
     if (memoryAuthToken === token) changeMemoryToken(undefined);
+    if (pendingAuthClear) throw new Error(AUTH_CLEAR_ERROR);
     throw new Error('Your sign-in could not be saved securely. Please try again.');
   }
 }
 export function clearAuthToken() {
   // Invalidate outstanding API responses before asynchronous storage work.
+  pendingAuthClear = true;
   changeMemoryToken(undefined);
   return queueStorage(async () => {
-    if (Platform.OS === 'web') browserStorage('sessionStorage')?.removeItem(AUTH_TOKEN_STORAGE_KEY);
-    else await SecureStore.deleteItemAsync(AUTH_TOKEN_STORAGE_KEY);
+    // Still try deleting the credential if the auxiliary marker cannot be saved.
+    await writeClearPending(true).catch(() => undefined);
+    if (Platform.OS === 'web') {
+      const storage = browserStorage('sessionStorage');
+      if (!storage) throw new Error(AUTH_CLEAR_ERROR);
+      storage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    } else await SecureStore.deleteItemAsync(AUTH_TOKEN_STORAGE_KEY);
     await purgeLegacyToken();
+    await writeClearPending(false);
+    pendingAuthClear = false;
+    changeMemoryToken(undefined);
   });
 }
 export async function hydrateStoredToken() {
   if (memoryAuthToken) return memoryAuthToken;
   const revision = getAuthRevision();
   await storageQueue;
+  if (pendingAuthClear || await readClearPending()) {
+    if (!pendingAuthClear) { pendingAuthClear = true; changeMemoryToken(undefined); }
+    throw new Error(AUTH_CLEAR_ERROR);
+  }
   const raw = Platform.OS === 'web' ? browserStorage('sessionStorage')?.getItem(AUTH_TOKEN_STORAGE_KEY)
     : await SecureStore.getItemAsync(AUTH_TOKEN_STORAGE_KEY);
   await purgeLegacyToken();

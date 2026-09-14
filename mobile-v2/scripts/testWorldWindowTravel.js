@@ -43,7 +43,43 @@ test('route map includes every known leg and identifies missing geometry without
 
 const response=(status,body)=>({status,ok:status>=200&&status<300,text:async()=>JSON.stringify(body)});
 const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
-function serviceEnvironment(){let token='account-a',revision=1,fetcher=async url=>response(200,[]),cursor=0,effects=[],slots=[],listeners=new Set();const calls=[];const same=(a,b)=>a&&b&&a.length===b.length&&a.every((v,i)=>v===b[i]);const react={createContext:()=>({}),createElement:()=>({}),useContext:()=>undefined,useState(initial){const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return[slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;}];},useRef(value){const i=cursor++;if(!(i in slots))slots[i]={current:value};return slots[i];},useMemo(fn,deps){const i=cursor++;if(!slots[i]||!same(slots[i].deps,deps))slots[i]={value:fn(),deps};return slots[i].value;},useCallback(fn,deps){return this.useMemo(()=>fn,deps);},useEffect(fn,deps){const i=cursor++;if(!slots[i]||!same(slots[i].deps,deps)){slots[i]?.cleanup?.();slots[i]={deps};effects.push(()=>{slots[i].cleanup=fn();});}}};const changeToken=value=>{token=value;revision++;listeners.forEach(fn=>fn());};const auth={getApiBaseUrl:()=> 'https://api.example.invalid',getStoredToken:()=>token,hydrateStoredToken:async()=>token,getAuthRevision:()=>revision,subscribeAuthToken:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},clearAuthToken:async()=>changeToken(undefined)};const module=load('services/dreams.ts',{'react':react,'./travelTrips':auth},'module.exports.testState=useDreamsState;module.exports.testFetch=dreamsAuthenticatedFetch;',{fetch:async(url,init)=>{calls.push({url,init});return fetcher(url,init);},setInterval:()=>1,clearInterval:()=>{}});return{module,calls,changeToken,fetcher:fn=>fetcher=fn,render(){cursor=0;const state=module.testState();const pending=effects;effects=[];pending.forEach(fn=>fn());return state;},dispose(){slots.forEach(slot=>slot?.cleanup?.());}};}
+function serviceEnvironment() {
+  let token = 'account-a', revision = 1, fetcher = async () => response(200, []), cursor = 0, effects = [], slots = [], listeners = new Set();
+  let now = 0, nextTimer = 0;
+  const calls = [], timers = new Map();
+  const setTimer = (fn, ms) => { const id = ++nextTimer; timers.set(id, { fn, due: now + ms, ms }); return id; };
+  const clock = {
+    pending: () => [...timers.values()].map(timer => timer.ms),
+    async advance(ms) {
+      const target = now + ms;
+      for (;;) {
+        const next = [...timers].filter(([, timer]) => timer.due <= target).sort((a, b) => a[1].due - b[1].due)[0];
+        if (!next) break;
+        now = next[1].due; timers.delete(next[0]); next[1].fn(); await flush();
+      }
+      now = target; await flush();
+    },
+  };
+  const same = (a, b) => a && b && a.length === b.length && a.every((value, index) => value === b[index]);
+  const react = {
+    createContext: () => ({}), createElement: () => ({}), useContext: () => undefined,
+    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial; return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; }]; },
+    useRef(value) { const i = cursor++; if (!(i in slots)) slots[i] = { current: value }; return slots[i]; },
+    useMemo(fn, deps) { const i = cursor++; if (!slots[i] || !same(slots[i].deps, deps)) slots[i] = { value: fn(), deps }; return slots[i].value; },
+    useCallback(fn, deps) { return this.useMemo(() => fn, deps); },
+    useEffect(fn, deps) { const i = cursor++; if (!slots[i] || !same(slots[i].deps, deps)) { slots[i]?.cleanup?.(); slots[i] = { deps }; effects.push(() => { slots[i].cleanup = fn(); }); } },
+  };
+  const changeToken = value => { token = value; revision++; listeners.forEach(fn => fn()); };
+  const auth = { getApiBaseUrl: () => 'https://api.example.invalid', getStoredToken: () => token, hydrateStoredToken: async () => token, getAuthRevision: () => revision,
+    subscribeAuthToken: fn => { listeners.add(fn); return () => listeners.delete(fn); }, clearAuthToken: async () => changeToken(undefined) };
+  const module = load('services/dreams.ts', { react, './travelTrips': auth }, 'module.exports.testState=useDreamsState;module.exports.testFetch=dreamsAuthenticatedFetch;', {
+    fetch: async (url, init) => { calls.push({ url, init }); return fetcher(url, init); }, setTimeout: setTimer, clearTimeout: id => timers.delete(id),
+  });
+  return { module, calls, clock, changeToken, fetcher: fn => fetcher = fn,
+    render() { cursor = 0; const state = module.testState(); const pending = effects; effects = []; pending.forEach(fn => fn()); return state; },
+    dispose() { slots.forEach(slot => slot?.cleanup?.()); },
+  };
+}
 const apiItem=(id,changes={})=>({id,dream_id:1,source_platform:'instagram',source_url:`https://www.instagram.com/reel/${id}`,category:'cafe',place_name:'Cafe One',city:'Lisbon',country:'Portugal',summary:'Notes',tags_json:[],needs_review:true,status:'needs_review',created_at:'2026-01-01',...changes});
 
 test('Dreams fetches all user items, including unassigned/review saves',async()=>{const env=serviceEnvironment();env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1),apiItem(2,{dream_id:999,country:null})]:[]));env.render();await flush();const state=env.render();assert.equal(state.items.length,2);assert.equal(state.needsReviewItems.length,2);assert.equal(env.calls.length,2);env.dispose();});
@@ -52,3 +88,74 @@ test('old-account responses cannot populate Dreams after sign out',async()=>{con
 test('failed edit retains item; confirmed edit persists to backend with location and review decision',async()=>{const env=serviceEnvironment();env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1)]:[]));env.render();await flush();let state=env.render();env.fetcher(async()=>response(503,{detail:'Offline'}));await assert.rejects(state.updateItem('1',{placeName:'Corrected place'}),/Offline/);assert.equal(env.render().items[0].placeName,'Cafe One');env.fetcher(async()=>response(200,apiItem(1,{place_name:'Corrected place',city:'Porto',status:'confirmed',needs_review:false})));await state.updateItem('1',{placeName:'Corrected place',city:'Porto',needsReview:false});state=env.render();assert.equal(state.items[0].city,'Porto');assert.equal(state.needsReviewItems.length,0);const request=env.calls.at(-1);assert.equal(request.init.method,'POST');assert.equal(JSON.parse(request.init.body).edits.place_name,'Corrected place');assert.equal(JSON.parse(request.init.body).decision,'confirm');env.dispose();});
 test('delete is server-first and a failure cannot remove the local save',async()=>{const env=serviceEnvironment();env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1),apiItem(2)]:[]));env.render();await flush();env.fetcher(async()=>response(500,{detail:'Try later'}));await assert.rejects(env.render().deleteItem('1'),/Try later/);assert.equal(env.render().items.length,2);env.fetcher(async()=>response(204,{}));await env.render().deleteItem('1');assert.deepEqual(env.render().items.map(item=>item.id),['2']);assert.equal(env.calls.at(-1).init.method,'DELETE');env.dispose();});
 test('capture rejects bad links and keeps failed post with original caption for retry',async()=>{const env=serviceEnvironment();env.render();await flush();env.fetcher(async()=>response(503,{detail:'Offline'}));const state=env.render();assert.equal(state.shareInstagramLink('not-a-url'),undefined);const pending=state.shareInstagramLink('https://www.instagram.com/reel/new','Original caption');assert(pending);await flush();const item=env.render().items[0];assert.equal(item.status,'failed');assert.equal(item.caption,'Original caption');assert.match(item.sourceUrl,/reel\/new/);env.dispose();});
+
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+test('slow Dreams polls apply completed results and concurrent refreshes share one request pair', async () => {
+  const env = serviceEnvironment();
+  env.fetcher(async url => response(200, url.endsWith('/dream-items') ? [apiItem(1, { status: 'processing' })] : []));
+  env.render(); await flush(); env.render();
+  const pending = deferred(); env.fetcher(async url => { await pending.promise; return response(200, url.endsWith('/dream-items') ? [apiItem(1, { status: 'confirmed', needs_review: false })] : []); });
+  await env.clock.advance(5000); assert.equal(env.calls.length, 4);
+  const first = env.render().refresh(), second = env.render().refresh();
+  assert.equal(first, second);
+  await env.clock.advance(12000); assert.equal(env.calls.length, 4, 'No overlapping poll despite multiple intervals passing');
+  pending.resolve(); await first; await flush();
+  assert.equal(env.render().items[0].status, 'confirmed');
+  assert.equal(env.clock.pending().filter(ms => ms === 5000).length, 0, 'No poll remains after processing stops');
+  env.dispose();
+});
+
+test('Dreams deadlines cover stalled headers and stalled bodies; timeout never deletes a retained item', async () => {
+  const env = serviceEnvironment();
+  env.fetcher(async url => response(200, url.endsWith('/dream-items') ? [apiItem(1)] : []));
+  env.render(); await flush();
+  const headers = deferred(); env.fetcher(() => headers.promise);
+  const deletion = env.render().deleteItem('1'); const rejected = assert.rejects(deletion, /may still finish.*Refresh saved places/);
+  await env.clock.advance(30000); await rejected;
+  assert.equal(env.render().items.length, 1); assert.equal(env.calls.at(-1).init.signal.aborted, true);
+  headers.resolve(response(204, {})); await flush(); assert.equal(env.render().items.length, 1, 'Late success cannot commit after timeout');
+  const body = deferred(); env.fetcher(async () => ({ status: 200, ok: true, text: () => body.promise }));
+  const saving = env.render().updateItem('1', { placeName: 'Updated' }); const bodyRejected = assert.rejects(saving, /timed out/);
+  await env.clock.advance(30000); await bodyRejected;
+  assert.equal(env.render().items[0].placeName, 'Cafe One');
+  body.resolve(JSON.stringify(apiItem(1, { place_name: 'Updated' }))); await flush();
+  assert.equal(env.render().items[0].placeName, 'Cafe One'); env.dispose();
+});
+
+test('an old Dreams refresh cannot overwrite a successful edit or deletion', async () => {
+  const env = serviceEnvironment();
+  env.fetcher(async url => response(200, url.endsWith('/dream-items') ? [apiItem(1), apiItem(2)] : []));
+  env.render(); await flush();
+  const old = deferred(); env.fetcher(async url => { await old.promise; return response(200, url.endsWith('/dream-items') ? [apiItem(1), apiItem(2)] : []); });
+  const refresh = env.render().refresh();
+  env.fetcher(async url => url.endsWith('/review') ? response(200, apiItem(1, { place_name: 'New name' })) : response(204, {}));
+  await env.render().updateItem('1', { placeName: 'New name' }); await env.render().deleteItem('2');
+  old.resolve(); await refresh;
+  assert.deepEqual(env.render().items.map(item => [item.id, item.placeName]), [['1', 'New name']]); env.dispose();
+});
+
+test('duplicate concurrent writes are blocked and account changes abort pending Dreams requests', async () => {
+  const env = serviceEnvironment();
+  env.fetcher(async url => response(200, url.endsWith('/dream-items') ? [apiItem(1)] : []));
+  env.render(); await flush();
+  const pending = deferred(); env.fetcher(() => pending.promise);
+  const save = env.render().updateItem('1', { placeName: 'New name' });
+  await assert.rejects(env.render().deleteItem('1'), /still saving/);
+  const rejected = assert.rejects(save, /account changed/);
+  env.changeToken('account-b'); await rejected;
+  assert.equal(env.calls.at(-1).init.signal.aborted, true);
+  assert.deepEqual(env.render().items, []);
+  pending.resolve(response(200, apiItem(1, { place_name: 'New name' }))); await flush();
+  assert.deepEqual(env.render().items, []); env.dispose();
+});
+
+test('a failed Dreams endpoint does not release its refresh while the sibling request is pending', async () => {
+  const env = serviceEnvironment(), sibling = deferred();
+  env.fetcher(async url => url.endsWith('/dream-items') ? sibling.promise : response(503, { detail: 'Synthetic unavailable endpoint' }));
+  const first = env.render().refresh(); await flush();
+  const second = env.render().refresh(); assert.equal(first, second); assert.equal(env.calls.length, 2);
+  await env.clock.advance(10000); assert.equal(env.calls.length, 2);
+  sibling.resolve(response(200, [])); await first;
+  assert.equal(env.render().status, 'error'); assert.match(env.render().error, /unavailable endpoint/);
+  env.dispose();
+});

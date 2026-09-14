@@ -6,11 +6,11 @@ const { test } = require('node:test');
 const serviceRoot = path.join(__dirname, '../src/services');
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const response = (status, body) => ({ status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body) });
-const flush = async () => { for (let n = 0; n < 20; n += 1) await Promise.resolve(); };
+const flush = async () => { for (let n = 0; n < 60; n += 1) await Promise.resolve(); };
 
-function environment({ stored, os = 'android', fetcher, secureRead } = {}) {
+function environment({ stored, plainStored = {}, os = 'android', fetcher, secureRead } = {}) {
   const secure = new Map(stored ? [['trotter.auth.v2', stored]] : []);
-  const plain = new Map([['trotterAuthToken', 'legacy-personal-token']]);
+  const plain = new Map([['trotterAuthToken', 'legacy-personal-token'], ...Object.entries(plainStored)]);
   const session = new Map();
   const calls = [];
   const storage = map => ({ getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), removeItem: key => map.delete(key) });
@@ -64,7 +64,7 @@ function environment({ stored, os = 'android', fetcher, secureRead } = {}) {
       if (request === 'expo-web-browser') return web;
       if (request === 'expo-crypto') return { randomUUID: () => 'test-attempt' };
       if (request === 'expo-secure-store') return secureStore;
-      if (request === '@react-native-async-storage/async-storage') return { removeItem: async key => { plain.delete(key); } };
+      if (request === '@react-native-async-storage/async-storage') return { getItem: async key => plain.get(key) ?? null, setItem: async (key, value) => { plain.set(key, value); }, removeItem: async key => { plain.delete(key); } };
       if (request === './googleAuth') return load('googleAuth');
       if (request.includes('stampIdentity')) return { stampIdentity: () => ({ shape: 'circle', color: '#111' }) };
       if (request.includes('passport-arrivals')) return { buildPassportArrivals: () => [] };
@@ -268,4 +268,81 @@ test('endpoint country metadata survives missing map coordinates', () => {
   assert.equal(segment.arrCountryCode, 'AE');
   assert.equal(segment.depPoint, undefined);
   assert.equal(segment.arrPoint, undefined);
+});
+
+const itinerary = (id, count) => ({ id, title: 'Synthetic trip', segments: Array.from({ length: count }, (_, n) => ({ id: id * 10 + n, dep_airport: 'LHR', arr_airport: 'SIN', dep_time: `2026-09-${String(n + 1).padStart(2, '0')}T10:00:00Z`, arr_time: `2026-09-${String(n + 1).padStart(2, '0')}T18:00:00Z` })) });
+const identityResponse = () => response(200, { user_id: 1, email: 'alex@example.invalid' });
+async function signedInArchive() {
+  const env = environment({ fetcher: async url => url.endsWith('/auth/me') ? identityResponse() : response(200, [itinerary(1, 1), itinerary(2, 1)]) });
+  env.render(); await flush(); await env.render().signIn(); await flush();
+  return env;
+}
+
+test('late trip detail cannot overwrite a newer refresh or resurrect a removed trip', async () => {
+  const env = await signedInArchive(), detail = deferred();
+  env.fetcher(async url => url.endsWith('/trips/1') ? detail.promise : url.endsWith('/auth/me') ? identityResponse() : response(200, [itinerary(1, 2), itinerary(2, 1)]));
+  const pending = env.render().loadTripDetail(1);
+  await env.render().refresh();
+  detail.resolve(response(200, itinerary(1, 1)));
+  assert.equal((await pending).segments.length, 2);
+  assert.equal(env.render().trips.find(t => t.backendId === 1).segments.length, 2);
+  const deleted = deferred();
+  env.fetcher(async url => url.endsWith('/trips/1') ? deleted.promise : url.endsWith('/auth/me') ? identityResponse() : response(200, [itinerary(2, 1)]));
+  const pendingDeleted = env.render().loadTripDetail(1); await env.render().refresh();
+  deleted.resolve(response(200, itinerary(1, 2)));
+  assert.equal(await pendingDeleted, undefined);
+  assert.deepEqual(env.render().trips.map(t => t.backendId), [2]); env.dispose();
+});
+
+test('older full refresh preserves a newer detail and concurrent trip reads stay independent', async () => {
+  const env = await signedInArchive(), full = deferred(), oldDetail = deferred();
+  env.fetcher(async url => url.endsWith('/auth/me') ? identityResponse() : url.endsWith('/trips') ? full.promise : response(200, itinerary(Number(url.split('/').at(-1)), 3)));
+  const refresh = env.render().refresh();
+  await env.render().loadTripDetail(1);
+  full.resolve(response(200, [itinerary(1, 1), itinerary(2, 1)])); await refresh;
+  assert.equal(env.render().trips.find(t => t.backendId === 1).segments.length, 3);
+  env.fetcher(async () => oldDetail.promise);
+  const old = env.render().loadTripDetail(1);
+  env.fetcher(async url => response(200, itinerary(Number(url.split('/').at(-1)), 4)));
+  await Promise.all([env.render().loadTripDetail(1), env.render().loadTripDetail(2)]);
+  oldDetail.resolve(response(200, itinerary(1, 2)));
+  assert.equal((await old).segments.length, 4);
+  assert(env.render().trips.every(t => t.segments.length === 4)); env.dispose();
+});
+
+test('failed secure logout blocks hydration and sign-in until retry, including a cold restart', async () => {
+  const env = await signedInArchive();
+  env.secureStore.deleteItemAsync = async () => { throw Error('Synthetic locked keystore'); };
+  await env.render().signOut();
+  const state = env.render();
+  assert.equal(state.signOutPending, true); assert.equal(state.authStatus, 'signed-out');
+  assert.deepEqual(state.trips, []); assert.equal(state.accountId, undefined);
+  assert.equal(env.plain.get('trotter.auth.clear-pending'), '1');
+  await assert.rejects(env.travel.hydrateStoredToken(), /Retry sign out/);
+  const oauthCount = env.calls.filter(c => c.kind === 'oauth').length;
+  await state.signIn(); assert.equal(env.calls.filter(c => c.kind === 'oauth').length, oauthCount);
+  const restart = environment({ stored: env.secure.get('trotter.auth.v2'), plainStored: Object.fromEntries(env.plain) });
+  restart.render(); await flush();
+  assert.equal(restart.render().signOutPending, true);
+  assert.equal(restart.calls.filter(c => c.kind === 'fetch').length, 0);
+  await restart.render().signOut(); await flush();
+  assert.equal(restart.render().signOutPending, false); assert.equal(restart.secure.size, 0);
+  assert.equal(restart.plain.has('trotter.auth.clear-pending'), false);
+  await restart.render().signIn(); await flush(); assert.equal(restart.render().authStatus, 'signed-in');
+  env.dispose(); restart.dispose();
+});
+
+test('Gmail import status is independent of archive refresh and clears on account logout', async () => {
+  const env = await signedInArchive(); assert.equal(env.render().gmailSyncStatus, 'unknown');
+  env.fetcher(async url => url.endsWith('/ingest/gmail/import') ? response(200, { job_id: 'synthetic' }) : response(200, { state: 'failed', error_message: 'No Google account linked' }));
+  await env.render().syncFromGmail();
+  assert.equal(env.render().gmailSyncStatus, 'error');
+  assert.equal(env.render().gmailSyncError, 'No Google account linked');
+  env.fetcher(async url => url.endsWith('/auth/me') ? identityResponse() : response(200, [itinerary(1, 1)]));
+  await env.render().refresh();
+  assert.equal(env.render().gmailSyncStatus, 'error'); assert.equal(env.render().gmailSyncError, 'No Google account linked');
+  env.fetcher(async url => url.endsWith('/auth/me') ? identityResponse() : url.endsWith('/ingest/gmail/import') ? response(200, { job_id: 'synthetic' }) : url.includes('/ingest/jobs/') ? response(200, { state: 'done' }) : response(200, [itinerary(1, 1)]));
+  await env.render().syncFromGmail();
+  assert.equal(env.render().gmailSyncStatus, 'synced'); assert.equal(env.render().gmailSyncError, undefined); assert(env.render().lastGmailSyncedAt);
+  await env.render().signOut(); assert.equal(env.render().gmailSyncStatus, 'unknown'); assert.equal(env.render().lastGmailSyncedAt, undefined); env.dispose();
 });
