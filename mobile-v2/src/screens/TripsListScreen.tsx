@@ -1,22 +1,25 @@
 import React from "react";
 import {
   FlatList,
-  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomNav } from "../components/trotter/TrotterKit";
 import {
+  WWButton,
   WWEmpty,
   WWHeader,
   WWIcon,
 } from "../components/world-window/WorldWindowUI";
-import { WalletCover } from "../components/world-window/trips/WalletCover";
-import { matchesTrip, tripInYear } from "../components/world-window/trips/tripPresentation";
+import { PressFeedback } from "../components/world-window/motion";
+import { WalletCover, type WalletOrigin } from "../components/world-window/trips/WalletCover";
+import { matchesTrip } from "../components/world-window/trips/tripPresentation";
+import { normalizeTravelYear, scopeTripsToYear } from "../utils/travelScope";
 import type { BottomNavTab, TripSummary } from "../data/trotterMock";
 import { useTravelTrips } from "../services/travelTrips";
 import { colors, fonts, layout } from "../theme/trotterTheme";
@@ -25,25 +28,41 @@ export function TripsListScreen({
   active,
   onChange,
   onOpenTrip,
+  initialYear,
+  scopeEpoch = 0,
+  onClearYear,
 }: {
   active: BottomNavTab;
   onChange: (tab: BottomNavTab) => void;
-  onOpenTrip?: (trip: TripSummary, flightId?: string) => void;
+  onOpenTrip?: (trip: TripSummary, flightId?: string, origin?: WalletOrigin) => void;
+  initialYear?: string;
+  scopeEpoch?: number;
+  onClearYear?: () => void;
 }) {
   const insets = useSafeAreaInsets(),
     { trips, status, error, refresh } = useTravelTrips();
-  const [query, setQuery] = React.useState(""),
-    [yearOnly, setYearOnly] = React.useState(false);
-  const year = new Date().getFullYear();
-  const visible = React.useMemo(
-    () => trips.filter((trip) => matchesTrip(trip, query, yearOnly, year)),
-    [trips, query, yearOnly, year],
-  );
+  const { width, fontScale } = useWindowDimensions();
+  const stackCount = width <= 360 && fontScale >= 1.35;
+  const [query, setQuery] = React.useState("");
+  const [selectedYear, setSelectedYear] = React.useState(() => normalizeTravelYear(initialYear));
+  const list = React.useRef<FlatList<TripSummary>>(null);
+  React.useEffect(() => {
+    setSelectedYear(normalizeTravelYear(initialYear));
+    setQuery("");
+    list.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [initialYear, scopeEpoch]);
+  const originals = React.useMemo(() => new Map(trips.map(trip => [trip.id, trip])), [trips]);
+  const scoped = React.useMemo(() => scopeTripsToYear(trips, selectedYear), [trips, selectedYear]);
+  const visible = React.useMemo(() => scoped.filter(trip => matchesTrip(trip, query, false, 0)), [scoped, query]);
+  const year = selectedYear ?? String(new Date().getFullYear());
+  const yearTrips = React.useMemo(() => scopeTripsToYear(trips, year), [trips, year]);
+  const clearYear = () => { setSelectedYear(undefined); onClearYear?.(); };
   const loading =
     status === "loading" || status === "refreshing" || status === "syncing";
   return (
     <View style={[s.screen, { paddingTop: insets.top }]}>
       <FlatList
+        ref={list}
         data={visible}
         keyExtractor={(trip) => trip.id}
         keyboardShouldPersistTaps="handled"
@@ -65,8 +84,9 @@ export function TripsListScreen({
           <>
             <WWHeader
               title="Trips"
-              action={<Text style={s.headerCount}>{query || yearOnly ? `${visible.length} / ${trips.length}` : trips.length}</Text>}
+              action={!stackCount ? <Text style={s.headerCount}>{query || selectedYear ? `${visible.length} / ${trips.length}` : trips.length}</Text> : undefined}
             />
+            {stackCount ? <Text style={s.stackedCount}>{visible.length}{query || selectedYear ? ` of ${trips.length}` : ""} trips</Text> : null}
             <View style={s.searchRow}>
               <WWIcon name="search" size={19} color={colors.mutedInk} />
               <TextInput
@@ -78,63 +98,63 @@ export function TripsListScreen({
                 style={s.search}
               />
               {query.length > 0 && (
-                <Pressable
+                <PressFeedback
                   accessibilityLabel="Clear search"
                   onPress={() => setQuery("")}
                   style={s.icon}
                 >
                   <WWIcon name="close" size={17} />
-                </Pressable>
+                </PressFeedback>
               )}
             </View>
             <View style={s.toolbar}>
               <View style={s.tabs}>
                 {[
-                  { label: "All trips", value: false, count: trips.length },
+                  { label: "All years", value: undefined, count: trips.length },
                   {
-                    label: "This year",
-                    value: true,
-                    count: trips.filter((t) =>
-                      tripInYear(t, year),
-                    ).length,
+                    label: year,
+                    value: year,
+                    count: yearTrips.length,
                   },
                 ].map(({ label, value, count }) => (
-                  <Pressable
+                  <PressFeedback
                     key={label}
                     accessibilityRole="tab"
-                    accessibilityState={{ selected: yearOnly === value }}
-                    onPress={() => setYearOnly(value)}
-                    style={[s.tab, yearOnly === value && s.activeTab]}
+                    accessibilityState={{ selected: selectedYear === value }}
+                    onPress={() => { if (value) setSelectedYear(value); else clearYear(); }}
+                    style={[s.tab, selectedYear === value && s.activeTab]}
                   >
                     <Text
-                      style={[s.tabText, yearOnly === value && s.activeText]}
+                      style={[s.tabText, selectedYear === value && s.activeText]}
                     >
                       {label} <Text style={s.tabCount}>{count}</Text>
                     </Text>
-                  </Pressable>
+                  </PressFeedback>
                 ))}
               </View>
             </View>
             {error && (
-              <Pressable onPress={() => void refresh()} style={s.error}>
+              <PressFeedback onPress={() => void refresh()} style={s.error}>
                 <Text style={s.errorText}>{error} · Tap to retry</Text>
-              </Pressable>
+              </PressFeedback>
             )}
           </>
         }
         renderItem={({ item, index }) => (
           <View>
             {(index === 0 ||
-              visible[index - 1].startDate.slice(0, 4) !==
-                item.startDate.slice(0, 4)) && (
+              (!selectedYear && visible[index - 1].startDate.slice(0, 4) !==
+                item.startDate.slice(0, 4))) && (
               <View style={s.yearDivider}>
-                <Text style={s.year}>{item.startDate.slice(0, 4)}</Text>
+                <Text style={s.year}>{selectedYear ?? item.startDate.slice(0, 4)}</Text>
                 <View style={s.yearRule} />
               </View>
             )}
             <WalletCover
               trip={item}
-              onPress={(flightId) => onOpenTrip?.(item, flightId)}
+              scopeYear={selectedYear}
+              totalFlightCount={originals.get(item.id)?.flightCount}
+              onPress={(origin) => { const original = originals.get(item.id); if (original) onOpenTrip?.(original, undefined, origin); }}
             />
           </View>
         )}
@@ -143,17 +163,18 @@ export function TripsListScreen({
             title={
               loading
                 ? "Loading your trips…"
-                : query || yearOnly
+                : query || selectedYear
                   ? "No matching trips"
                   : "Your trips will live here"
             }
             body={
               loading
                 ? undefined
-                : query || yearOnly
+                : query || selectedYear
                   ? "Try another search or view all trips."
-                  : "Connect your flight archive from Profile to bring your journeys together."
+                  : "Import your flight confirmations from Profile."
             }
+            action={!loading ? <WWButton label={error ? "Retry" : query || selectedYear ? "Show all trips" : "Open Profile"} onPress={() => { if (error) void refresh(); else if (query || selectedYear) { setQuery(""); clearYear(); } else onChange("profile"); }} secondary /> : undefined}
           />
         }
       />
@@ -220,6 +241,7 @@ const s = StyleSheet.create({
     color: "#cd744f",
     includeFontPadding: false,
   },
+  stackedCount: { marginHorizontal: 24, marginTop: -10, marginBottom: 12, fontFamily: fonts.sansRegular, fontSize: 13, lineHeight: 19, color: colors.mutedInk },
   yearDivider: {
     marginHorizontal: 20,
     marginTop: 16,

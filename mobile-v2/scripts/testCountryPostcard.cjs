@@ -7,7 +7,7 @@ const file = path.join(__dirname, '../src/components/world-window/dreams/Country
 const board = { key: 'thailand', title: 'Thailand', cities: ['Bangkok', 'Krabi'], items: Array.from({ length: 28 }, (_, i) => ({ id: String(i) })) };
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 function harness() {
-  let slots = [], cursor = 0, effects = [], listener, settlePreference, active, opens = 0;
+  let slots = [], cursor = 0, effects = [], listener, settlePreference, active, opens = 0, returns = 0;
   const transitions = [], values = [];
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => v === b[i]);
   const react = {
@@ -46,7 +46,8 @@ function harness() {
   return {
     transitions,
     get opens() { return opens; },
-    render(nextBoard = board) { cursor = 0; const tree = module.exports.CountryPostcard({ board: nextBoard, onPress: () => opens++ }); const pending = effects; effects = []; pending.forEach(fn => fn()); return tree; },
+    get returns() { return returns; },
+    render(nextBoard = board, props = {}) { cursor = 0; const tree = module.exports.CountryPostcard({ board: nextBoard, onPress: () => opens++, onReturned: () => returns++, ...props }); const pending = effects; effects = []; pending.forEach(fn => fn()); return tree; },
     preference(enabled) { settlePreference(enabled); },
     changePreference(enabled) { listener?.(enabled); },
     complete(finished = true) { assert(active, 'An animation must be running'); const callback = active.callback; active = undefined; callback({ finished }); },
@@ -88,4 +89,27 @@ test('unmount cancels the transition and a late accessibility response cannot na
 test('screen reader names retain the country, count, and direct country-opening purpose', () => {
   const h = harness(); assert.equal(h.render().props.accessibilityLabel, 'Thailand, view 28 saved places');
   assert.equal(h.render({ ...board, items: board.items.slice(0, 1) }).props.accessibilityLabel, 'Thailand, view 1 saved place'); h.dispose();
+});
+
+test('Back reverses into the same postcard once, then leaves an actionable front', async () => {
+  const h=harness(); let card=h.render(board,{returning:true}); h.preference(false); await flush();
+  card.props.onPress(); assert.equal(h.opens,0); assert.equal(h.transitions.length,1); assert.equal(h.transitions[0].toValue,0);
+  h.complete(); assert.equal(h.returns,1); card=h.render(); assert.equal(card.props.disabled,false);
+  card.props.onPress(); h.complete(); assert.equal(h.opens,1); h.dispose();
+});
+
+test('reduced motion Back restores the postcard immediately without another entry action', async () => {
+  const h=harness(); h.render(board,{returning:true}); h.preference(true); await flush();
+  assert.equal(h.transitions.length,0); assert.equal(h.returns,1); assert.equal(h.opens,0); h.dispose();
+});
+
+test('switching away during an opening turn cancels navigation and restores the front for return', async () => {
+  const h=harness(); let card=h.render(); h.preference(false); await flush(); card.props.onPress();
+  h.render(board,{visible:false}); assert.equal(h.opens,0);
+  card=h.render(board,{visible:true}); assert.equal(card.props.disabled,false); card.props.onPress(); h.complete(); assert.equal(h.opens,1); h.dispose();
+});
+
+test('reduced motion enabled mid-return ends at the front with one return callback', async () => {
+  const h=harness();h.render(board,{returning:true});h.preference(false);await flush();h.changePreference(true);
+  assert.equal(h.returns,1);assert.equal(h.render().props.disabled,false);assert.equal(h.opens,0);h.dispose();
 });

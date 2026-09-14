@@ -2,6 +2,7 @@ import React from 'react';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { readGmailRecovery, writeGmailRecovery, type GmailRecovery } from './gmailRecovery';
 import type { CountryIconKey } from '../components/trotter/stamps/PngStamp';
 import { stampIdentity } from '../components/trotter/stamps/stampIdentity';
 import type { TravelerProfile, TripSummary } from '../data/trotterMock';
@@ -152,6 +153,7 @@ type TravelTripsContextValue = {
   accountEmail?: string;
   lastSyncedAt?: string;
   signIn: () => Promise<void>;
+  retryAuth: () => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
   loadTripDetail: (backendId: number) => Promise<TripSummary | undefined>;
@@ -163,6 +165,7 @@ type ImportJobStatus = {
   parsed_count?: number;
   segment_count?: number;
   error_message?: string | null;
+  updated_at?: string | null;
   detail?: unknown;
 };
 
@@ -198,6 +201,8 @@ function useTravelTripsState(): TravelTripsContextValue {
   const tripReads = React.useRef(new Map<number, number>());
   const authAttempt = React.useRef(0);
   const syncRunning = React.useRef<{ revision: number } | undefined>(undefined);
+  const recovery = React.useRef<GmailRecovery | undefined>(undefined);
+  const recoveryRead = React.useRef<number | undefined>(undefined);
   const current = (revision: number) => mounted.current && revision === getAuthRevision();
   const resetAccount = React.useCallback(() => {
     accountRef.current = undefined;
@@ -210,6 +215,8 @@ function useTravelTripsState(): TravelTripsContextValue {
     setGmailSyncStatus('unknown');
     setGmailSyncError(undefined);
     setLastGmailSyncedAt(undefined);
+    recovery.current = undefined;
+    recoveryRead.current = undefined;
   }, []);
 
   const loadTrips = React.useCallback(async (mode: 'loading' | 'refreshing' | 'silent' = 'refreshing') => {
@@ -261,7 +268,7 @@ function useTravelTripsState(): TravelTripsContextValue {
       setTrips(next);
       setLastSyncedAt(new Date().toISOString());
       setError(undefined);
-      if (mode !== 'silent') setStatus('idle');
+      if (mode !== 'silent') setStatus(syncRunning.current?.revision === revision ? 'syncing' : 'idle');
     } catch (caught) {
       if (!relevant()) return;
       setError(friendlyError(caught));
@@ -364,30 +371,34 @@ function useTravelTripsState(): TravelTripsContextValue {
     return mapped;
   }, []);
 
-  const syncFromGmail = React.useCallback(async () => {
-    const token = getStoredToken();
-    const revision = getAuthRevision();
-    if (syncRunning.current?.revision === revision || !token || !accountRef.current) return;
+  const observeGmailJob = React.useCallback(async (jobId: string, token: string, revision: number, saved: GmailRecovery) => {
+    if (!current(revision) || syncRunning.current?.revision === revision) return;
     const running = { revision };
     syncRunning.current = running;
+    recovery.current = saved;
     setStatus('syncing');
     setGmailSyncStatus('syncing');
     setGmailSyncError(undefined);
     setError(undefined);
+    const persist = async (next: GmailRecovery) => {
+      if (!current(revision)) return;
+      recovery.current = next;
+      // A storage outage must not cancel an already-running server job.
+      await writeGmailRecovery(next).catch(() => undefined);
+    };
     try {
-      const response = await authFetch('/ingest/gmail/import', { method: 'POST' }, token);
-      if (!current(revision)) return;
-      if (response.status === 401) throw new SessionExpired();
-      const data = await readJson(response) as { job_id?: string; detail?: unknown };
-      if (!current(revision)) return;
-      if (!response.ok || !data.job_id) throw new Error(readError(data, 'Gmail sync could not start. Please retry.'));
-      await waitForImport(data.job_id, token, () => current(revision), async () => {
+      await persist(saved);
+      const completedAt = await waitForImport(jobId, token, () => current(revision), async () => {
         await loadTrips('silent');
         if (current(revision)) setStatus('syncing');
       });
       if (current(revision)) {
+        const lastSuccessAt = completedAt ?? new Date().toISOString();
+        await persist({ ...saved, activeJobId: undefined, activeStartedAt: undefined, lastSuccessAt, outcome: 'synced' });
+        if (!current(revision)) return;
         setGmailSyncStatus('synced');
-        setLastGmailSyncedAt(new Date().toISOString());
+        setLastGmailSyncedAt(lastSuccessAt);
+        syncRunning.current = undefined;
         await loadTrips('refreshing');
       }
     } catch (caught) {
@@ -396,6 +407,10 @@ function useTravelTripsState(): TravelTripsContextValue {
         await clearAuthToken();
         if (mounted.current && !getStoredToken()) setError('Your session expired. Sign in with Google again.');
       } else {
+        const terminal = caught instanceof ImportObservationError && caught.terminal;
+        await persist({ ...saved, activeJobId: terminal ? undefined : jobId,
+          activeStartedAt: terminal ? undefined : saved.activeStartedAt, outcome: 'error' });
+        if (!current(revision)) return;
         setGmailSyncStatus('error');
         setGmailSyncError(friendlyError(caught));
         setError(friendlyError(caught));
@@ -404,10 +419,72 @@ function useTravelTripsState(): TravelTripsContextValue {
     } finally { if (syncRunning.current === running) syncRunning.current = undefined; }
   }, [loadTrips]);
 
+  const syncFromGmail = React.useCallback(async () => {
+    const token = getStoredToken();
+    const revision = getAuthRevision();
+    const owner = accountRef.current;
+    if (syncRunning.current?.revision === revision || !token || !owner) return;
+    // An interrupted observation resumes its exact existing job; it does not
+    // create another import merely because the app restarted or lost network.
+    const saved = recovery.current ?? await readGmailRecovery(getApiBaseUrl(), owner.user_id);
+    if (!current(revision) || accountRef.current?.user_id !== owner.user_id || syncRunning.current?.revision === revision) return;
+    if (saved?.activeJobId) { await observeGmailJob(saved.activeJobId, token, revision, saved); return; }
+    const starting = { revision };
+    syncRunning.current = starting;
+    setStatus('syncing'); setGmailSyncStatus('syncing'); setGmailSyncError(undefined); setError(undefined);
+    try {
+      const response = await authFetch('/ingest/gmail/import', { method: 'POST' }, token);
+      if (!current(revision)) return;
+      if (response.status === 401) throw new SessionExpired();
+      const data = await readJson(response) as { job_id?: string; detail?: unknown };
+      if (!current(revision)) return;
+      if (!response.ok || typeof data.job_id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(data.job_id)) throw new Error(readError(data, 'Gmail sync could not start. Please retry.'));
+      if (syncRunning.current === starting) syncRunning.current = undefined;
+      await observeGmailJob(data.job_id, token, revision, { version: 1, apiBaseUrl: getApiBaseUrl(), ownerId: owner.user_id,
+        lastSuccessAt: saved?.lastSuccessAt, activeJobId: data.job_id, activeStartedAt: new Date().toISOString() });
+    } catch (caught) {
+      if (!current(revision)) return;
+      if (caught instanceof SessionExpired) {
+        await clearAuthToken();
+        if (mounted.current && !getStoredToken()) setError('Your session expired. Sign in with Google again.');
+      } else {
+        const failed: GmailRecovery = { version: 1, apiBaseUrl: getApiBaseUrl(), ownerId: owner.user_id, lastSuccessAt: saved?.lastSuccessAt, outcome: 'error' };
+        recovery.current = failed;
+        await writeGmailRecovery(failed).catch(() => undefined);
+        if (!current(revision)) return;
+        setGmailSyncStatus('error'); setGmailSyncError(friendlyError(caught)); setError(friendlyError(caught)); setStatus('error');
+      }
+    } finally { if (syncRunning.current === starting) syncRunning.current = undefined; }
+  }, [observeGmailJob]);
+
+  React.useEffect(() => {
+    const ownerId = account?.user_id, token = getStoredToken(), revision = getAuthRevision();
+    if (!ownerId || !token || recoveryRead.current === revision) return;
+    recoveryRead.current = revision;
+    let live = true;
+    void readGmailRecovery(getApiBaseUrl(), ownerId).then(saved => {
+      if (!live || !current(revision) || accountRef.current?.user_id !== ownerId || syncRunning.current?.revision === revision || recovery.current) return;
+      if (!saved) return;
+      recovery.current = saved;
+      setLastGmailSyncedAt(saved.lastSuccessAt);
+      if (saved.activeJobId) void observeGmailJob(saved.activeJobId, token, revision, saved);
+      else {
+        setGmailSyncStatus(saved.outcome === 'error' ? 'error' : saved.lastSuccessAt ? 'synced' : 'unknown');
+        if (saved.outcome === 'error') setGmailSyncError('Your last Gmail scan needs attention. Check mail to try again.');
+      }
+    });
+    return () => { live = false; };
+  }, [account?.user_id, observeGmailJob]);
+
+  const retryAuth = React.useCallback(async () => {
+    if (getStoredToken()) await loadTrips('loading');
+    else await signIn();
+  }, [loadTrips, signIn]);
+
   return { trips, profile: buildProfile(trips, account), source: 'api', status, authStatus,
     signOutPending, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt,
     error, accountId: account?.user_id, accountEmail: account?.email, lastSyncedAt,
-    signIn, signOut, refresh: () => loadTrips('refreshing'), loadTripDetail, syncFromGmail };
+    signIn, retryAuth, signOut, refresh: () => loadTrips('refreshing'), loadTripDetail, syncFromGmail };
 }
 
 export function getApiBaseUrl() {
@@ -533,6 +610,7 @@ export async function hydrateStoredToken() {
 }
 
 class SessionExpired extends Error {}
+class ImportObservationError extends Error { constructor(message: string, readonly terminal = false) { super(message); } }
 async function authFetch(path: string, init: RequestInit | undefined, token: string) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
@@ -550,17 +628,21 @@ async function waitForImport(jobId: string, token: string, isCurrent: () => bool
     if (response.status === 401) throw new SessionExpired();
     const data = await readJson(response) as ImportJobStatus;
     if (!isCurrent()) return;
-    if (!response.ok) throw new Error(readError(data, 'Sync progress could not be loaded. Your import continues on the server.'));
+    if (!response.ok) throw new ImportObservationError(readError(data, response.status === 404 ? 'This scan is no longer available. Check mail to start a new scan.' : 'Sync progress could not be loaded. Your import continues on the server.'), response.status === 404);
     if ((data.parsed_count ?? 0) > parsed || (data.segment_count ?? 0) > segments) {
       parsed = data.parsed_count ?? 0;
       segments = data.segment_count ?? 0;
       if (parsed > 0 || segments > 0) await onProgress();
     }
-    if (['done', 'completed', 'success'].includes(data.state ?? '')) return;
-    if (['failed', 'error'].includes(data.state ?? '')) throw new Error(data.error_message || 'Gmail sync failed. Please retry.');
+    if (['done', 'completed', 'success'].includes(data.state ?? '')) {
+      // Older servers serialize their UTC database timestamp without an offset.
+      const updatedAt = data.updated_at && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(data.updated_at) ? `${data.updated_at}Z` : data.updated_at;
+      return updatedAt && Number.isFinite(Date.parse(updatedAt)) && Date.parse(updatedAt) <= Date.now() + 60000 ? updatedAt : undefined;
+    }
+    if (['failed', 'error'].includes(data.state ?? '')) throw new ImportObservationError(data.error_message || 'Gmail sync failed. Please retry.', true);
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
-  if (isCurrent()) throw new Error('Your import is still running on the server. Refresh your trips in a moment.');
+  if (isCurrent()) throw new Error('Your import is still running on the server. Check mail to resume its progress.');
 }
 async function readJson(response: Response) {
   const text = await response.text();

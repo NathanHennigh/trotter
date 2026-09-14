@@ -4,7 +4,6 @@ import {
   Linking,
   Modal,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,6 +24,9 @@ import { DreamPhoto } from "./DreamPhoto";
 import { isFindingLocation, locationExplanation } from "./locationPresentation";
 import { useLiveDreamLocation } from "./useLiveDreamLocation";
 import { countryRegion } from "./countryRegion";
+import { draftFingerprint, draftFromItem } from "./dreamDraft";
+import { PressFeedback as Pressable, useReducedMotion } from "../motion";
+import { selectionHaptic } from "../../../utils/experiencePreferences";
 
 const categories: DreamItemCategory[] = [
   "restaurant",
@@ -49,6 +51,9 @@ export function DreamEditor({
   onRetry,
   onLocate,
   onConfirmLocation,
+  initialMode = "view",
+  visible = true,
+  onCloseRequestChange,
 }: {
   item: DreamItem;
   points: MapPoint[];
@@ -58,6 +63,9 @@ export function DreamEditor({
   onRetry: () => void;
   onLocate?: (id: string) => Promise<void>;
   onConfirmLocation?: (id: string, candidateId: string) => Promise<void>;
+  initialMode?: "view" | "edit";
+  visible?: boolean;
+  onCloseRequestChange?: (handler: (() => void) | null) => void;
 }) {
   const insets = useSafeAreaInsets();
   const { width, fontScale } = useWindowDimensions();
@@ -73,7 +81,10 @@ export function DreamEditor({
     closed.current = true;
     onClose();
   };
-  const [editing, setEditing] = React.useState(false),
+  const reducedMotion = useReducedMotion();
+  const [editing, setEditing] = React.useState(initialMode === "edit"),
+    [discarding, setDiscarding] = React.useState(false),
+    [success, setSuccess] = React.useState<string>(),
     [confirmDelete, setConfirmDelete] = React.useState(false),
     [busy, setBusy] = React.useState(false),
     [error, setError] = React.useState<string>(),
@@ -87,8 +98,22 @@ export function DreamEditor({
     [maps, setMaps] = React.useState(item.googleMapsUrl || ""),
     [category, setCategory] = React.useState(item.category);
   const mapsBaseline = React.useRef(item.googleMapsUrl || "");
+  const draftBaseline = React.useRef(draftFingerprint(draftFromItem(item)));
+  const currentDraft = draftFingerprint({ name, city, country, region, summary, tags, maps, category });
+  const requestClose = () => {
+    if (discarding) { setDiscarding(false); return; }
+    if (confirmDelete) { setConfirmDelete(false); return; }
+    if (editing && currentDraft !== draftBaseline.current) { setDiscarding(true); return; }
+    close();
+  };
+  const closeRequest = React.useRef(requestClose);
+  closeRequest.current = requestClose;
+  React.useEffect(() => {
+    onCloseRequestChange?.(visible ? () => closeRequest.current() : null);
+    return () => onCloseRequestChange?.(null);
+  }, [visible, onCloseRequestChange]);
   const overview = React.useMemo(() => countryRegion(country), [country]);
-  const liveLocation = useLiveDreamLocation(item, !editing);
+  const liveLocation = useLiveDreamLocation(item, visible && !editing);
   const locationItem = liveLocation.details ? { ...item, ...liveLocation.details } : item;
   React.useEffect(() => {
     if (!editing && !placing) {
@@ -114,13 +139,15 @@ export function DreamEditor({
     ],
     [points, point?.lat, point?.lon, item.id],
   );
-  const run = async (action: () => Promise<void>, closeOnSuccess = true) => {
+  const run = async (action: () => Promise<void>, closeOnSuccess = true, complete?: () => void) => {
     if (running.current || closed.current) return;
     running.current = true;
     setBusy(true);
     setError(undefined);
+    setSuccess(undefined);
     try {
       await action();
+      if (mounted.current && !closed.current) complete?.();
       if (closeOnSuccess && mounted.current && !closed.current) close();
     } catch (caught) {
       if (!mounted.current || closed.current) return;
@@ -145,12 +172,16 @@ export function DreamEditor({
   };
   const saved = /^\d+$/.test(item.id),
     processing = item.status === "processing" || item.status === "created";
+  const savedFeedback = (message: string) => {
+    setSuccess(message);
+    void selectionHaptic("confirmation");
+  };
   return (
     <Modal
-      visible
-      animationType="slide"
+      visible={visible}
+      animationType={reducedMotion ? "none" : "slide"}
       presentationStyle="pageSheet"
-      onRequestClose={close}
+      onRequestClose={requestClose}
     >
       <KeyboardAvoidingView
         style={[s.screen, { paddingTop: insets.top }]}
@@ -162,14 +193,21 @@ export function DreamEditor({
             <Pressable
               accessibilityLabel="Close place"
               accessibilityRole="button"
-              onPress={close}
+              onPress={requestClose}
               style={s.icon}
             >
               <WWIcon name="close" />
             </Pressable>
           }
         />
-        <ScrollView
+        {discarding ? <View style={s.discardPanel}>
+          <Text accessibilityRole="header" style={s.candidateName}>Discard changes?</Text>
+          <Text style={s.locationHint}>Your saved place will stay as it was.</Text>
+          <View style={s.actions}>
+            <WWButton label="Keep editing" onPress={() => setDiscarding(false)} />
+            <WWButton label="Discard changes" secondary onPress={close} />
+          </View>
+        </View> : <ScrollView
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
             paddingHorizontal: 24,
@@ -177,6 +215,7 @@ export function DreamEditor({
           }}
         >
           {busy ? <Text accessibilityLiveRegion="polite" style={s.review}>This request can finish after you close this view.</Text> : null}
+          {success && <Text accessibilityLiveRegion="polite" style={s.success}>{success}</Text>}
           {!editing ? (
             <>
               <View style={s.photo}>
@@ -197,7 +236,7 @@ export function DreamEditor({
               )}
               {item.needsReview && (
                 <Text style={s.review}>
-                  Check the place and location before confirming this save.
+                  Review the place details before saving them.
                 </Text>
               )}
               {processing && (
@@ -211,13 +250,13 @@ export function DreamEditor({
                     <WWIcon name="pin" size={17} />
                     <Text style={s.locationLabel}>Location</Text>
                   </View>
-                  {liveLocation.loading && <Text accessibilityLiveRegion="polite" style={s.locationHint}>Loading location details…</Text>}
+                  {liveLocation.loading && <Text accessibilityLiveRegion="polite" style={s.locationHint}>{shownPoint ? "Loading address…" : "Loading location details…"}</Text>}
                   {liveLocation.error && <View>
                     <Text accessibilityRole="alert" style={s.locationHint}>{liveLocation.error}</Text>
                     <View style={s.actions}><WWButton label="Retry details" secondary onPress={liveLocation.retry} /></View>
                   </View>}
                   {locationItem.locationAddress && <Text selectable style={s.locationAddress}>{locationItem.locationAddress}</Text>}
-                  {shownPoint ? <DreamPlacesMap points={[shownPoint]} fitKey={`location-${item.id}`} height={170} /> : (
+                  {shownPoint ? <DreamPlacesMap points={[shownPoint]} fitKey={`location-${item.id}`} height={248} /> : !liveLocation.loading && !liveLocation.error ? (
                     <>
                       <Text accessibilityLiveRegion="polite" style={s.locationHint}>{locationExplanation(locationItem)}</Text>
                       {(locationItem.locationCandidates ?? []).map(candidate => (
@@ -225,8 +264,8 @@ export function DreamEditor({
                           <Text style={s.candidateName}>{candidate.name}</Text>
                           <Text selectable style={s.locationHint}>{candidate.address}</Text>
                           <View style={[s.actions, fontScale > 1.25 && s.actionsStack]}>
-                            {onConfirmLocation && <WWButton label="Use this location" disabled={busy}
-                              onPress={() => void run(() => onConfirmLocation(item.id, candidate.id))} />}
+                            {onConfirmLocation && <WWButton label="Confirm pin" disabled={busy}
+                              onPress={() => void run(() => onConfirmLocation(item.id, candidate.id), false, () => savedFeedback("Pin confirmed."))} />}
                             {safeWebUrl(candidate.googleMapsUrl) && <WWButton label="View map ↗" secondary
                               onPress={() => void open(candidate.googleMapsUrl)} />}
                           </View>
@@ -238,7 +277,7 @@ export function DreamEditor({
                           label={item.locationStatus === "failed" || item.locationStatus === "not_found" || item.locationStatus === "blocked" ? "Retry location" : "Find location"}
                           secondary disabled={busy} onPress={() => void run(() => onLocate(item.id), false)} /></View>}
                     </>
-                  )}
+                  ) : null}
                   {locationItem.locationProvider === "google_places" && Boolean(locationItem.locationAddress || liveLocation.details?.locationAttributions.length) &&
                     <GoogleAttribution values={liveLocation.details?.locationAttributions ?? []} onOpen={open} />}
                   {item.locationProvider === "geoapify" && !point && (item.locationCandidates?.length ?? 0) > 0 &&
@@ -278,17 +317,19 @@ export function DreamEditor({
                         setCountry(item.country || ""); setRegion(item.regionOrNeighborhood || "");
                         setSummary(item.summary); setTags(item.tags.join(", ")); setCategory(item.category);
                         mapsBaseline.current = item.googleMapsUrl || "";
+                        draftBaseline.current = draftFingerprint(draftFromItem(item));
                         setMaps(mapsBaseline.current);
+                        setSuccess(undefined);
                         setEditing(true);
                       }}
                     />
                   )}
                   {item.needsReview && saved && (
                     <WWButton
-                      label={busy ? "Saving…" : "Confirm place"}
+                      label={busy ? "Saving…" : "Save place details"}
                       disabled={busy}
                       onPress={() =>
-                        void run(() => onSave(item.id, { needsReview: false }))
+                        void run(() => onSave(item.id, { needsReview: false }), false, () => savedFeedback("Place details saved."))
                       }
                     />
                   )}
@@ -307,7 +348,7 @@ export function DreamEditor({
           ) : (
             <>
               <Field disabled={busy} label="Place name" value={name} onChange={setName} />
-              <View style={s.fields}>
+              <View style={[s.fields, fontScale > 1.25 && s.actionsStack]}>
                 <View style={s.fieldColumn}>
                   <Field disabled={busy} label="City" value={city} onChange={setCity} />
                 </View>
@@ -423,7 +464,11 @@ export function DreamEditor({
                         category,
                         ...(maps.trim() !== mapsBaseline.current.trim() ? { googleMapsUrl: maps.trim() || undefined } : {}),
                         needsReview: false,
-                      }),
+                      }), false, () => {
+                        draftBaseline.current = currentDraft;
+                        setEditing(false); setPlacing(false);
+                        savedFeedback("Changes saved.");
+                      },
                     );
                   }}
                 />
@@ -463,7 +508,7 @@ export function DreamEditor({
               </View>
             </View>
           ) : null}
-        </ScrollView>
+        </ScrollView>}
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -510,6 +555,8 @@ function Field({
   );
 }
 const s = StyleSheet.create({
+  discardPanel: { padding: 24, gap: 12 },
+  success: { paddingVertical: 12, marginBottom: 12, fontFamily: fonts.sansSemi, fontSize: 13, lineHeight: 20, color: colors.blue },
   googleAttribution: { paddingTop: 10, paddingBottom: 5, gap: 4, alignItems: "flex-start" },
   googleName: { color: "#5e5e5e", fontFamily: fonts.sansRegular, fontSize: 12 },
   locationPanel: { marginTop: 22, paddingTop: 16, paddingBottom: 4, borderTopWidth: 1, borderColor: colors.paperBorder, gap: 10 },

@@ -56,6 +56,7 @@ export function tripAtlasGeometry(
   segments: TripSegmentSummary[],
   land: MapLand | null,
   destination?: string,
+  options: { maxLabels?: number; prioritizeByFrequency?: boolean } = {},
 ) {
   const airports = new Map<
     string,
@@ -169,14 +170,19 @@ export function tripAtlasGeometry(
       })
       .join("") ?? "";
   const labels: AtlasLabel[] = [];
+  const frequency = new Map<string, number>();
+  for (const segment of segments) for (const code of [segment.depAirport, segment.arrAirport])
+    frequency.set(code, (frequency.get(code) ?? 0) + 1);
   const projected = [...airports.keys()]
-    .sort((a, b) => Number(b === destination) - Number(a === destination) || a.localeCompare(b))
+    .sort((a, b) => Number(b === destination) - Number(a === destination)
+      || (options.prioritizeByFrequency ? (frequency.get(b) ?? 0) - (frequency.get(a) ?? 0) : 0) || a.localeCompare(b))
     .map((code) => {
       const airport = airports.get(code)!,
         [x, y] = project([normalize(airport.lon) * cosine, -airport.lat]);
       return { code, x, y, radius: code === destination ? 4.2 : 2.7 };
     });
   const ports: AtlasPort[] = projected.map((port) => {
+    if (labels.length >= (options.maxLabels ?? Infinity)) return port;
     const { x, y } = port;
     const label = [
       [x + 9, y - 15],

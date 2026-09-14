@@ -5,6 +5,7 @@ import paths from "./emblem-paths.json";
 import { fitDisplayFont } from "./displayTextFit";
 import { getMobileVisualWidth } from "../../utils/mobileLayout";
 import { colors, fonts } from "../../theme/trotterTheme";
+import { PressFeedback } from "./motion";
 
 export function WWEmblem({
   size = 32,
@@ -153,7 +154,7 @@ export function WWButton({
   secondary?: boolean;
 }) {
   return (
-    <Pressable
+    <PressFeedback
       accessibilityRole="button"
       accessibilityState={{ disabled }}
       onPress={onPress}
@@ -162,13 +163,12 @@ export function WWButton({
         s.button,
         secondary && s.secondary,
         disabled && s.disabled,
-        pressed && !disabled && { opacity: 0.8 },
       ]}
     >
       <Text style={[s.buttonText, secondary && { color: colors.ink }]}>
         {label}
       </Text>
-    </Pressable>
+    </PressFeedback>
   );
 }
 export function WWHeader({
@@ -186,7 +186,7 @@ export function WWHeader({
   return (
     <View style={s.header}>
       {onBack && (
-        <Pressable
+        <PressFeedback
           accessibilityRole="button"
           accessibilityLabel="Back"
           hitSlop={8}
@@ -194,7 +194,7 @@ export function WWHeader({
           style={s.back}
         >
           <WWIcon name="back" />
-        </Pressable>
+        </PressFeedback>
       )}
       <Text accessibilityRole="header" style={[s.title, { fontSize: titleSize, lineHeight: titleSize * 42 / 38 }]}>
         {title}

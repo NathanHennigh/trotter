@@ -194,13 +194,76 @@ async function cancelledCover(page, width, entry) {
   entry.samples.push(await sample(page, 'cancel-restored', 1));
   record(await page.evaluate(() => window.__messages.filter(m => m.type === 'gesture').at(-1)?.active === false), 'Cancelled gesture left the native lock active', { width });
 }
+async function touchIntent(page, width, entry) {
+  const cdp = await page.context().newCDPSession(page);
+  const face = await page.locator('.cover-front').boundingBox();
+  const start = { x: face.x + face.width * .72, y: face.y + face.height * .35 };
+  const activeCount = () => page.evaluate(() => window.__messages.filter(m => m.type === 'gesture' && m.active).length);
+  const before = await activeCount();
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [start] });
+  await page.waitForTimeout(30);
+  record(await activeCount() === before, 'A resting touch captured the native scroll before intent', { width });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{x:start.x+1,y:start.y+65}] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(100);
+  record(await activeCount() === before, 'Vertical touch motion stole parent scroll', { width });
+  await waitForState(page, 0, true);
+  const grab = { x: face.x + face.width - 12, y: start.y };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [grab] });
+  for (let i=1;i<=12;i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{x:grab.x-width*.72*i/12,y:grab.y+3}] });
+    await page.waitForTimeout(12);
+  }
+  record(await activeCount() > before, 'Horizontal touch failed to grab the rigid cover', { width });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await waitForState(page, 0, false);
+  const book=await page.locator('#book').boundingBox();
+  await page.mouse.click(book.x+book.width*.035,book.y+book.height*.5); await waitForState(page,0,true);
+  await cdp.send('Input.dispatchTouchEvent', {type:'touchStart',touchPoints:[grab]});
+  await cdp.send('Input.dispatchTouchEvent', {type:'touchMove',touchPoints:[{x:grab.x-35,y:grab.y+2}]});
+  await cdp.send('Input.dispatchTouchEvent', {type:'touchCancel',touchPoints:[]});
+  await page.waitForTimeout(750); await waitForState(page,0,true);
+  record(await page.evaluate(()=>window.__messages.filter(m=>m.type==='gesture').at(-1)?.active===false), 'Cancelled touch retained native scroll lock', {width});
+  entry.touchIntent = 'Resting/vertical touch yields; horizontal grabs; cancellation restores cover and unlocks scroll';
+  await cdp.detach();
+}
+async function queuedArchiveUpdate(page,width,entry) {
+  const face=await page.locator('.cover-front').boundingBox(),x=face.x+face.width-12,y=face.y+60;
+  await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x-width*.18,y,{steps:5});
+  const readyBefore=await page.evaluate(()=>window.__messages.filter(m=>m.type==='ready').length);
+  await page.evaluate(()=>window.updatePassport({...window.__PASSPORT__,name:'Updated Traveler'}));
+  await page.waitForTimeout(160);
+  record(await page.evaluate(()=>window.__messages.filter(m=>m.type==='ready').length)===readyBefore,'Archive replacement interrupted a held page', {width});
+  record(await page.evaluate(()=>window.__messages.filter(m=>m.type==='gesture').at(-1)?.active===true),'Archive replacement released a held page', {width});
+  await page.locator('#book').dispatchEvent('pointercancel',{pointerId:1,pointerType:'mouse',isPrimary:true,clientX:x-width*.18,clientY:y});await page.mouse.up();
+  await page.waitForFunction(n=>window.__messages.filter(m=>m.type==='ready').length>n,readyBefore);
+  await waitForState(page,0,true); entry.archiveUpdate='Queued while held; applied after cancelled turn settled';
+}
+async function earnedStampOnce(page,width,entry) {
+  const update = async () => {
+    const count=await page.evaluate(()=>window.__messages.filter(m=>m.type==='ready').length);
+    await page.evaluate(()=>window.updatePassport({...window.__PASSPORT__,earned:{key:'synthetic-import',codes:['DE']}}));
+    await page.waitForFunction(n=>window.__messages.filter(m=>m.type==='ready').length>n,count);
+  };
+  await update();
+  await page.locator('.cover-target').focus();await page.keyboard.press('Enter');await waitForState(page,0,false);
+  const first=await page.locator('#paper').evaluate(canvas=>canvas.toDataURL());
+  await page.waitForTimeout(320);
+  const settled=await page.locator('#paper').evaluate(canvas=>canvas.toDataURL());
+  record(first!==settled,'A newly earned visible country did not settle into the paper', {width});
+  await update();
+  const sameEvent=await page.locator('#paper').evaluate(canvas=>canvas.toDataURL());await page.waitForTimeout(320);
+  record(await page.locator('#paper').evaluate((canvas,expected)=>canvas.toDataURL()===expected,sameEvent),'An existing import replayed its earned-country animation', {width});
+  await page.locator('#book').focus();await page.keyboard.press('ArrowLeft');await waitForState(page,0,true);
+  entry.earnedStamp='New country settles once; identical import update does not replay';
+}
 
 (async () => {
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   try {
     for (const width of [320, 410]) {
       const viewportHeight = passportViewportHeight(width);
-      const page = await browser.newPage({ viewport: { width, height: viewportHeight }, deviceScaleFactor: 2, reducedMotion: 'no-preference' });
+      const page = await browser.newPage({ viewport: { width, height: viewportHeight }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: 'no-preference' });
       const entry = { width, viewportHeight, samples: [], images: [], errors: [], requests: [] }; report.widths.push(entry);
       page.on('pageerror', error => entry.errors.push(error.message));
       await page.route('**/*', route => { entry.requests.push(route.request().url()); route.abort(); });
@@ -234,6 +297,9 @@ async function cancelledCover(page, width, entry) {
         const book = await page.locator('#book').boundingBox();
         await page.mouse.click(book.x + book.width * .035, book.y + book.height * .5);
         await waitForState(page, 0, true);
+        await touchIntent(page, width, entry);
+        await queuedArchiveUpdate(page, width, entry);
+        await earnedStampOnce(page, width, entry);
         entry.fonts = await page.evaluate(() => Array.from(document.fonts).map(font => ({ family: font.family, status: font.status })));
         entry.containerHeightLag = await page.evaluate(() => ({
           scope: 'Historical dynamic-host diagnostic using size bridge reports delayed by0/16/33/50ms. Current native host uses the stable viewport envelope instead; these are not clipping failures.',

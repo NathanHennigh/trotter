@@ -21,16 +21,26 @@ import { getApiBaseUrl } from "../../../services/travelTrips";
 export function CountryPostcard({
   board,
   onPress,
+  returning = false,
+  visible = true,
+  onReturned,
 }: {
   board: CountryBoard;
   onPress: () => void;
+  returning?: boolean;
+  visible?: boolean;
+  onReturned?: () => void;
 }) {
   const { width, fontScale } = useWindowDimensions();
   const photoWidth = getMobileVisualWidth(width) - 66;
   const countrySize = fitDisplayFont(
     board.title, 40, photoWidth - 32, fontScale, "italic",
   );
-  const turn = React.useRef(new Animated.Value(0)).current;
+  const turn = React.useRef(new Animated.Value(returning ? 1 : 0)).current;
+  const returnPending = React.useRef(returning);
+  const returningNow = React.useRef(returning);
+  const isVisible = React.useRef(visible), didReturn = React.useRef(onReturned);
+  isVisible.current = visible; didReturn.current = onReturned;
   const mounted = React.useRef(true),
     opening = React.useRef(false),
     dispatched = React.useRef(false),
@@ -39,7 +49,7 @@ export function CountryPostcard({
   const [turning, setTurning] = React.useState(false);
   open.current = onPress;
   const finish = React.useCallback(() => {
-    if (!mounted.current || dispatched.current) return;
+    if (!mounted.current || !isVisible.current || dispatched.current) return;
     dispatched.current = true;
     open.current();
   }, []);
@@ -48,6 +58,16 @@ export function CountryPostcard({
     const update = (enabled: boolean) => {
       if (!mounted.current) return;
       reduceMotion.current = enabled;
+      if (returnPending.current) {
+        returnPending.current = false;
+        if (enabled || !isVisible.current) { turn.setValue(0); returningNow.current = false; didReturn.current?.(); }
+        else {
+          setTurning(true);
+          Animated.timing(turn, { toValue: 0, duration: 140, easing: Easing.bezier(0.23, 1, 0.32, 1), useNativeDriver: true })
+            .start(() => { if (mounted.current) { turn.setValue(0); returningNow.current = false; setTurning(false); didReturn.current?.(); } });
+        }
+      }
+      if (enabled && returningNow.current) turn.stopAnimation();
       if (enabled && opening.current && !dispatched.current) {
         finish();
         turn.stopAnimation();
@@ -66,8 +86,15 @@ export function CountryPostcard({
       turn.stopAnimation();
     };
   }, [finish, turn]);
+  React.useEffect(() => {
+    if (!visible) {
+      turn.stopAnimation(); turn.setValue(0);
+      opening.current = false; dispatched.current = false;
+      setTurning(false);
+    }
+  }, [visible, turn]);
   const handlePress = () => {
-    if (!mounted.current || opening.current) return;
+    if (!mounted.current || !isVisible.current || opening.current || returningNow.current || turning) return;
     opening.current = true;
     if (reduceMotion.current) {
       finish();
@@ -76,7 +103,7 @@ export function CountryPostcard({
     setTurning(true);
     Animated.timing(turn, {
       toValue: 1,
-      duration: 180,
+      duration: 120,
       easing: Easing.bezier(0.32, 0, 0.67, 1),
       useNativeDriver: true,
     }).start(({ finished }) => {
@@ -109,7 +136,7 @@ export function CountryPostcard({
               {
                 rotateY: turn.interpolate({
                   inputRange: [0, 1],
-                  outputRange: ["0deg", "-88deg"],
+                  outputRange: ["0deg", "-76deg"],
                 }),
               },
             ],
@@ -153,10 +180,10 @@ const s = StyleSheet.create({
     marginBottom: 22,
     padding: 8,
     paddingBottom: 0,
-    backgroundColor: "#fffdf5",
+    backgroundColor: colors.paperPhoto,
     borderWidth: 1,
     borderBottomWidth: 2,
-    borderColor: "#cbd0c5",
+    borderColor: colors.paperBorder,
     borderBottomColor: "#bcc5bb",
   },
   photo: {
@@ -170,7 +197,7 @@ const s = StyleSheet.create({
     paddingBottom: 14,
   },
   country: {
-    color: "#fffdf5",
+    color: colors.paperPhoto,
     fontFamily: fonts.displayItalic,
     letterSpacing: -0.65,
     includeFontPadding: false,

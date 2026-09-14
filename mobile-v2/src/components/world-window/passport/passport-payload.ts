@@ -8,7 +8,7 @@ import { passportArtwork } from './passport-artwork';
 import { passportIdentityAirport, type PassportArchive } from './passport-model';
 
 export type BookStamp = { code: string; country: string; airport: string; date: string; color: string; frame: string; icon?: string; template: StampTemplate };
-export type BookPayload = { name: string; airportLabel: string; homeAirport: string; homeAirportName: string; homeAirportCountry?: string; firstFlightDate: string; flights: number; miles: number; countries: number; years: { year: number; flights: number }[]; stamps: BookStamp[]; fonts: Record<string, string>; state?: { closed: boolean; spread: number } };
+export type BookPayload = { name: string; airportLabel: string; homeAirport: string; homeAirportName: string; homeAirportCountry?: string; firstFlightDate: string; flights: number; miles: number; countries: number; years: { year: number; flights: number }[]; stamps: BookStamp[]; fonts: Record<string, string>; visible?: boolean; scopeYear?: string; register?: { label: string; value: string; detail?: string }[]; earned?: { key: string; codes: string[] }; state?: { closed: boolean; spread: number } };
 const shapes: Record<StampShapeKey, keyof typeof stampShapeAssets> = { archedCountryCanonical: 'arched_country_canonical', archedCountryBanner: 'arched_country_banner', archedCountryVariant: 'arched_country_variant', circularCityClean: 'circular_city_clean', circularCityDoubleLine: 'circular_city_double_line', roundedImmigrationCanonical: 'rounded_immigration_canonical', roundedImmigrationWithBand: 'rounded_immigration_with_band', shieldBadgeRounded: 'shield_badge_rounded' };
 const fontAssets = {
   Newsreader: require('../../../../assets/world-window/fonts/Newsreader-Regular.ttf'),
@@ -48,5 +48,10 @@ export async function preparePassportPayload(archive: PassportArchive): Promise<
   }));
   const identityAirport = passportIdentityAirport(archive);
   return { name: archive.name, airportLabel: identityAirport?.label ?? 'Home airport', homeAirport: identityAirport?.code ?? '', homeAirportName: identityAirport?.place ?? '', homeAirportCountry: archive.airports.find(a => a.code === identityAirport?.code)?.country ?? '', firstFlightDate: archive.firstFlightDate,
-    flights: archive.flights, miles: archive.miles, countries: archive.arrivals.length, years: archive.years, stamps, fonts };
+    flights: archive.flights, miles: archive.miles, countries: archive.arrivals.length, years: archive.years, stamps, fonts, scopeYear: archive.scopeYear,
+    register: [
+      { label: 'First recorded flight', value: archive.recordStartDate ?? archive.firstFlightDate },
+      ...archive.records.filter(record => ['Most used airport', 'Most common route', 'Furthest flight'].includes(record.label)).map(({ label, value, detail }) => ({ label, value, detail })),
+      { label: 'Airports / airlines', value: `${archive.airports.length} / ${archive.airlines.length}` },
+    ].filter(entry => entry.value) };
 }

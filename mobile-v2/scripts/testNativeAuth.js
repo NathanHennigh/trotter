@@ -66,6 +66,7 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
       if (request === 'expo-secure-store') return secureStore;
       if (request === '@react-native-async-storage/async-storage') return { getItem: async key => plain.get(key) ?? null, setItem: async (key, value) => { plain.set(key, value); }, removeItem: async key => { plain.delete(key); } };
       if (request === './googleAuth') return load('googleAuth');
+      if (request === './gmailRecovery') return load('gmailRecovery');
       if (request.includes('stampIdentity')) return { stampIdentity: () => ({ shape: 'circle', color: '#111' }) };
       if (request.includes('passport-arrivals')) return { buildPassportArrivals: () => [] };
       if (request.includes('countryArrivals')) return { firstCountryEntry: () => undefined, buildCountryArrivals: () => [] };
@@ -345,4 +346,84 @@ test('Gmail import status is independent of archive refresh and clears on accoun
   await env.render().syncFromGmail();
   assert.equal(env.render().gmailSyncStatus, 'synced'); assert.equal(env.render().gmailSyncError, undefined); assert(env.render().lastGmailSyncedAt);
   await env.render().signOut(); assert.equal(env.render().gmailSyncStatus, 'unknown'); assert.equal(env.render().lastGmailSyncedAt, undefined); env.dispose();
+});
+
+
+const recoveryKey = (owner = 1) => `trotter.gmail-recovery.v1.${encodeURIComponent('https://api.example.invalid')}.${owner}`;
+const savedSession = token => JSON.stringify({ token, apiBaseUrl: 'https://api.example.invalid' });
+const recoveryValue = (overrides = {}) => JSON.stringify({ version: 1, apiBaseUrl: 'https://api.example.invalid', ownerId: 1, ...overrides });
+const identityOrTrips = url => response(200, url.endsWith('/auth/me') ? { user_id: 1, name: 'Alex Avery', email: 'owner@example.invalid' } : []);
+async function settleRecovery(env) { env.render(); await flush(); env.render(); await flush(); return env.render(); }
+
+test('auth retry repeats Google only without a token and verifies an existing token directly', async () => {
+  const env=environment();await settleRecovery(env);
+  env.browserResult({type:'success',url:'trotterv2://oauthredirect?attempt=test-attempt'});
+  await env.render().signIn();assert.equal(env.render().status,'error');
+  env.browserResult(undefined);await env.render().retryAuth();await flush();
+  assert.equal(env.render().authStatus,'signed-in');assert.equal(env.calls.filter(c=>c.kind==='oauth').length,2);env.dispose();
+  const verification=environment({stored:savedSession('token-a'),fetcher:async()=>{throw new TypeError('offline');}});
+  await settleRecovery(verification);assert.equal(verification.render().authStatus,'signed-out');
+  verification.fetcher(identityOrTrips);await verification.render().retryAuth();await flush();
+  assert.equal(verification.render().authStatus,'signed-in');assert(!verification.calls.some(c=>c.kind==='oauth'));verification.dispose();
+});
+
+test('cold restart restores scoped last success without launching or polling a new scan', async () => {
+  const lastSuccessAt='2026-01-02T12:00:00Z';
+  const env=environment({stored:savedSession('token-a'),plainStored:{[recoveryKey()]:recoveryValue({lastSuccessAt,outcome:'synced'})}});
+  const state=await settleRecovery(env);assert.equal(state.gmailSyncStatus,'synced');assert.equal(state.lastGmailSyncedAt,lastSuccessAt);
+  assert(!env.calls.some(c=>c.url?.includes('/ingest/')));env.dispose();
+});
+
+test('cold restart observes only the existing owned job and records its server completion time', async () => {
+  const job=deferred(),completedAt='2026-02-03T14:00:00Z';
+  const env=environment({stored:savedSession('token-a'),plainStored:{[recoveryKey()]:recoveryValue({activeJobId:'existing-job',activeStartedAt:new Date().toISOString()})},fetcher:async url=>url.includes('/ingest/jobs/')?job.promise:identityOrTrips(url)});
+  let state=await settleRecovery(env);assert.equal(state.gmailSyncStatus,'syncing');assert.equal(env.calls.filter(c=>c.url?.includes('/ingest/jobs/existing-job')).length,1);
+  assert(!env.calls.some(c=>c.url?.endsWith('/ingest/gmail/import')));
+  job.resolve(response(200,{state:'completed',updated_at:completedAt}));await flush();state=env.render();assert.equal(state.gmailSyncStatus,'synced');assert.equal(state.lastGmailSyncedAt,completedAt);
+  const saved=JSON.parse(env.plain.get(recoveryKey()));assert.equal(saved.activeJobId,undefined);assert.equal(saved.lastSuccessAt,completedAt);assert(!JSON.stringify(saved).includes('token-a'));env.dispose();
+});
+
+test('observation network failure retains a resumable job; Check mail does not duplicate it', async () => {
+  let fail=true;
+  const env=environment({stored:savedSession('token-a'),plainStored:{[recoveryKey()]:recoveryValue({activeJobId:'existing-job',activeStartedAt:new Date().toISOString()})},fetcher:async url=>{if(url.includes('/ingest/jobs/')){if(fail)throw new TypeError('offline');return response(200,{state:'done'});}return identityOrTrips(url);}});
+  await settleRecovery(env);await flush();assert.equal(env.render().gmailSyncStatus,'error');assert.equal(JSON.parse(env.plain.get(recoveryKey())).activeJobId,'existing-job');
+  fail=false;await env.render().syncFromGmail();await flush();assert.equal(env.render().gmailSyncStatus,'synced');assert(!env.calls.some(c=>c.url?.endsWith('/ingest/gmail/import')));env.dispose();
+});
+
+test('terminal and missing jobs clear recovery while keeping prior successful scan time', async () => {
+  for(const status of [200,404]){
+    const previous='2026-01-02T12:00:00Z';
+    const env=environment({stored:savedSession('token-a'),plainStored:{[recoveryKey()]:recoveryValue({activeJobId:'finished-job',activeStartedAt:new Date().toISOString(),lastSuccessAt:previous})},fetcher:async url=>url.includes('/ingest/jobs/')?response(status,{state:'failed',error_message:'Synthetic scan failure'}):identityOrTrips(url)});
+    await settleRecovery(env);await flush();assert.equal(env.render().gmailSyncStatus,'error');const saved=JSON.parse(env.plain.get(recoveryKey()));assert.equal(saved.activeJobId,undefined);assert.equal(saved.lastSuccessAt,previous);env.dispose();
+  }
+});
+
+test('recovery never observes another account, server, malformed or expired job', async () => {
+  for(const overrides of [{ownerId:2},{apiBaseUrl:'https://other.example.invalid'},{activeJobId:'../wrong'},{activeStartedAt:'2020-01-01T00:00:00Z'}]){
+    const env=environment({stored:savedSession('token-a'),plainStored:{[recoveryKey()]:recoveryValue({activeJobId:'private-job',activeStartedAt:new Date().toISOString(),...overrides})}});
+    await settleRecovery(env);assert(!env.calls.some(c=>c.url?.includes('/ingest/')));env.dispose();
+  }
+  const env=environment({stored:savedSession('token-b'),plainStored:{[recoveryKey(1)]:recoveryValue({activeJobId:'account-a-job',activeStartedAt:new Date().toISOString()})}});
+  const state=await settleRecovery(env);assert.equal(state.accountId,2);assert.equal(state.gmailSyncStatus,'unknown');assert(!env.calls.some(c=>c.url?.includes('/ingest/')));env.dispose();
+});
+
+test('late recovered job completion cannot overwrite the next account', async () => {
+  const job=deferred();
+  const env=environment({stored:savedSession('token-a'),plainStored:{[recoveryKey()]:recoveryValue({activeJobId:'account-a-job',activeStartedAt:new Date().toISOString()})},fetcher:async(url,init)=>url.includes('/ingest/jobs/')?job.promise:response(200,url.endsWith('/auth/me')?{user_id:init.headers.Authorization==='Bearer token-b'?2:1,email:'owner@example.invalid'}:[])});
+  await settleRecovery(env);assert.equal(env.render().gmailSyncStatus,'syncing');await env.render().signOut();env.token('token-b');await env.render().signIn();await flush();env.render();job.resolve(response(200,{state:'done'}));await flush();
+  assert.equal(env.render().accountId,2);assert.equal(env.render().gmailSyncStatus,'unknown');assert.equal(env.render().lastGmailSyncedAt,undefined);env.dispose();
+});
+
+test('two rapid Check mail presses create one job and retain that job before observing it', async () => {
+  const launch = deferred(), poll = deferred();
+  const env = environment({ stored: savedSession('token-a'), fetcher: async url => url.endsWith('/ingest/gmail/import') ? launch.promise : url.includes('/ingest/jobs/') ? poll.promise : identityOrTrips(url) });
+  await settleRecovery(env);
+  const first = env.render().syncFromGmail(), second = env.render().syncFromGmail();
+  await flush(); assert.equal(env.calls.filter(call => call.url?.endsWith('/ingest/gmail/import')).length, 1);
+  launch.resolve(response(200, { job_id: 'one-job' })); await flush();
+  assert.equal(JSON.parse(env.plain.get(recoveryKey())).activeJobId, 'one-job');
+  assert.equal(env.calls.filter(call => call.url?.includes('/ingest/jobs/')).length, 1);
+  poll.resolve(response(200, { state: 'done', updated_at: '2026-02-03T14:00:00' })); await Promise.all([first, second]);
+  assert.equal(env.render().lastGmailSyncedAt, '2026-02-03T14:00:00Z', 'UTC server timestamps never use the device timezone');
+  env.dispose();
 });

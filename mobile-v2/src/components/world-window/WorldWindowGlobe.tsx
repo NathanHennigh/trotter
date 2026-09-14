@@ -23,6 +23,7 @@ import { globeDayDetailTiles } from "../../data/globeDayDetailTiles";
 import { globeNightDetailTiles } from "../../data/globeNightDetailTiles";
 import { globeCountryDetailTiles } from "../../data/globeCountryDetailTiles";
 import { colors, fonts } from "../../theme/trotterTheme";
+import { flightPathKey } from "./routeSelection";
 import {
   countryAt,
   flightCountryKey,
@@ -50,15 +51,6 @@ const sunVector = (date: Date) => {
   return vector(p.lat, p.lon, 1);
 };
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
-const flightPathKey = (route: FlightRoute) =>
-  [
-    route.from.code,
-    route.from.lat,
-    route.from.lon,
-    route.to.code,
-    route.to.lat,
-    route.to.lon,
-  ].join(":");
 type Props = {
   routes: FlightRoute[];
   active: boolean;

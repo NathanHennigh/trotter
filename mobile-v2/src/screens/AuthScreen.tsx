@@ -1,7 +1,6 @@
 import React from "react";
 import {
   ActivityIndicator,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +9,7 @@ import {
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { PressFeedback } from "../components/world-window/motion";
 import { WWEmblem } from "../components/world-window/WorldWindowUI";
 import { useTravelTrips } from "../services/travelTrips";
 import { colors, fonts } from "../theme/trotterTheme";
@@ -17,7 +17,7 @@ import { colors, fonts } from "../theme/trotterTheme";
 export function AuthScreen() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const { authStatus, status, error, signIn, signOut, signOutPending, refresh } =
+  const { authStatus, status, error, signIn, signOut, signOutPending, retryAuth } =
     useTravelTrips();
   const [clearing, setClearing] = React.useState(false);
   const retrySignOut = async () => {
@@ -68,50 +68,47 @@ export function AuthScreen() {
           </Text>
         ) : null}
         {signOutPending ? (
-          <Pressable
+          <PressFeedback
             accessibilityRole="button"
             accessibilityState={{ disabled: clearing, busy: clearing }}
             disabled={clearing}
             onPress={() => void retrySignOut()}
-            style={({ pressed }) => [styles.googleButton, pressed && styles.pressed]}
+            style={styles.googleButton}
           >
             {clearing ? <ActivityIndicator color={colors.blue} /> : null}
             <Text style={styles.googleLabel}>{clearing ? "Finishing sign out…" : "Retry sign out"}</Text>
-          </Pressable>
+          </PressFeedback>
         ) : busy ? (
           <View accessibilityLiveRegion="polite" style={styles.loading}>
             <ActivityIndicator color={colors.blue} />
             <Text style={styles.loadingText}>Connecting your account…</Text>
           </View>
         ) : (
-          <Pressable
+          <PressFeedback
             accessibilityRole="button"
             onPress={() => void signIn()}
-            style={({ pressed }) => [
-              styles.googleButton,
-              pressed && styles.pressed,
-            ]}
+            style={styles.googleButton}
           >
             <GoogleMark />
             <Text style={styles.googleLabel}>Continue with Google</Text>
-          </Pressable>
+          </PressFeedback>
         )}
         {signOutPending ? null : busy ? (
-          <Pressable
+          <PressFeedback
             accessibilityRole="button"
             onPress={() => void signOut()}
             style={styles.textButton}
           >
             <Text style={styles.textButtonLabel}>Cancel</Text>
-          </Pressable>
+          </PressFeedback>
         ) : status === "error" ? (
-          <Pressable
+          <PressFeedback
             accessibilityRole="button"
-            onPress={() => void refresh()}
+            onPress={() => void retryAuth()}
             style={styles.textButton}
           >
             <Text style={styles.textButtonLabel}>Try connection again</Text>
-          </Pressable>
+          </PressFeedback>
         ) : null}
         <Text style={styles.privacy}>
           Trotter uses read-only Gmail access to build your private travel
@@ -199,7 +196,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   googleLabel: { color: colors.ink, fontFamily: fonts.sansSemi, fontSize: 14 },
-  pressed: { opacity: 0.75, transform: [{ scale: 0.985 }] },
   loading: {
     minHeight: 54,
     flexDirection: "row",

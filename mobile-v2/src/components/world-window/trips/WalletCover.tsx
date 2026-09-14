@@ -1,20 +1,22 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import Svg, { Defs, Line, LinearGradient, Rect, Stop } from "react-native-svg";
 import type { TripSummary } from "../../../data/trotterMock";
 import { fitDisplayFont } from "../displayTextFit";
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
-import { fonts } from "../../../theme/trotterTheme";
+import { colors, fonts } from "../../../theme/trotterTheme";
 import { WWEmblem, WWIcon } from "../WorldWindowUI";
-import { tripDates, walletSummary } from "./tripPresentation";
+import { PressFeedback } from "../motion";
+import type { TripOpenOrigin } from "./tripTransition";
+import { calendarDate, orderedSegments, tripDates, walletSummary } from "./tripPresentation";
 
 export const walletColors = {
   blue: "#427494",
   ink: "#315b70",
   muted: "#526975",
-  paper: "#f7f5ed",
-  rule: "#c7d1cc",
-  copper: "#b27655",
+  paper: colors.paperInset,
+  rule: colors.paperBorder,
+  copper: colors.copper,
 };
 
 export function WalletHeading({
@@ -62,34 +64,57 @@ export function WalletHeading({
   );
 }
 
+export type WalletOrigin = TripOpenOrigin;
+
 export function WalletCover({
   trip,
   onPress,
+  scopeYear,
+  totalFlightCount,
+  embedded = false,
 }: {
   trip: TripSummary;
-  onPress: (flightId?: string) => void;
+  onPress: (origin?: WalletOrigin) => void;
+  scopeYear?: string;
+  totalFlightCount?: number;
+  embedded?: boolean;
 }) {
   const { shown, hidden } = React.useMemo(() => walletSummary(trip), [trip]);
+  const surface = React.useRef<View>(null);
+  const alive = React.useRef(true);
+  React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const open = () => {
+    if (!surface.current?.measureInWindow) { onPress(); return; }
+    surface.current.measureInWindow((x, y, width, height) => {
+      if (alive.current) onPress([x, y, width, height].every(Number.isFinite) && width > 0 && height > 0 ? { x, y, width, height, wallet: { trip, scopeYear, totalFlightCount } } : undefined);
+    });
+  };
+  const headingTrip = React.useMemo(() => {
+    const legs = orderedSegments(trip.segments);
+    return scopeYear && legs.length ? { ...trip, startDate: calendarDate(legs[0].depTime) ?? trip.startDate,
+      endDate: calendarDate(legs[legs.length - 1].arrTime) ?? trip.endDate } : trip;
+  }, [trip, scopeYear]);
   return (
-    <View style={s.stack}>
+    <View ref={surface} collapsable={false} style={[s.stack, embedded && { marginHorizontal: 0, marginBottom: 0 }]}>
       <View pointerEvents="none" style={s.paperEdgeBack} />
       <View pointerEvents="none" style={s.paperEdgeFront} />
       <View style={s.wallet}>
-        <Pressable
+        <PressFeedback
           accessibilityRole="button"
-          accessibilityLabel={`Open ${trip.title}, ${tripDates(trip)}, ${trip.flightCount} flights`}
-          onPress={() => onPress()}
-          style={({ pressed }) => pressed && s.pressed}
+          accessibilityLabel={`Open ${trip.title}, ${tripDates(headingTrip)}, ${trip.flightCount} flights`}
+          onPress={open}
+          paper
         >
-          <WalletHeading trip={trip} compact />
-        </Pressable>
+          <WalletHeading trip={headingTrip} compact />
+        </PressFeedback>
         <View style={s.insert}>
+          {scopeYear ? <Text style={s.scopeNote}>{trip.flightCount} {trip.flightCount === 1 ? "flight" : "flights"} in {scopeYear}{totalFlightCount != null && totalFlightCount !== trip.flightCount ? ` \u00b7 ${totalFlightCount} in full itinerary` : ""}</Text> : null}
           {shown.map((group) => (
-            <Pressable
+            <PressFeedback
               accessibilityRole="button"
               accessibilityLabel={`${group.first.depAirport} to ${group.last.arrAirport}, ${group.dates}`}
-              onPress={() => onPress(group.first.id)}
-              style={s.coupon}
+              onPress={open}
+              style={s.coupon} paper
               key={group.id}
             >
               <View style={s.routeCopy}>
@@ -119,16 +144,16 @@ export function WalletCover({
                   strokeDasharray="4 3"
                 />
               </Svg>
-            </Pressable>
+            </PressFeedback>
           ))}
           {!shown.length && (
             <View style={s.coupon}>
               <Text style={s.fallback}>{trip.routeLabel}</Text>
             </View>
           )}
-          <Pressable
+          <PressFeedback
             accessibilityRole="button"
-            onPress={() => onPress()}
+            onPress={open}
             style={s.open}
           >
             <Text style={s.openText}>
@@ -143,7 +168,7 @@ export function WalletCover({
               </Text>
               <WWIcon name="arrow" size={15} color={walletColors.ink} />
             </View>
-          </Pressable>
+          </PressFeedback>
         </View>
         <View pointerEvents="none" style={s.spine} />
         <View pointerEvents="none" style={s.topLight} />
@@ -275,6 +300,7 @@ const s = StyleSheet.create({
     maxWidth: 96,
     textAlign: "right",
   },
+  scopeNote: { fontFamily: fonts.sansRegular, fontSize: 12, lineHeight: 18, color: walletColors.muted, paddingTop: 10, paddingBottom: 4 },
   fallback: { fontFamily: fonts.mono, fontSize: 18, color: walletColors.ink },
   open: {
     minHeight: 44,

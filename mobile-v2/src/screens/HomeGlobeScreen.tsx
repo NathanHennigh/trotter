@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,7 +19,13 @@ import {
 } from "../components/world-window/WorldWindowUI";
 import { type GeoCountry } from "../components/world-window/globe-geography";
 import { buildGlobeHistory } from "../components/world-window/globe-history";
+import { flightsOnPath } from "../components/world-window/routeSelection";
+import { PaperPresence, PressFeedback, useReducedMotion } from "../components/world-window/motion";
+import { useExperiencePreferences } from "../utils/experiencePreferences";
+import type { TripOpenOrigin } from "../components/world-window/trips/tripTransition";
 import { flightDate } from "../components/world-window/trips/tripPresentation";
+import { fitDisplayFont } from "../components/world-window/displayTextFit";
+import { getMobileVisualWidth } from "../utils/mobileLayout";
 import type { BottomNavTab, TripSummary } from "../data/trotterMock";
 import type { FlightRoute } from "../data/demoTravel";
 import { useTravelTrips } from "../services/travelTrips";
@@ -27,11 +34,13 @@ import { colors, fonts, layout } from "../theme/trotterTheme";
 type Props = {
   active: BottomNavTab;
   onChange: (tab: BottomNavTab) => void;
-  onOpenTrip?: (trip: TripSummary, flightId?: string) => void;
+  onOpenTrip?: (trip: TripSummary, flightId?: string, origin?: TripOpenOrigin) => void;
   onOpenCountry?: (code: string) => void;
-  onOpenCollection?: (kind: "countries" | "airports") => void;
+  onOpenCollection?: (kind: "countries" | "airports", year?: string) => void;
+  onOpenFlights?: (year?: string) => void;
   filterYear?: string;
   onFilterYear?: (year: string) => void;
+  onBackHandlerChange?: (handler: (() => boolean) | null) => void;
 };
 export function HomeGlobeScreen({
   active,
@@ -39,11 +48,18 @@ export function HomeGlobeScreen({
   onOpenTrip,
   onOpenCountry,
   onOpenCollection,
+  onOpenFlights,
   filterYear,
   onFilterYear,
+  onBackHandlerChange,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const { trips, status, error, syncFromGmail } = useTravelTrips();
+  const { width, height, fontScale = 1 } = useWindowDimensions();
+  const visualWidth = getMobileVisualWidth(width), paperWidth = visualWidth - 48;
+  const largeText = fontScale >= 1.35;
+  const airportSize = Math.min(35, (paperWidth - 81) / (6 * .62 * fontScale));
+  const { trips, status, error, syncFromGmail, refresh } = useTravelTrips();
+  const reducedMotion = useReducedMotion();
   const [localYear, setLocalYear] = useState("All years");
   const year = filterYear ?? localYear;
   const setYear = (next: string) => {
@@ -54,18 +70,42 @@ export function HomeGlobeScreen({
   useEffect(() => {
     if (active !== "globe") setYearOpen(false);
   }, [active]);
-  const [mapStyle, setMapStyle] = useState<"classic" | "nasa">("classic");
+  const { texture: mapStyle, setTexture: setMapStyle } = useExperiencePreferences();
+  const [textureNotice, setTextureNotice] = useState<string>();
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current); }, []);
+  const [flightChoicesOpen, setFlightChoicesOpen] = useState(false);
+  const ticketRef = useRef<View>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const liveSelection = useRef({ active, selectedId });
+  liveSelection.current = { active, selectedId };
   const [country, setCountry] = useState<GeoCountry | null>(null);
   const clear = () => {
     setSelectedId(null);
     setCountry(null);
+    setFlightChoicesOpen(false);
   };
   const { routes, visited, flightCount, airportCount, years } = useMemo(
     () => buildGlobeHistory(trips, year),
     [trips, year],
   );
   const selected = routes.find((route) => route.id === selectedId) ?? null;
+  const routeFlights = useMemo(() => flightsOnPath(routes, selected), [routes, selected]);
+  const lifetimeVisited = useMemo(() => buildGlobeHistory(trips, "All years").visited, [trips]);
+  const statWidth = paperWidth / 3 - 8;
+  const statSize = Math.min(32, statWidth / (Math.max(String(flightCount).length, String(airportCount).length, String(visited.length).length) * .63 * fontScale));
+  const statLabelSize = Math.min(13, statWidth / (9 * .56 * fontScale));
+  const maxPaperHeight = Math.max(180, height - insets.top - insets.bottom - layout.bottomNavHeight - 118);
+  useEffect(() => {
+    if (active !== "globe") { onBackHandlerChange?.(null); return; }
+    onBackHandlerChange?.(() => {
+      if (yearOpen) { setYearOpen(false); return true; }
+      if (selected && flightChoicesOpen) { setFlightChoicesOpen(false); return true; }
+      if (selected || country) { clear(); return true; }
+      return false;
+    });
+    return () => onBackHandlerChange?.(null);
+  }, [active, yearOpen, selected, country, flightChoicesOpen, onBackHandlerChange]);
   const previousYear = useRef(year);
   useEffect(() => {
     if (previousYear.current !== year) {
@@ -78,9 +118,15 @@ export function HomeGlobeScreen({
     ? trips.find((t) => t.segments?.some((s) => s.id === selected.id))
     : null;
   const openTrip = () => {
-    if (selectedTrip && onOpenTrip) onOpenTrip(selectedTrip, selected?.id);
-    else onChange("trips");
-    clear();
+    const navigate = (origin?: TripOpenOrigin) => {
+      if (liveSelection.current.active !== "globe" || liveSelection.current.selectedId !== selectedId) return;
+      if (selectedTrip && onOpenTrip) onOpenTrip(selectedTrip, selected?.id, origin);
+      else if (onOpenFlights) onOpenFlights(year);
+      else onChange("trips");
+      clear();
+    };
+    if (ticketRef.current) ticketRef.current.measureInWindow((x, y, width, height) => navigate({ x, y, width, height }));
+    else navigate();
   };
   const syncing = status === "syncing";
   const busy = syncing || status === "loading";
@@ -97,6 +143,7 @@ export function HomeGlobeScreen({
         onRoute={(route: FlightRoute) => {
           setCountry(null);
           setSelectedId(route.id);
+          setFlightChoicesOpen(flightsOnPath(routes, route).length > 1);
         }}
         onCountry={(next: GeoCountry) => {
           setSelectedId(null);
@@ -112,18 +159,18 @@ export function HomeGlobeScreen({
           <View pointerEvents="none" style={styles.brand}>
             <WWEmblem size={33} />
           </View>
-          <Pressable
+          <PressFeedback
             accessibilityRole="button"
             accessibilityLabel="Filter flights by year"
             onPress={() => setYearOpen(true)}
-            style={({ pressed }) => [styles.year, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.year]}
           >
             <Text style={styles.yearText} numberOfLines={1}>
               {year}
             </Text>
             <WWIcon name="down" size={15} />
-          </Pressable>
-          <Pressable
+          </PressFeedback>
+          <PressFeedback
             accessibilityRole="button"
             accessibilityLabel={
               mapStyle === "classic"
@@ -131,19 +178,24 @@ export function HomeGlobeScreen({
                 : "Switch to classic globe"
             }
             accessibilityState={{ selected: mapStyle === "nasa" }}
-            onPress={() =>
-              setMapStyle((v) => (v === "classic" ? "nasa" : "classic"))
-            }
+            onPress={() => {
+              const next = mapStyle === "classic" ? "nasa" : "classic";
+              setMapStyle(next);
+              setTextureNotice(next === "nasa" ? "Satellite" : "Classic");
+              if (noticeTimer.current) clearTimeout(noticeTimer.current);
+              noticeTimer.current = setTimeout(() => setTextureNotice(undefined), 1500);
+            }}
             style={({ pressed }) => [
               styles.iconButton,
               styles.textureButton,
               mapStyle === "nasa" && styles.chosen,
-              pressed && styles.pressed,
+
             ]}
           >
             <WWIcon name="globe" size={21} />
-          </Pressable>
+          </PressFeedback>
         </View>
+        {textureNotice ? <View pointerEvents="none" style={styles.textureNotice}><Text accessibilityLiveRegion="polite" style={styles.textureNoticeText}>{textureNotice}</Text></View> : null}
         {!trips.length && !busy ? (
           <View style={styles.import}>
             <Text style={styles.importTitle}>Add your flight history</Text>
@@ -162,6 +214,7 @@ export function HomeGlobeScreen({
             </Text>
           </View>
         ) : null}
+        {error && trips.length > 0 && !busy ? <PressFeedback accessibilityRole="button" accessibilityLabel="Retry loading your flight history" onPress={() => void refresh()} style={styles.retryNotice}><Text style={styles.error}>{error} Tap to retry.</Text></PressFeedback> : null}
       </View>
       <View
         pointerEvents="box-none"
@@ -170,15 +223,16 @@ export function HomeGlobeScreen({
           { bottom: insets.bottom + layout.bottomNavHeight + 12 },
         ]}
       >
-        {selected ? (
-          <View style={styles.ticket}>
-            <Pressable
+        <PaperPresence>{selected ? (
+          <View ref={ticketRef} collapsable={false} style={styles.ticket}>
+            <ScrollView style={{ maxHeight: maxPaperHeight }} nestedScrollEnabled showsVerticalScrollIndicator={largeText}>
+            <PressFeedback paper
               accessibilityRole="button"
               accessibilityLabel={`View trip for ${selected.from.code} to ${selected.to.code}, ${flightDate(selected.depTime ?? undefined)}${selected.flightNumber ? `, ${selected.flightNumber}` : ""}`}
               onPress={openTrip}
               style={({ pressed }) => [
                 styles.ticketBody,
-                pressed && styles.pressed,
+
               ]}
             >
               <View style={styles.ticketHeading}>
@@ -193,20 +247,20 @@ export function HomeGlobeScreen({
               </View>
               <View style={styles.route}>
                 <View style={styles.endpoint}>
-                  <Text style={styles.airport}>{selected.from.code}</Text>
+                  <Text style={[styles.airport, { fontSize: airportSize, lineHeight: airportSize * 1.05 }]}>{selected.from.code}</Text>
                   <Text style={styles.city} numberOfLines={1}>
                     {selected.from.city}
                   </Text>
                 </View>
                 <WWIcon name="plane" size={25} color={colors.blue} />
                 <View style={[styles.endpoint, { alignItems: "flex-end" }]}>
-                  <Text style={styles.airport}>{selected.to.code}</Text>
+                  <Text style={[styles.airport, { fontSize: airportSize, lineHeight: airportSize * 1.05 }]}>{selected.to.code}</Text>
                   <Text style={styles.city} numberOfLines={1}>
                     {selected.to.city}
                   </Text>
                 </View>
               </View>
-              <View style={styles.tear}>
+              <View style={[styles.tear, largeText && { flexDirection: "column", alignItems: "flex-start", gap: 12 }]}>
                 <Text style={styles.ticketDate}>
                   {flightDate(selected.depTime ?? undefined)}
                 </Text>
@@ -215,26 +269,47 @@ export function HomeGlobeScreen({
                   <WWIcon name="arrow" size={16} />
                 </View>
               </View>
-            </Pressable>
-            <Pressable
+            </PressFeedback>
+            {routeFlights.length > 1 ? <View style={styles.repeatFlights}>
+              <PressFeedback accessibilityRole="button" accessibilityState={{ expanded: flightChoicesOpen }}
+                accessibilityLabel={`Choose among ${routeFlights.length} flights on this route`}
+                onPress={() => setFlightChoicesOpen(value => !value)} style={styles.flightChoiceHeading}>
+                <Text style={styles.flightChoiceCount}>{routeFlights.length} flights on this route</Text>
+                <WWIcon name={flightChoicesOpen ? "close" : "down"} size={14} />
+              </PressFeedback>
+              {flightChoicesOpen ? <ScrollView style={styles.flightChoices} nestedScrollEnabled>
+                {routeFlights.map(flight => <PressFeedback key={flight.id} accessibilityRole="button"
+                  accessibilityState={{ selected: selected.id === flight.id }}
+                  accessibilityLabel={`Select ${flight.from.code} to ${flight.to.code}, ${flightDate(flight.depTime ?? undefined)}, ${flight.flightNumber || flight.airline || "flight"}`}
+                  onPress={() => { setSelectedId(flight.id); setFlightChoicesOpen(false); }}
+                  style={[styles.flightChoice, selected.id === flight.id && styles.flightChoiceSelected]}>
+                  <View style={{ flex: 1, gap: 3, paddingVertical: 7 }}><Text style={styles.ticketDate}>{flightDate(flight.depTime ?? undefined)}</Text>
+                    <Text style={styles.flightNumber}>{flight.from.code} → {flight.to.code}</Text></View>
+                  <Text style={styles.flightNumber}>{flight.flightNumber || flight.airline || "Flight"}</Text>
+                  {selected.id === flight.id ? <WWIcon name="check" size={14} /> : null}
+                </PressFeedback>)}
+              </ScrollView> : null}
+            </View> : null}
+            </ScrollView>
+            <PressFeedback
               accessibilityRole="button"
               accessibilityLabel="Dismiss flight"
               onPress={clear}
               style={styles.dismiss}
             >
               <WWIcon name="close" size={16} />
-            </Pressable>
+            </PressFeedback>
           </View>
         ) : country ? (
           <View style={styles.countryCard}>
-            <Text style={styles.countryTitle}>{country.name}</Text>
+            <Text style={[styles.countryTitle, { fontSize: fitDisplayFont(country.name, 29, paperWidth - 65, fontScale) }]}>{country.name}</Text>
             <Text style={styles.body}>
               {visited.includes(country.code)
-                ? "In your travel history"
-                : "No flights recorded"}
+                ? year === "All years" ? "In your travel history" : `Flights recorded in ${year}`
+                : year === "All years" ? "No flights recorded" : `No flights in ${year}`}
             </Text>
-            {visited.includes(country.code) ? (
-              <Pressable
+            {lifetimeVisited.includes(country.code) ? (
+              <PressFeedback
                 accessibilityRole="button"
                 onPress={() => {
                   onOpenCountry?.(country.code);
@@ -244,31 +319,31 @@ export function HomeGlobeScreen({
               >
                 <Text style={styles.link}>View passport entry</Text>
                 <WWIcon name="arrow" size={17} />
-              </Pressable>
+              </PressFeedback>
             ) : null}
-            <Pressable
+            <PressFeedback
               accessibilityRole="button"
               accessibilityLabel="Dismiss country"
               onPress={clear}
               style={styles.dismiss}
             >
               <WWIcon name="close" size={16} />
-            </Pressable>
+            </PressFeedback>
           </View>
-        ) : null}
-        <View style={styles.stats}>
+        ) : null}</PaperPresence>
+        {!selected && !country ? <View style={styles.stats}>
           {[
             {
               value: flightCount,
               label: "Flights",
-              open: () => onChange("trips"),
+              open: () => onOpenFlights ? onOpenFlights(year) : onChange("trips"),
             },
             {
               value: visited.length,
               label: "Countries",
               open: () =>
                 onOpenCollection
-                  ? onOpenCollection("countries")
+                  ? onOpenCollection("countries", year)
                   : onChange("passport"),
             },
             {
@@ -276,11 +351,11 @@ export function HomeGlobeScreen({
               label: "Airports",
               open: () =>
                 onOpenCollection
-                  ? onOpenCollection("airports")
+                  ? onOpenCollection("airports", year)
                   : onChange("passport"),
             },
           ].map(({ value, label, open }) => (
-            <Pressable
+            <PressFeedback
               key={String(label)}
               accessibilityRole="button"
               accessibilityLabel={`${value} ${label.toLowerCase()}`}
@@ -288,13 +363,13 @@ export function HomeGlobeScreen({
                 clear();
                 open();
               }}
-              style={({ pressed }) => [styles.stat, pressed && styles.pressed]}
+              style={({ pressed }) => [styles.stat]}
             >
-              <Text style={styles.statNumber}>{value}</Text>
-              <Text style={styles.statLabel}>{label}</Text>
-            </Pressable>
+              <Text style={[styles.statNumber, { fontSize: statSize, lineHeight: statSize * 1.05 }]}>{value}</Text>
+              <Text style={[styles.statLabel, { fontSize: statLabelSize, lineHeight: statLabelSize * 1.3 }]}>{label}</Text>
+            </PressFeedback>
           ))}
-        </View>
+        </View> : null}
       </View>
       <BottomNav
         active={active}
@@ -306,7 +381,7 @@ export function HomeGlobeScreen({
       <Modal
         visible={active === "globe" && yearOpen}
         transparent
-        animationType="slide"
+        animationType={reducedMotion ? "none" : "slide"}
         onRequestClose={() => setYearOpen(false)}
       >
         <View style={styles.modal}>
@@ -324,7 +399,7 @@ export function HomeGlobeScreen({
             <Text style={styles.sheetTitle}>Flight history</Text>
             <ScrollView>
               {["All years", ...years].map((y) => (
-                <Pressable
+                <PressFeedback
                   accessibilityRole="button"
                   accessibilityState={{ selected: y === year }}
                   key={y}
@@ -337,7 +412,7 @@ export function HomeGlobeScreen({
                 >
                   <Text style={styles.yearOptionText}>{y}</Text>
                   {year === y ? <WWIcon name="check" size={20} /> : null}
-                </Pressable>
+                </PressFeedback>
               ))}
             </ScrollView>
           </View>
@@ -383,7 +458,16 @@ const styles = StyleSheet.create({
   },
   textureButton: { width: 48, borderWidth: 1, borderColor: colors.paperBorder },
   chosen: { backgroundColor: colors.paperDeep },
-  pressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
+  pressed: { opacity: 0.85 },
+  textureNotice: { position: "absolute", top: 52, right: 0, backgroundColor: colors.paperSoft, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 4 },
+  textureNoticeText: { fontFamily: fonts.sansRegular, fontSize: 12, color: colors.mutedInk },
+  retryNotice: { marginTop: 14, padding: 10, backgroundColor: colors.paperSoft, borderWidth: 1, borderColor: colors.paperBorder },
+  repeatFlights: { borderTopWidth: 1, borderTopColor: colors.paperBorder, marginHorizontal: 18, marginBottom: 8 },
+  flightChoiceHeading: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  flightChoiceCount: { flex: 1, fontFamily: fonts.sansSemi, fontSize: 12, color: colors.ink },
+  flightChoices: { maxHeight: 144 },
+  flightChoice: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 8 },
+  flightChoiceSelected: { backgroundColor: colors.paperDeep },
   bottom: { position: "absolute", left: 24, right: 24, gap: 20 },
   stats: {
     flexDirection: "row",
@@ -486,8 +570,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 2,
     top: 2,
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },

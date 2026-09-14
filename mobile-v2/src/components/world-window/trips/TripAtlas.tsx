@@ -28,11 +28,11 @@ export function TripAtlas({
   height?: number;
   variant?: "profile";
 }) {
-  const map = React.useMemo(
-    () => tripAtlasGeometry(segments, world, destination),
-    [segments, destination],
-  );
   const profile = variant === "profile";
+  const map = React.useMemo(
+    () => tripAtlasGeometry(segments, world, destination, profile ? { maxLabels: 7, prioritizeByFrequency: true } : {}),
+    [segments, destination, profile],
+  );
   const fold = React.useId().replace(/:/g, "");
   return (
     <View

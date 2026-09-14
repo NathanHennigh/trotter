@@ -2,16 +2,18 @@ import React from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomNav } from "../components/trotter/TrotterKit";
-import { WWEmpty, WWIcon } from "../components/world-window/WorldWindowUI";
+import { WWButton, WWEmpty, WWIcon } from "../components/world-window/WorldWindowUI";
+import { PressFeedback, useReducedMotion } from "../components/world-window/motion";
 import { BoardingPass } from "../components/world-window/trips/BoardingPass";
 import { TripAtlas } from "../components/world-window/trips/TripAtlas";
+import type { TripOpenOrigin } from "../components/world-window/trips/tripTransition";
 import {
   WalletHeading,
   walletColors,
@@ -37,6 +39,7 @@ export function TripDetailScreen({
   onChange,
   selectedFlightId,
   backLabel = "Back to trips",
+  onWalletLayout,
 }: {
   trip: TripSummary;
   active: BottomNavTab;
@@ -44,15 +47,34 @@ export function TripDetailScreen({
   onChange: (tab: BottomNavTab) => void;
   selectedFlightId?: string;
   backLabel?: string;
+  onWalletLayout?: (bounds: TripOpenOrigin) => void;
 }) {
   const insets = useSafeAreaInsets(),
-    { loadTripDetail, trips } = useTravelTrips();
+    { loadTripDetail, trips, refresh } = useTravelTrips();
+  const reducedMotion = useReducedMotion();
+  const { width, fontScale } = useWindowDimensions();
+  const stackTotals = width <= 360 && fontScale >= 1.35;
   const [hydrated, setHydrated] = React.useState<TripSummary>(),
     [loading, setLoading] = React.useState(false),
     [error, setError] = React.useState<string>(),
     [retry, setRetry] = React.useState(0);
   const list = React.useRef<FlatList<TripSegmentSummary>>(null),
     focused = React.useRef<string>("");
+  const wallet = React.useRef<View>(null);
+  const walletLive = React.useRef(true);
+  React.useEffect(() => { walletLive.current = true; return () => { walletLive.current = false; }; }, []);
+  const walletMeasurement = React.useRef({ tripId: trip.id, done: false });
+  if (walletMeasurement.current.tripId !== trip.id) walletMeasurement.current = { tripId: trip.id, done: false };
+  const measureWallet = () => {
+    const measurement = walletMeasurement.current;
+    if (measurement.done || !onWalletLayout || !wallet.current) return;
+    measurement.done = true;
+    wallet.current.measureInWindow((x, y, width, height) => {
+      if (!walletLive.current || walletMeasurement.current !== measurement) return;
+      if ([x, y, width, height].every(Number.isFinite) && width > 0 && height > 0) onWalletLayout({ x, y, width, height });
+      else measurement.done = false;
+    });
+  };
   React.useEffect(() => {
     let live = true;
     setHydrated(undefined);
@@ -102,13 +124,29 @@ export function TripDetailScreen({
       focused.current = selectedFlightId;
       list.current?.scrollToIndex({
         index,
-        animated: true,
-        viewPosition: 0.18,
+        animated: !reducedMotion,
+        viewPosition: 0,
+        viewOffset: 12,
       });
+    }
+  };
+  const retryDetails = () => {
+    if (loading) return;
+    if (trip.backendId) setRetry(value => value + 1);
+    else {
+      setLoading(true);
+      void refresh().finally(() => setLoading(false));
     }
   };
   return (
     <View style={[s.screen, { paddingTop: insets.top }]}>
+      <View style={s.detailBar}>
+        <PressFeedback accessibilityRole="button" accessibilityLabel={backLabel} onPress={onBack} style={s.backButton}>
+          <WWIcon name="back" size={19} />
+          <Text numberOfLines={1} style={s.backLabel}>{backLabel.replace(/^Back to /i, "")}</Text>
+        </PressFeedback>
+        <Text style={s.detailLabel}>Itinerary</Text>
+      </View>
       <FlatList
         ref={list}
         data={segments}
@@ -121,31 +159,20 @@ export function TripDetailScreen({
         onScrollToIndexFailed={(info) => {
           list.current?.scrollToOffset({
             offset: info.averageItemLength * info.index,
-            animated: true,
+            animated: !reducedMotion,
           });
           focused.current = "";
         }}
         initialNumToRender={5}
         ListHeaderComponent={
           <>
-            <View style={s.detailBar}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={backLabel}
-                onPress={onBack}
-                style={s.backButton}
-              >
-                <WWIcon name="back" size={20} />
-              </Pressable>
-              <Text style={s.detailLabel}>Trip details</Text>
-            </View>
-            <View style={s.wallet}>
+            <View ref={wallet} collapsable={false} onLayout={measureWallet} style={s.wallet}>
               <WalletHeading trip={current} />
               <View pointerEvents="none" style={s.coverLight} />
               <View style={s.mapInsert}>
                 <View style={s.mapHeader}>
                   <Text style={s.mapTitle}>Route map</Text>
-                  <Text style={s.mapCount}>{current.flightCount} flights</Text>
+                  <Text style={s.mapCount}>{segments.length} {segments.length === 1 ? "flight" : "flights"}</Text>
                 </View>
                 {map.points.length > 0 ? (
                   <TripAtlas
@@ -172,17 +199,18 @@ export function TripDetailScreen({
                     </Text>
                   )}
               </View>
+              <Text style={s.scheduleNote}>Dates and times as recorded for each airport.</Text>
               {loading && (
                 <ActivityIndicator color={colors.blue} style={s.loading} />
               )}
-              {error && (
-                <Pressable
+              {error && segments.length > 0 && (
+                <PressFeedback
                   accessibilityRole="button"
-                  onPress={() => setRetry((value) => value + 1)}
+                  onPress={retryDetails}
                   style={s.error}
                 >
                   <Text style={s.errorText}>{error} Tap to retry.</Text>
-                </Pressable>
+                </PressFeedback>
               )}
             </View>
           </>
@@ -203,6 +231,7 @@ export function TripDetailScreen({
                     style={[
                       s.groupHeader,
                       groupIndex === 0 && s.firstGroupHeader,
+                      stackTotals && s.stackedGroupHeader,
                     ]}
                   >
                     <Text style={s.sequence}>
@@ -233,9 +262,9 @@ export function TripDetailScreen({
         }}
         ListFooterComponent={
           <View style={[s.documentRail, s.walletEnd]}>
-            <View style={[s.documentPaper, s.totals]}>
+            <View style={[s.documentPaper, s.totals, stackTotals && s.stackedTotals]}>
               {[
-                { label: "Flights", value: String(current.flightCount) },
+                { label: "Flights", value: String(segments.length) },
                 {
                   label: "Distance",
                   value: `${Math.round(current.miles).toLocaleString()} mi`,
@@ -249,10 +278,10 @@ export function TripDetailScreen({
               ].map((stat) => (
                 <View
                   key={stat.label}
-                  style={{ flex: stat.label === "Flights" ? 0.65 : 1 }}
+                  style={stackTotals ? s.totalRow : { flex: stat.label === "Flights" ? 0.65 : 1 }}
                 >
                   <Text style={s.totalLabel}>{stat.label}</Text>
-                  <Text style={s.totalValue}>{stat.value}</Text>
+                  <Text style={[s.totalValue, stackTotals && s.stackedValue]}>{stat.value}</Text>
                 </View>
               ))}
             </View>
@@ -262,7 +291,8 @@ export function TripDetailScreen({
           !loading ? (
             <WWEmpty
               title="No flight details yet"
-              body="The trip is preserved. Refresh to load its recorded flights."
+              body={error || "The trip is preserved. Retry to load its recorded flights."}
+              action={<WWButton label="Retry flight details" onPress={retryDetails} secondary />}
             />
           ) : null
         }
@@ -351,19 +381,28 @@ const s = StyleSheet.create({
     paddingBottom: 14,
   },
   firstGroupHeader: { borderTopWidth: 1, borderTopColor: walletColors.rule },
+  stackedGroupHeader: { flexDirection: "column", alignItems: "stretch", gap: 5 },
   detailBar: {
-    height: 54,
+    minHeight: 52,
+    flexShrink: 0,
+    backgroundColor: colors.paperSoft,
+    borderBottomWidth: 1,
+    borderBottomColor: walletColors.rule,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 24,
+    paddingHorizontal: 18,
+    gap: 12,
   },
   backButton: {
-    width: 44,
-    height: 44,
+    flex: 1,
+    minHeight: 44,
+    flexDirection: "row",
+    gap: 9,
     alignItems: "center",
-    justifyContent: "center",
   },
+  backLabel: { flexShrink: 1, fontFamily: fonts.sansRegular, fontSize: 13, lineHeight: 19, color: colors.ink },
+  scheduleNote: { fontFamily: fonts.sansRegular, fontSize: 11, lineHeight: 17, color: walletColors.muted, backgroundColor: walletColors.paper, paddingHorizontal: 13, paddingBottom: 13 },
   detailLabel: {
     fontFamily: fonts.sansRegular,
     fontSize: 12,
@@ -378,9 +417,9 @@ const s = StyleSheet.create({
     color: walletColors.copper,
   },
   groupTitle: {
-    fontFamily: fonts.sans,
-    fontSize: 14,
-    lineHeight: 20,
+    fontFamily: fonts.display,
+    fontSize: 23,
+    lineHeight: 28,
     color: walletColors.ink,
   },
   groupDate: {
@@ -426,6 +465,9 @@ const s = StyleSheet.create({
     color: walletColors.muted,
     marginBottom: 6,
   },
+  stackedTotals: { flexDirection: "column", gap: 14 },
+  totalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 12 },
+  stackedValue: { flexShrink: 1, textAlign: "right" },
   totalValue: {
     fontFamily: fonts.mono,
     fontSize: 14,

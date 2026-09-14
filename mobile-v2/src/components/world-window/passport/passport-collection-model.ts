@@ -5,7 +5,7 @@ import { SOMALILAND_TRAVEL_KEY, travelCountry } from '../../../utils/travelCount
 const nameKey = (value: string) => value.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
 
 /** Share the passport's country identity, including ISO aliases and Somaliland. */
-export function tripsForCountry(trips: readonly TripSummary[], arrival: CountryArrival): TripSummary[] {
+export function tripsForCountry(trips: readonly TripSummary[], arrival: CountryArrival, segmentOnly = false): TripSummary[] {
   const target = (arrival.travelCountryKey ?? travelCountry(arrival.country, undefined, arrival.airportCode).travelCountryKey).toUpperCase();
   const matches = (country: string, countryCode?: string, airport?: string, savedKey?: string) => {
     const identity = travelCountry(country, countryCode, airport);
@@ -13,7 +13,7 @@ export function tripsForCountry(trips: readonly TripSummary[], arrival: CountryA
     if (key === SOMALILAND_TRAVEL_KEY || target === SOMALILAND_TRAVEL_KEY) return key === target;
     return key === target || Boolean(country && nameKey(country) === nameKey(arrival.country));
   };
-  return trips.filter(trip => matches(trip.country, trip.countryCode, trip.airportCode, trip.travelCountryKey)
+  return trips.filter(trip => ((!segmentOnly || trip.segments?.some(segment => segment.arrAirport === trip.airportCode)) && matches(trip.country, trip.countryCode, trip.airportCode, trip.travelCountryKey))
     || (trip.segments ?? []).some(segment => matches(segment.arrPoint?.country ?? segment.arrCountry ?? '', segment.arrPoint?.countryCode ?? segment.arrCountryCode, segment.arrAirport)
       || Boolean(arrival.airportCode && segment.arrAirport === arrival.airportCode)));
 }

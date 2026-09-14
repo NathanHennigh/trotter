@@ -1,10 +1,10 @@
 import React from "react";
 import {
   ActivityIndicator,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   useWindowDimensions,
   View,
@@ -19,17 +19,22 @@ import { flightDate } from "../components/world-window/trips/tripPresentation";
 import type { BottomNavTab, TripSegmentSummary } from "../data/trotterMock";
 import { useTravelTrips } from "../services/travelTrips";
 import { colors, fonts, layout } from "../theme/trotterTheme";
+import { PressFeedback } from "../components/world-window/motion";
+import { useExperiencePreferences } from "../utils/experiencePreferences";
 
 export function ProfileScreen({
   active,
   onChange,
   onOpenStamps,
+  onOpenAirport,
 }: {
   active: BottomNavTab;
   onChange: (tab: BottomNavTab) => void;
   onOpenStamps: () => void;
+  onOpenAirport?: (code: string) => void;
 }) {
   const insets = useSafeAreaInsets();
+  const preferences = useExperiencePreferences();
   const { width, fontScale } = useWindowDimensions();
   const largeText = fontScale >= 1.35;
   const visualWidth = getMobileVisualWidth(width);
@@ -126,7 +131,7 @@ export function ProfileScreen({
                 {profile.flights === 1 ? "flight" : "flights"}
               </Text>
             </View>
-            <Pressable
+            <PressFeedback
               accessibilityRole="button"
               accessibilityLabel="Check Gmail for new flights"
               accessibilityState={{
@@ -139,7 +144,7 @@ export function ProfileScreen({
                 styles.syncButton,
                 largeText && styles.syncButtonLarge,
                 busy && styles.disabled,
-                pressed && styles.pressed,
+
               ]}
             >
               {status === "syncing" ? (
@@ -148,7 +153,7 @@ export function ProfileScreen({
                 <WWIcon name="sync" size={19} color={colors.blue} />
               )}
               <Text style={styles.textButtonLabel}>Check mail</Text>
-            </Pressable>
+            </PressFeedback>
           </View>
           <Text style={styles.sourceNote} accessibilityLiveRegion="polite">
             {status === "syncing"
@@ -181,7 +186,9 @@ export function ProfileScreen({
               destination={airport.code}
               backgroundColor="#b5ced1"
             />
-            <View style={[styles.airport, largeText && styles.airportLarge]}>
+            <PressFeedback accessibilityRole="button" accessibilityLabel={`View ${airport.code} airport history`}
+              disabled={!onOpenAirport} onPress={() => onOpenAirport?.(airport.code)}
+              style={[styles.airport, largeText && styles.airportLarge]}>
               <Text style={styles.airportCode}>{airport.code}</Text>
               <View style={styles.airportCopy}>
                 {airport.point?.city ? (
@@ -192,7 +199,8 @@ export function ProfileScreen({
                   {airport.segments.length === 1 ? "flight" : "flights"}
                 </Text>
               </View>
-            </View>
+              {onOpenAirport ? <WWIcon name="arrow" size={19} color={colors.blue} /> : null}
+            </PressFeedback>
             {airport.point ? (
               <Text style={styles.coordinates}>
                 {coordinates(airport.point.lat, airport.point.lon)}
@@ -217,6 +225,15 @@ export function ProfileScreen({
           onPress={onOpenStamps}
         />
         <View style={styles.account}>
+          <View style={styles.feedbackSetting}>
+            <View style={styles.feedbackCopy}>
+              <Text style={styles.sectionTitle}>Tactile feedback</Text>
+              <Text style={styles.secondary}>Page turns and confirmations</Text>
+            </View>
+            <Switch accessibilityLabel="Tactile feedback" value={preferences.haptics} hitSlop={12}
+              onValueChange={preferences.setHaptics}
+              trackColor={{ false: colors.paperBorder, true: colors.blue }} thumbColor={colors.paperSoft} />
+          </View>
           <Text style={styles.sectionTitle}>Google account</Text>
           <Text style={styles.accountEmail} selectable>
             {accountEmail}
@@ -224,7 +241,7 @@ export function ProfileScreen({
           {lastSyncedAt ? <Text style={styles.secondary}>Archive refreshed {formatUpdated(lastSyncedAt)}</Text> : null}
           {error && error !== gmailSyncError ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
           <View style={styles.accountActions}>
-            <Pressable
+            <PressFeedback
               accessibilityRole="button"
               accessibilityState={{
                 disabled: busy,
@@ -235,7 +252,7 @@ export function ProfileScreen({
               style={({ pressed }) => [
                 styles.textButton,
                 busy && styles.disabled,
-                pressed && styles.pressed,
+
               ]}
             >
               {status === "refreshing" ? (
@@ -246,18 +263,18 @@ export function ProfileScreen({
               <Text style={styles.textButtonLabel}>
                 {status === "refreshing" ? "Refreshing…" : "Refresh archive"}
               </Text>
-            </Pressable>
-            <Pressable
+            </PressFeedback>
+            <PressFeedback
               accessibilityRole="button"
               onPress={() => void signOut()}
               style={({ pressed }) => [
                 styles.textButton,
-                pressed && styles.pressed,
+
               ]}
             >
               <Text style={styles.textButtonLabel}>Sign out</Text>
               <WWIcon name="logout" size={16} color={colors.blue} />
-            </Pressable>
+            </PressFeedback>
           </View>
         </View>
       </ScrollView>
@@ -275,17 +292,17 @@ function ArchiveRow({
   onPress: () => void;
 }) {
   return (
-    <Pressable
+    <PressFeedback
       accessibilityRole="button"
       onPress={onPress}
-      style={({ pressed }) => [styles.archiveRow, pressed && styles.pressed]}
+      style={styles.archiveRow}
     >
       <Text style={styles.archiveLabel}>{label}</Text>
       <View style={styles.archiveValue}>
         <Text style={styles.archiveLabel}>{value}</Text>
         <WWIcon name="arrow" size={17} color={colors.blue} />
       </View>
-    </Pressable>
+    </PressFeedback>
   );
 }
 // An observed airport is not a user-declared home. Keep that distinction in the label.
@@ -341,6 +358,8 @@ function formatUpdated(value: string) {
 }
 // Profile-specific geometry follows identity.css and approved window-polish.css.
 const styles = StyleSheet.create({
+  feedbackSetting: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, paddingBottom: 22, marginBottom: 22, borderBottomWidth: 1, borderBottomColor: colors.paperBorder },
+  feedbackCopy: { flex: 1, gap: 6 },
   screen: { flex: 1, backgroundColor: colors.paperSoft },
   content: {
     paddingHorizontal: 24,

@@ -94,11 +94,17 @@ function load(file, name, overrides = {}) {
   const compiled = ts.transpileModule(`${text.startsWith("export") ? text : "export " + text}\n${styles?.getText(ast) ?? ""}`, {
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  const tags = "View Text Pressable FlatList BoardingPass TripAtlas WalletHeading WWEmpty ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionList CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen".split(" ");
+  const tags = "View Text Pressable FlatList BoardingPass TripAtlas WalletHeading WWEmpty ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionScope CollectionList CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen PaperReveal PaperPresence TripNavigationSurface".split(" ");
   const globals = {
     ...Object.fromEntries(tags.map(tag => [tag, tag])),
     React: host.React, useState: host.React.useState, useMemo: host.React.useMemo, useEffect: host.React.useEffect, useRef: host.React.useRef,
     StyleSheet: { create: x => x, absoluteFillObject: {}, absoluteFill: {} },
+    PressFeedback: "Pressable", useReducedMotion: () => false, selectionHaptic: noOp,
+    useExperiencePreferences: () => { const [texture, setTexture] = host.React.useState("classic"); return { texture, setTexture, haptics: true, setHaptics: noOp }; },
+    ...pure("src/utils/travelScope.ts"), ...pure("src/components/world-window/routeSelection.ts"),
+    ...pure("src/components/world-window/displayTextFit.ts"),
+    scopedPassportArchive: () => archive,
+    passportScope: () => ({ arrivals: archive.arrivals, lifetimeArrivals: archive.arrivals, trips: [trip], scopedTrips: [trip] }),
     ...pure("src/components/world-window/trips/tripPresentation.ts"), walletColors: {}, Platform: { OS: "android" }, colors: {}, fonts: {}, layout: { bottomNavHeight: 62 },
     useSafeAreaInsets: () => ({ top: 24, bottom: 20 }), useWindowDimensions: () => ({ width: 390, height: 844 }), getMobileVisualWidth: x => x,
     useTravelTrips: () => ({ trips: [trip], profile: {}, status: "ready", refresh: noOp, syncFromGmail: noOp }),
@@ -122,6 +128,7 @@ const button = (tree, label) => nodes(tree).find(n => n.type === "Pressable" && 
 const appHost = overrides => load("App.tsx", "AppShell", overrides);
 const passportHost = () => load("src/screens/PassportStatsScreen.tsx", "PassportStatsScreen");
 const listHost = () => load("src/components/world-window/passport/PassportCollections.tsx", "CollectionList");
+const finishTripTransition = host => { let tree = host.render(); const surface = find(tree, "TripNavigationSurface"); assert(surface?.props.closing); surface.props.onClosed(); return host.render(); };
 
 test("Home controls share one balanced row and preserve touch targets and texture toggle", () => {
   const host = load("src/screens/HomeGlobeScreen.tsx", "HomeGlobeScreen");
@@ -149,16 +156,48 @@ test("Home statistic actions target flights, countries and airports separately",
   assert.deepEqual(calls, ["trips", "countries", "airports"]);
 });
 
+test("Home year reaches Flights and clearing it does not silently change the globe year", () => {
+  const host = appHost(); let tree = host.render({ consumeShare: noOp });
+  find(tree, "HomeGlobeScreen").props.onFilterYear("2026"); tree = host.render();
+  find(tree, "HomeGlobeScreen").props.onOpenFlights("2026"); tree = host.render();
+  assert.equal(find(tree, "TripsListScreen").props.initialYear, "2026");
+  const epoch = find(tree, "TripsListScreen").props.scopeEpoch;
+  find(tree, "TripsListScreen").props.onClearYear(); tree = host.render();
+  assert.equal(find(tree, "TripsListScreen").props.initialYear, undefined);
+  assert(find(tree, "TripsListScreen").props.scopeEpoch > epoch);
+  assert.equal(find(tree, "HomeGlobeScreen").props.filterYear, "2026");
+});
+
+test("Profile airport goes directly to its airport history and Back returns Profile", () => {
+  const host = appHost(); let tree = host.render({ consumeShare: noOp });
+  find(tree, "HomeGlobeScreen").props.onChange("profile"); tree = host.render();
+  find(tree, "ProfileScreen").props.onOpenAirport("DFW"); tree = host.render();
+  const collection = find(tree, "PassportStatsScreen");
+  assert.equal(collection.props.initialCollection, "airports"); assert.equal(collection.props.initialAirport, "DFW");
+  assert.equal(collection.props.collectionBackLabel, "Profile");
+  collection.props.onCloseCollection(); tree = host.render(); assert.equal(find(tree, "ProfileScreen").props.active, "profile");
+});
+
+test("a delayed wallet measurement cannot reopen Trips after changing tabs", () => {
+  const host = appHost(); let tree = host.render({ consumeShare: noOp });
+  find(tree, 'HomeGlobeScreen').props.onChange('trips'); tree = host.render();
+  const delayedOpen = find(tree, 'TripsListScreen').props.onOpenTrip;
+  find(tree, 'TripsListScreen').props.onChange('profile'); tree = host.render();
+  delayedOpen(trip, undefined, { x: 20, y: 180, width: 350, height: 260 }); tree = host.render();
+  assert.equal(find(tree, 'TripDetailScreen'), undefined); assert.equal(find(tree, 'ProfileScreen').props.active, 'profile');
+});
+
 for (const kind of ["countries", "airports"]) {
   test(`Home ${kind} opens that collection; close returns Home and preserves year`, () => {
     const host = appHost();
     let tree = host.render({ consumeShare: noOp });
     find(tree, "HomeGlobeScreen").props.onFilterYear("2026");
     tree = host.render();
-    find(tree, "HomeGlobeScreen").props.onOpenCollection(kind);
+    find(tree, "HomeGlobeScreen").props.onOpenCollection(kind, "2026");
     tree = host.render();
     const passport = find(tree, "PassportStatsScreen");
     assert.equal(passport.props.initialCollection, kind);
+    assert.equal(passport.props.initialYear, "2026");
     assert.equal(passport.props.collectionBackLabel, "Globe");
     assert.equal(find(tree, "HomeGlobeScreen").props.active, "passport");
     passport.props.onCloseCollection();
@@ -186,7 +225,7 @@ test("Explicit tab navigation clears a collection; a trip detail preserves its r
   tree = host.render();
   assert.equal(find(tree, "TripDetailScreen").props.trip.id, trip.id);
   find(tree, "TripDetailScreen").props.onBack();
-  tree = host.render();
+  tree = finishTripTransition(host);
   assert.equal(find(tree, "PassportStatsScreen").props.visible, true);
   assert.equal(find(tree, "PassportStatsScreen").props.initialCollection, "airports");
 });
@@ -213,7 +252,7 @@ test("Airport hardware Back steps detail → airport list → Home", () => {
   list.unmount();
 });
 
-test("Country hardware Back steps trips → country → country list → Home", () => {
+test("Country journeys are inline; hardware Back steps country → country list → Home", () => {
   let exits = 0, back;
   const passport = passportHost();
   let tree = passport.render({ active: "passport", onChange: noOp, initialCollection: "countries", onCloseCollection: () => exits++, onBackHandlerChange: handler => back = handler });
@@ -221,14 +260,10 @@ test("Country hardware Back steps trips → country → country list → Home", 
   tree = passport.render();
   const detail = load("src/components/world-window/passport/PassportCollections.tsx", "CountryArrivalDetail");
   let detailTree = detail.render(find(tree, "CountryArrivalDetail").props);
-  find(detailTree, "WWButton").props.onPress();
-  detailTree = detail.render();
   assert(find(detailTree, "TripRows"));
+  assert.equal(find(detailTree, "WWButton"), undefined, "No redundant View trips navigation step");
   back();
-  detailTree = detail.render();
-  assert.equal(find(detailTree, "TripRows"), undefined);
   assert.equal(exits, 0);
-  back();
   detail.unmount();
   tree = passport.render();
   assert.equal(find(tree, "CollectionList").props.kind, "countries");
@@ -258,13 +293,14 @@ test("Hidden tab layers cannot receive touches or appear in either accessibility
   const list=find(tree,"TripsListScreen"); list.props.onOpenTrip(trip); tree=host.render();
   assert(find(tree,"TripsListScreen"),"Trip list stays mounted beneath detail");
   const layers=tree.props.children.flat(Infinity).filter(n=>n&&n.type==="View");
-  assert.equal(layers.filter(n=>n.props.pointerEvents==="auto").length,1);
+  assert.equal(layers.filter(n=>n.props.pointerEvents==="auto").length,0, "Only the separate itinerary surface accepts input");
+  assert(find(tree, "TripNavigationSurface"));
   for(const layer of layers.filter(n=>n.props.pointerEvents==="none")){
     assert.equal(layer.props.accessibilityElementsHidden,true);
     assert.equal(layer.props.importantForAccessibility,"no-hide-descendants");
     assert.equal(layer.props["aria-hidden"],true);
   }
-  find(tree,"TripDetailScreen").props.onBack(); tree=host.render();
+  find(tree,"TripDetailScreen").props.onBack(); tree=finishTripTransition(host);
   assert.equal(find(tree,"TripsListScreen").props.active,"trips");
 });
 
@@ -276,6 +312,7 @@ test("App hardware Back returns to the collection before delegating its nested B
   find(tree,"PassportStatsScreen").props.onBackHandlerChange(()=>{childCalls++;return true});
   find(tree,"PassportStatsScreen").props.onOpenTrip(trip); tree=host.render();
   assert.equal(back(),true); tree=host.render(); assert.equal(childCalls,0);
+  tree=finishTripTransition(host);
   assert.equal(find(tree,"PassportStatsScreen").props.visible,true);
   assert.equal(back(),true); assert.equal(childCalls,1);
 });
@@ -311,7 +348,7 @@ test("Explicit navigation from a trip clears its retained passport overlay; ordi
   find(book,'CollectionButtons').props.onOpen('airports'); book=passport.render();
   find(book,'CollectionList').props.onOpenTrip(trip); tree=host.render();
   book=passport.render(find(tree,'PassportStatsScreen').props); assert(find(book,'CollectionList'));
-  find(tree,'TripDetailScreen').props.onBack(); tree=host.render();
+  find(tree,'TripDetailScreen').props.onBack(); tree=finishTripTransition(host);
   book=passport.render(find(tree,'PassportStatsScreen').props); assert(find(book,'CollectionList'));
   find(book,'CollectionList').props.onOpenTrip(trip); tree=host.render();
   find(tree,'TripDetailScreen').props.onChange('profile'); tree=host.render();

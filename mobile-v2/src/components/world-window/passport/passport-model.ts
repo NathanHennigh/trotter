@@ -7,6 +7,8 @@ export type AirlineRecord = { code: string; flights: number; miles: number; trip
 export type ActivityYear = { year: number; flights: number; miles: number };
 export type PassportRecord = { label: string; value: string; detail: string; trip?: TripSummary };
 export type PassportArchive = {
+  scopeYear?: string;
+  recordStartDate?: string;
   name: string; homeAirport: string; homeAirportName: string; firstFlightDate: string;
   arrivals: CountryArrival[]; airports: AirportRecord[]; airlines: AirlineRecord[];
   years: ActivityYear[]; flights: number; miles: number; tripCount: number; records: PassportRecord[];

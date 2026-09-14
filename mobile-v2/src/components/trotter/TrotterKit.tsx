@@ -31,6 +31,7 @@ import {
 import { getMobileVisualWidth } from "../../utils/mobileLayout";
 import { PngStamp } from "./stamps/PngStamp";
 import { WWIcon } from "../world-window/WorldWindowUI";
+import { PressFeedback } from "../world-window/motion";
 
 const paperTexture = require("../../../assets/textures/paper_texture_clean.png");
 const darkTexture = require("../../../assets/textures/dark_dashboard_texture.png");
@@ -625,7 +626,7 @@ export function SegmentedFilterTabs({
       {tabs.map((tab) => {
         const active = tab.key === activeKey;
         return (
-          <Pressable
+          <PressFeedback
             key={tab.key}
             onPress={() => onChange(tab.key)}
             style={[styles.tab, active && styles.tabActive]}
@@ -639,7 +640,7 @@ export function SegmentedFilterTabs({
               {tab.label}
               {typeof tab.count === "number" ? ` ${tab.count}` : ""}
             </Text>
-          </Pressable>
+          </PressFeedback>
         );
       })}
     </View>

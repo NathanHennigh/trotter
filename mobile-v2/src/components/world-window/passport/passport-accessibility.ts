@@ -20,8 +20,8 @@ export function passportPageDescription(page: PaperPage, payload: BookPayload) {
   if (page.kind === 'record') return { label: 'Travel record', lines: [
     `Flights: ${payload.flights.toLocaleString()}`,
     `Miles flown: ${payload.miles.toLocaleString()}`,
-    ...payload.years.map(year => `${year.year}: ${year.flights.toLocaleString()} flights`),
-    payload.firstFlightDate && `First flight: ${dateText(payload.firstFlightDate)}`,
+    ...(payload.register ?? []).map(entry => `${entry.label}: ${entry.value}${entry.detail ? ', ' + entry.detail : ''}`),
+    !payload.register && payload.firstFlightDate && `First flight: ${dateText(payload.firstFlightDate)}`,
   ].filter((line): line is string => Boolean(line)) };
   return undefined;
 }

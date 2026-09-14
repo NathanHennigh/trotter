@@ -13,6 +13,7 @@ import { passportDocument, scriptJSON } from "./passport-document";
 import { passportPose, passportViewportHeight } from "./passport-cover";
 import { preparePassportPayload, type BookPayload } from "./passport-payload";
 import type { PassportArchive } from "./passport-model";
+import { selectionHaptic } from "../../../utils/experiencePreferences";
 
 type BookState = { spread: number; closed: boolean };
 type Props = {
@@ -20,12 +21,16 @@ type Props = {
   width: number;
   onCountry: (code: string) => void;
   onInteractionChange?: (active: boolean) => void;
+  earned?: { key: string; codes: string[] };
+  visible?: boolean;
 };
 export function PassportBook({
   archive,
   width,
   onCountry,
   onInteractionChange,
+  earned,
+  visible = true,
 }: Props) {
   const drawingWidth = Number.isFinite(width) ? Math.max(1, width) : 1;
   const viewportHeight = useMemo(() => passportViewportHeight(drawingWidth), [drawingWidth]);
@@ -77,7 +82,7 @@ export function PassportBook({
     preparePassportPayload(archive)
       .then((next) => {
         if (cancelled) return;
-        payload.current = { ...next, state: state.current };
+        payload.current = { ...next, state: state.current, earned, visible };
         setError(false);
         if (!initial.current) {
           const document = passportDocument(payload.current);
@@ -92,11 +97,12 @@ export function PassportBook({
     return () => {
       cancelled = true;
     };
-  }, [archive, attempt, sendPayload]);
+  }, [archive, attempt, sendPayload, earned, visible]);
   const message = useCallback((data: unknown) => {
     if (!mounted.current || !data || typeof data !== "object") return;
     const value = data as Record<string, unknown>;
     if (value.source !== "trotter-passport") return;
+    if (value.type === "page-complete") selectionHaptic('page');
     if (
       value.type === "size" &&
       typeof value.height === "number" &&

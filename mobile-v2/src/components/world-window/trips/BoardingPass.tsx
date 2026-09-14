@@ -5,7 +5,7 @@ import type { TripSegmentSummary } from "../../../data/trotterMock";
 import { colors, fonts } from "../../../theme/trotterTheme";
 import { AirlineLogo, airlineName } from "../AirlineLogo";
 import { WWIcon } from "../WorldWindowUI";
-import { calendarDate, flightDate, flightTime } from "./tripPresentation";
+import { arrivalDayChange, calendarDate, flightDate, flightTime } from "./tripPresentation";
 import { walletColors } from "./WalletCover";
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 
@@ -16,7 +16,8 @@ export function BoardingPass({
   segment: TripSegmentSummary;
   selected?: boolean;
 }) {
-  const width = getMobileVisualWidth(useWindowDimensions().width) || 410;
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const width = getMobileVisualWidth(windowWidth) || 410;
   const grain = React.useId().replace(/:/g, "");
   const flight = segment.flightNumber
     ? segment.flightNumber
@@ -25,7 +26,8 @@ export function BoardingPass({
       ? segment.flightNumber.replace(/\s+/g, "")
       : `${segment.airline || ""}${segment.flightNumber}`.replace(/\s+/g, "")
     : "—";
-  const compact = width <= 350;
+  const compact = width <= 350 || fontScale >= 1.35;
+  const stackEndpoints = width <= 360 && fontScale >= 1.35;
   const narrow = width <= 360 && !compact;
   const date = calendarDate(segment.depTime);
   const day = date?.slice(8, 10),
@@ -35,8 +37,7 @@ export function BoardingPass({
           timeZone: "UTC",
         })
       : undefined;
-  const changedDate =
-    calendarDate(segment.depTime) !== calendarDate(segment.arrTime);
+  const dayChange = arrivalDayChange(segment.depTime, segment.arrTime);
   return (
     <View style={s.ticketWrap}>
       <View pointerEvents="none" style={s.paperEdge} />
@@ -81,7 +82,7 @@ export function BoardingPass({
                 : "Airline unavailable"}
             </Text>
           </View>
-          <View style={s.airports}>
+          <View style={[s.airports, stackEndpoints && s.stackedEndpoints]}>
             <View style={s.endpoint}>
               <Text
                 style={[
@@ -116,7 +117,7 @@ export function BoardingPass({
               </Text>
             </View>
           </View>
-          <View style={s.times}>
+          <View style={[s.times, stackEndpoints && s.stackedEndpoints]}>
             <View style={s.endpoint}>
               <Text style={s.scheduleLabel}>Departure</Text>
               <Text
@@ -141,9 +142,10 @@ export function BoardingPass({
               >
                 {flightTime(segment.arrTime)}
               </Text>
-              <Text style={[s.date, s.right, changedDate && s.changedDate]}>
+              <Text style={[s.date, s.right, dayChange && s.changedDate]}>
                 {flightDate(segment.arrTime)}
               </Text>
+              {dayChange ? <Text style={s.dayChange}>{dayChange}</Text> : null}
             </View>
           </View>
           {(segment.bookingReference || segment.distanceMiles != null) && (
@@ -218,6 +220,7 @@ export function BoardingPass({
   );
 }
 const s = StyleSheet.create({
+  stackedEndpoints: { flexDirection: "column", alignItems: "stretch", gap: 14 },
   ticketWrap: { position: "relative" },
   paperEdge: {
     position: "absolute",
@@ -229,10 +232,10 @@ const s = StyleSheet.create({
     borderRadius: 3,
   },
   ticket: {
-    backgroundColor: "#fcfaf3",
+    backgroundColor: colors.paperSheet,
     flexDirection: "row",
     borderWidth: 1,
-    borderColor: "#c9d2ca",
+    borderColor: colors.paperBorder,
     borderRadius: 3,
     shadowColor: colors.ink,
     shadowOpacity: 0.045,
@@ -303,8 +306,8 @@ const s = StyleSheet.create({
   },
   time: {
     fontFamily: fonts.mono,
-    fontSize: 19,
-    lineHeight: 24.7,
+    fontSize: 21,
+    lineHeight: 27,
     color: walletColors.ink,
     includeFontPadding: false,
   },
@@ -315,7 +318,8 @@ const s = StyleSheet.create({
     color: colors.mutedInk,
     marginTop: 7,
   },
-  changedDate: { color: colors.red },
+  changedDate: { color: walletColors.ink },
+  dayChange: { color: walletColors.copper, fontFamily: fonts.sansSemi, fontSize: 11, lineHeight: 16, marginTop: 4, textAlign: "right" },
   metadata: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -401,7 +405,7 @@ const s = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: walletColors.paper,
     borderWidth: 1,
-    borderColor: "#c9d2ca",
+    borderColor: colors.paperBorder,
   },
   notchTop: { left: -5, top: -5 },
   notchBottom: { left: -5, bottom: -5 },

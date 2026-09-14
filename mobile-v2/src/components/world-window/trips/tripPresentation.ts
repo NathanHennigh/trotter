@@ -34,6 +34,17 @@ export function flightTime(value?: string) {
     : "—";
 }
 
+/** Calendar change between the airport dates, not elapsed flight duration. */
+export function arrivalDayChange(departure?: string, arrival?: string) {
+  const start = calendarDate(departure), end = calendarDate(arrival);
+  if (!start || !end) return undefined;
+  const days = Math.round((Date.parse(`${end}T12:00:00Z`) - Date.parse(`${start}T12:00:00Z`)) / 86400000);
+  if (!Number.isFinite(days) || days === 0) return undefined;
+  if (days === 1) return "Next day";
+  if (days === -1) return "Previous day";
+  return `${Math.abs(days)} days ${days > 0 ? "later" : "earlier"}`;
+}
+
 export function tripDates(trip: Pick<TripSummary, "startDate" | "endDate">) {
   if (trip.startDate === trip.endDate) return flightDate(trip.startDate);
   return `${flightDate(trip.startDate, trip.startDate.slice(0, 4) !== trip.endDate.slice(0, 4))} – ${flightDate(trip.endDate)}`;

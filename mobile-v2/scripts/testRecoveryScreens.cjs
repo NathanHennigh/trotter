@@ -6,6 +6,8 @@ const ts = require('typescript');
 const { test } = require('node:test');
 const root = path.join(__dirname, '../src');
 const noop = () => {};
+const draftModule = { exports: {} };
+new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(root, 'components/world-window/dreams/dreamDraft.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(draftModule, draftModule.exports);
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const flush = async () => { for (let n = 0; n < 30; n++) await Promise.resolve(); };
 function screen(file, exportName, overrides = {}) {
@@ -21,7 +23,7 @@ function screen(file, exportName, overrides = {}) {
   const tags = 'ActivityIndicator Pressable ScrollView Text View KeyboardAvoidingView Modal TextInput'.split(' ');
   const native = { ...Object.fromEntries(tags.map(tag => [tag, tag])), StyleSheet: { create: x => x }, Platform: { OS: 'android' }, useWindowDimensions: () => ({ width: 390, height: 840 }), Linking: { openURL: async () => {} } };
   const mocks = {
-    react, 'react-native': native, 'react-native-svg': { default: 'Svg', Path: 'Path' },
+    react, './dreamDraft': draftModule.exports, '../motion': { PressFeedback: 'Pressable', useReducedMotion: () => true }, '../components/world-window/motion': { PressFeedback: 'Pressable' }, '../../../utils/experiencePreferences': { selectionHaptic: noop }, 'react-native': native, 'react-native-svg': { default: 'Svg', Path: 'Path' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) },
     '../services/travelTrips': { useTravelTrips: () => overrides.account },
     '../components/world-window/WorldWindowUI': { WWEmblem: 'WWEmblem' },
@@ -71,7 +73,7 @@ for (const closeVia of ['hardware', 'button']) test(`Dream editor ${closeVia} Cl
   const wait = deferred(); let closes = 0, saves = 0;
   const host = screen('components/world-window/dreams/DreamEditor.tsx', 'DreamEditor');
   let tree = host.render({ item, points: [], onClose: () => closes++, onSave: () => { saves++; return wait.promise; }, onDelete: noop, onRetry: noop });
-  const confirm = button(tree, 'Confirm place'); confirm.props.onPress(); confirm.props.onPress();
+  const confirm = button(tree, 'Save place details'); confirm.props.onPress(); confirm.props.onPress();
   assert.equal(saves, 1, 'Double press cannot launch two mutations before React rerenders');
   tree = host.render();
   const close = button(tree, 'Close place'); assert.notEqual(close.props.disabled, true);
@@ -91,7 +93,7 @@ test('failed Dreams save keeps the editor and its draft, then allows a deliberat
   assert.equal(closes, 0); assert(text(tree).some(value => value.includes('request timed out')));
   assert.equal(nodes(tree).find(node => node.props?.label === 'Place name').props.value, 'My retained draft');
   assert.equal(button(tree, 'Save changes').props.disabled, false);
-  button(tree, 'Save changes').props.onPress(); await flush(); assert.equal(closes, 1); host.dispose();
+  button(tree, 'Save changes').props.onPress(); await flush(); tree = host.render(); assert.equal(closes, 0); assert.equal(button(tree, 'Save changes'), undefined); assert(text(tree).includes('Changes saved.')); host.dispose();
 });
 
 test('editing notes does not silently turn an automatically found location into a manual pin', async () => {
@@ -109,8 +111,8 @@ test('location lookup remains open and candidate confirmation sends only the cho
   const props={item:{...item,needsReview:false},points:[],onClose:()=>closes++,onSave:noop,onDelete:noop,onRetry:noop,onLocate:async()=>lookups++,onConfirmLocation:async(id,candidate)=>{confirmed=[id,candidate];}};
   let tree=host.render(props); button(tree,'Find location').props.onPress(); await flush(); assert.equal(lookups,1); assert.equal(closes,0);
   tree=host.render({...props,item:{...props.item,locationStatus:'needs_review',locationCandidates:[{id:'candidate-2',name:'Cafe One',address:'1 Synthetic Road',latitude:38.7,longitude:-9.1}]}});
-  assert.equal(button(tree,'Find location'),undefined); button(tree,'Use this location').props.onPress(); await flush();
-  assert.deepEqual(confirmed,['1','candidate-2']); assert.equal(closes,1); host.dispose();
+  assert.equal(button(tree,'Find location'),undefined); button(tree,'Confirm pin').props.onPress(); await flush();
+  assert.deepEqual(confirmed,['1','candidate-2']); assert.equal(closes,0); tree=host.render(); assert(text(tree).includes('Pin confirmed.')); host.dispose();
 });
 
 test('entering Edit uses the latest parsed place, then polling preserves an active draft',()=>{
@@ -124,4 +126,12 @@ test('entering Edit uses the latest parsed place, then polling preserves an acti
   field(tree,'Place name').props.onChange('My corrected name');
   tree=host.render({...ready,item:{...ready.item,placeName:'Later server value',locationStatus:'resolved'}});
   assert.equal(field(tree,'Place name').props.value,'My corrected name'); host.dispose();
+});
+
+ test('connection error retry calls the failed-step recovery, not archive refresh', () => {
+  let retries = 0, refreshes = 0;
+  const host = screen('screens/AuthScreen.tsx', 'AuthScreen', { account: { authStatus: 'signed-out', status: 'error', error: 'Connection failed', signIn: noop, signOut: noop, retryAuth: () => retries++, refresh: () => refreshes++ } });
+  const tree = host.render();
+  const retry = nodes(tree).find(node => node.type === 'Pressable' && text(node).includes('Try connection again'));
+  assert(retry); retry.props.onPress(); assert.equal(retries, 1); assert.equal(refreshes, 0); host.dispose();
 });

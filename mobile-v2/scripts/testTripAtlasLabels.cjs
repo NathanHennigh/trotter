@@ -76,6 +76,15 @@ test('single-point and empty archives remain finite and do not invent markers', 
   assert.deepEqual(geometry.tripAtlasGeometry([], null), { landPath: '', paths: [], ports: [] });
 });
 
+test('Profile limits labels by importance while retaining all routes and markers', () => {
+  const ports = [point('DFW', 33, -97), point('SIN', 1, 104), point('LHR', 51, 0), point('SFO', 38, -122), point('SYD', -34, 151)];
+  const flights = ports.slice(1).map(port => flight(ports[0], port));
+  flights.push(flight(ports[0], ports[2], 'repeat1'), flight(ports[0], ports[2], 'repeat2'));
+  const map = geometry.tripAtlasGeometry(flights, null, 'SIN', { maxLabels: 3, prioritizeByFrequency: true });
+  assert.equal(map.paths.length, flights.length); assert.equal(map.ports.length, 5); assertClear(map);
+  assert.deepEqual(new Set(map.ports.filter(port => port.label).map(port => port.code)), new Set(['SIN', 'DFW', 'LHR']));
+});
+
 test('actual TripAtlas SVG paints all airport circles before every label background and text', () => {
   const react = { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), useMemo: fn => fn(), useId: () => 'atlas-label-test' };
   const svg = { __esModule: true, default: 'Svg', ...Object.fromEntries('Circle Defs G LinearGradient Path Rect Stop Text'.split(' ').map(tag => [tag, tag])) };

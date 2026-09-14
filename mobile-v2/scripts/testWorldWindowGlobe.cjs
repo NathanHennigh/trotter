@@ -54,6 +54,11 @@ new Function(
   if (request === "expo-gl" || request.includes("expoThree")) return {};
   if (request.includes("trotterTheme")) return { colors: {}, fonts: {} };
   if (request === "./globe-geography") return geography;
+  if (request === "./routeSelection") {
+    const module = { exports: {} };
+    new Function("module", "exports", compile(fs.readFileSync(path.join(directory, "routeSelection.ts"), "utf8")))(module, module.exports);
+    return module.exports;
+  }
   if (request.includes("globeDayDetailTiles"))
     return {
       globeDayDetailTiles: Array.from({ length: 6 }, (_, r) =>

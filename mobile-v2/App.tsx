@@ -38,6 +38,9 @@ import {
   useTravelTrips,
 } from "./src/services/travelTrips";
 import { colors } from "./src/theme/trotterTheme";
+import { normalizeTravelYear } from "./src/utils/travelScope";
+import type { TripOpenOrigin } from "./src/components/world-window/trips/tripTransition";
+import { TripNavigationSurface } from "./src/components/world-window/trips/TripNavigationSurface";
 
 const tabs: BottomNavTab[] = [
   "globe",
@@ -219,18 +222,30 @@ function AppShell({
   consumeShare: (queueId: number) => void;
 }) {
   const [activeTab, setActiveTab] = React.useState<BottomNavTab>(getInitialTab);
+  const currentTab = React.useRef(activeTab);
+  currentTab.current = activeTab;
   const [visitedTabs, setVisitedTabs] = React.useState<BottomNavTab[]>(() => [getInitialTab()]);
   const [globeYear, setGlobeYear] = React.useState("All years");
+  const [tripsScope, setTripsScope] = React.useState<{ year?: string; epoch: number }>({ epoch: 0 });
+  const scopeSequence = React.useRef(0);
   const [passportReset, setPassportReset] = React.useState(0);
   const [selectedTripId, setSelectedTripId] = React.useState<string | null>(null);
   const [selectedFlightId, setSelectedFlightId] = React.useState<string>();
+  const [tripClosing, setTripClosing] = React.useState(false);
+  const [tripPaperOrigin, setTripPaperOrigin] = React.useState<TripOpenOrigin>();
+  const [tripPaperTarget, setTripPaperTarget] = React.useState<TripOpenOrigin>();
   const [countries, setCountries] = React.useState<{
     initialCountry?: string;
     returnTab: BottomNavTab;
+    year?: string;
+    epoch: number;
   } | null>(null);
   const [passportCollection, setPassportCollection] = React.useState<{
     kind: CollectionKind;
     returnTab: BottomNavTab;
+    year?: string;
+    epoch: number;
+    airport?: string;
   } | null>(null);
   const tripOrigin = React.useRef<BottomNavTab>("trips");
   const handlers = React.useRef<Record<string, (() => boolean) | null>>({});
@@ -242,6 +257,9 @@ function AppShell({
   }, []);
   const registerDreamsBack = React.useCallback((handler: (() => boolean) | null) => {
     handlers.current.dreams = handler;
+  }, []);
+  const registerGlobeBack = React.useCallback((handler: (() => boolean) | null) => {
+    handlers.current.globe = handler;
   }, []);
   const { trips } = useTravelTrips();
   const { shareInstagramLink } = useDreams();
@@ -255,25 +273,38 @@ function AppShell({
     setPassportReset((value) => value + 1);
     setSelectedTripId(null);
     setSelectedFlightId(undefined);
+    setTripClosing(false);
     setCountries(null);
     setPassportCollection(null);
     visit(tab);
   };
-  const openTrip = (trip: TripSummary, flightId?: string) => {
+  const openTrip = (trip: TripSummary, flightId?: string, paperOrigin?: TripOpenOrigin) => {
+    if (currentTab.current !== activeTab) return;
     tripOrigin.current = activeTab;
     setSelectedTripId(trip.id);
     setSelectedFlightId(flightId);
+    setTripClosing(false);
+    setTripPaperOrigin(paperOrigin);
+    setTripPaperTarget(undefined);
     // Keep the origin mounted, including its collection selection and scroll.
     visit("trips");
   };
-  const closeTrip = () => {
+  const finishCloseTrip = () => {
     setSelectedTripId(null);
     setSelectedFlightId(undefined);
+    setTripClosing(false);
+    setTripPaperOrigin(undefined);
+    setTripPaperTarget(undefined);
     visit(tripOrigin.current);
   };
-  const openCountries = (code?: string) => {
+  const closeTrip = () => setTripClosing(true);
+  const openFilteredTrips = (year?: string) => {
+    setTripsScope({ year: normalizeTravelYear(year), epoch: ++scopeSequence.current });
+    changeTab("trips");
+  };
+  const openCountries = (code?: string, year?: string) => {
     setPassportCollection(null);
-    setCountries({ initialCountry: code, returnTab: activeTab });
+    setCountries({ initialCountry: code, returnTab: activeTab, year: normalizeTravelYear(year), epoch: ++scopeSequence.current });
     visit("passport");
   };
   const closeCountries = () => {
@@ -281,8 +312,8 @@ function AppShell({
     setCountries(null);
     visit(origin);
   };
-  const openPassportCollection = (kind: CollectionKind) => {
-    setPassportCollection({ kind, returnTab: activeTab });
+  const openPassportCollection = (kind: CollectionKind, year?: string, airport?: string) => {
+    setPassportCollection({ kind, returnTab: activeTab, year: normalizeTravelYear(year), epoch: ++scopeSequence.current, airport });
     setCountries(null);
     setSelectedTripId(null);
     setSelectedFlightId(undefined);
@@ -301,7 +332,7 @@ function AppShell({
     consumeShare(incomingShare.queueId);
   }, [incomingShare, consumeShare, shareInstagramLink]);
   React.useEffect(() => {
-    if (selectedTripId && !selectedTrip) closeTrip();
+    if (selectedTripId && !selectedTrip) finishCloseTrip();
   }, [selectedTripId, selectedTrip]);
   React.useEffect(() => {
     const listener = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -315,6 +346,7 @@ function AppShell({
         if (passportCollection) { closePassportCollection(); return true; }
       }
       if (activeTab === "dreams" && handlers.current.dreams?.()) return true;
+      if (activeTab === "globe" && handlers.current.globe?.()) return true;
       if (activeTab !== "globe") { changeTab("globe"); return true; }
       return false;
     });
@@ -324,47 +356,60 @@ function AppShell({
   // Retain navigation state without exposing or accepting input on hidden screens.
   const layer = (key: string, visible: boolean, content: React.ReactNode) => (
     <View key={key} style={[styles.overlay, !visible && styles.inactive]}
-      pointerEvents={visible ? "auto" : "none"}
-      accessibilityElementsHidden={!visible}
-      aria-hidden={!visible}
-      importantForAccessibility={visible ? "auto" : "no-hide-descendants"}>
+      pointerEvents={visible && !selectedTrip ? "auto" : "none"}
+      accessibilityElementsHidden={!visible || Boolean(selectedTrip)}
+      aria-hidden={!visible || Boolean(selectedTrip)}
+      importantForAccessibility={visible && !selectedTrip ? "auto" : "no-hide-descendants"}>
       {content}
     </View>
   );
   const mainVisible = !selectedTrip;
-  const passportVisible = mainVisible && activeTab === "passport" && !countries;
-  const countryVisible = mainVisible && activeTab === "passport" && Boolean(countries);
+  const baseTab = selectedTrip ? tripOrigin.current : activeTab;
+  const passportVisible = baseTab === "passport" && !countries;
+  const countryVisible = baseTab === "passport" && Boolean(countries);
   const label = (tab: BottomNavTab) => tab.charAt(0).toUpperCase() + tab.slice(1);
   return (
     <View style={styles.shell}>
-      {layer("globe", activeTab === "globe" && mainVisible,
+      {layer("globe", baseTab === "globe",
         <HomeGlobeScreen filterYear={globeYear} onFilterYear={setGlobeYear}
+          onBackHandlerChange={registerGlobeBack}
           active={activeTab} onChange={changeTab} onOpenTrip={openTrip}
-          onOpenCountry={openCountries} onOpenCollection={openPassportCollection} />)}
-      {visitedTabs.includes("trips") && layer("trips", activeTab === "trips" && mainVisible,
-        <TripsListScreen active={activeTab} onChange={changeTab} onOpenTrip={openTrip} />)}
+          onOpenCountry={openCountries} onOpenCollection={openPassportCollection} onOpenFlights={openFilteredTrips} />)}
+      {visitedTabs.includes("trips") && layer("trips", baseTab === "trips",
+        <TripsListScreen active={activeTab} onChange={changeTab} onOpenTrip={openTrip}
+          initialYear={tripsScope.year} scopeEpoch={tripsScope.epoch}
+          onClearYear={() => setTripsScope({ epoch: ++scopeSequence.current })} />)}
       {visitedTabs.includes("passport") && layer("passport", passportVisible,
-        <PassportStatsScreen visible={passportVisible} resetEpoch={passportReset} onBackHandlerChange={registerPassportBack}
+        <PassportStatsScreen visible={passportVisible && mainVisible} resetEpoch={passportReset} onBackHandlerChange={registerPassportBack}
           initialCollection={passportCollection?.kind}
+          initialYear={passportCollection?.year} scopeEpoch={passportCollection?.epoch}
+          initialAirport={passportCollection?.airport}
+          onClearYear={() => setPassportCollection(value => value ? { ...value, year: undefined, epoch: ++scopeSequence.current } : null)}
           collectionBackLabel={passportCollection ? label(passportCollection.returnTab) : undefined}
           onCloseCollection={passportCollection ? closePassportCollection : undefined}
           onYear={(year) => { setGlobeYear(year); changeTab("globe"); }}
           active={activeTab} onChange={changeTab} onOpenCountries={() => openCountries()}
           onOpenTrip={openTrip} />)}
       {countries && layer("countries", countryVisible,
-        <CountryStampCollectionScreen visible={countryVisible}
+        <CountryStampCollectionScreen visible={countryVisible && mainVisible}
           onBackHandlerChange={registerCountryBack} backLabel={label(countries.returnTab)}
           active={activeTab} onChange={changeTab} initialCountry={countries.initialCountry}
+          initialYear={countries.year} scopeEpoch={countries.epoch}
+          onClearYear={() => setCountries(value => value ? { ...value, year: undefined, epoch: ++scopeSequence.current } : null)}
           onBack={closeCountries} onOpenTrip={openTrip} />)}
-      {visitedTabs.includes("dreams") && layer("dreams", mainVisible && activeTab === "dreams",
+      {visitedTabs.includes("dreams") && layer("dreams", baseTab === "dreams",
         <DreamsScreen active={activeTab} onChange={changeTab}
           visible={mainVisible && activeTab === "dreams"} onBackHandlerChange={registerDreamsBack} />)}
-      {visitedTabs.includes("profile") && layer("profile", mainVisible && activeTab === "profile",
-        <ProfileScreen active={activeTab} onChange={changeTab} onOpenStamps={() => openCountries()} />)}
-      {selectedTrip && layer("trip-detail", true,
+      {visitedTabs.includes("profile") && layer("profile", baseTab === "profile",
+        <ProfileScreen active={activeTab} onChange={changeTab} onOpenStamps={() => openCountries()}
+          onOpenAirport={code => openPassportCollection("airports", undefined, code)} />)}
+      {selectedTrip && <TripNavigationSurface key={selectedTrip.id} trip={selectedTrip} flightId={selectedFlightId}
+        origin={tripPaperOrigin} target={tripPaperTarget} closing={tripClosing} onClosed={finishCloseTrip}>
         <TripDetailScreen key={selectedTrip.id} trip={selectedTrip} selectedFlightId={selectedFlightId}
+          onWalletLayout={setTripPaperTarget}
           active="trips" onBack={closeTrip} onChange={changeTab}
-          backLabel={tripOrigin.current === "passport" ? "Back to collection" : `Back to ${label(tripOrigin.current).toLowerCase()}`} />)}
+          backLabel={tripOrigin.current === "passport" ? "Back to collection" : `Back to ${label(tripOrigin.current).toLowerCase()}`} />
+      </TripNavigationSurface>}
     </View>
   );
 }

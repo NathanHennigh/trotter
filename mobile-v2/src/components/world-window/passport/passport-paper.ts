@@ -2,7 +2,7 @@ import type { StampFootprint, StampLabelBox } from './passport-footprint';
 export const PAGE_WIDTH = 320, PAGE_HEIGHT = 440, BOOK_MARGIN = 12;
 export type StampPlacement = { code: string; x: number; y: number; width: number; height: number; angle: number };
 export type PaperPage = { kind: 'identity' | 'stamps' | 'record'; stamps: StampPlacement[] };
-export type PageTexture = { canvas: HTMLCanvasElement; page: PaperPage };
+export type PageTexture = { canvas: HTMLCanvasElement; page: PaperPage; settleStamp?: (code: string, progress: number) => void };
 
 /** Physical pages run from the first recorded arrival to the most recent one.
  * Keep unknown dates at the end and use a stable tie-breaker for same-day stamps. */

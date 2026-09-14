@@ -66,6 +66,8 @@ function environment(trips = []) {
     },
   };
   const RN = {
+    Platform: { OS: "android" },
+    useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }),
     StyleSheet: { create: (x) => x, absoluteFill: {} },
     PanResponder: { create: (panHandlers) => ({ panHandlers }) },
     AppState: {
@@ -103,6 +105,14 @@ function environment(trips = []) {
       if (name === "react-native-safe-area-context")
         return { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) };
       if (name.endsWith("expoThree")) return {};
+      if (name.endsWith("/motion")) return { PressFeedback: "Pressable", PaperReveal: "View", PaperPresence: "View", useReducedMotion: () => false };
+      if (name.endsWith("/experiencePreferences")) return {
+        useExperiencePreferences: () => {
+          const [texture, setTexture] = React.useState("classic");
+          return { texture, setTexture, haptics: false, setHaptics() {} };
+        },
+        selectionHaptic() {},
+      };
       if (name.endsWith("/travelTrips"))
         return {
           useTravelTrips: () => ({
@@ -332,6 +342,33 @@ test("a retained Home cannot leave its native year modal over another tab", () =
     false,
     "returning to Home must not reopen the dismissed year sheet",
   );
+});
+
+test("one globe arc exposes both directions and every date; Back dismisses before leaving Home", () => {
+  const returnTrip = { ...crossYear, id: 'return-trip', segments: [leg('return', NRT, DFW, '2026-02-02T08:00:00Z', '2026-02-02T16:00:00Z')] };
+  const env = environment([crossYear, returnTrip]), calls = [];
+  const { HomeGlobeScreen } = env.load(path.join(root, 'src/screens/HomeGlobeScreen.tsx'));
+  const { WorldWindowGlobe } = env.load(path.join(root, 'src/components/world-window/WorldWindowGlobe.tsx'));
+  let back;
+  const props = { active: 'globe', onChange() {}, onBackHandlerChange: value => { back = value; }, onOpenTrip: (...args) => calls.push(args) };
+  const render = () => env.render(() => HomeGlobeScreen(props));
+  let tree = render(), globe = nodes(tree).find(node => node.type === WorldWindowGlobe);
+  globe.props.onRoute(globe.props.routes.find(route => route.id === 'first')); tree = render();
+  assert(texts(tree).join('').includes('2 flights on this route'));
+  assert(texts(tree).join('').includes('NRT → DFW')); assert(texts(tree).join('').includes('DFW → NRT'));
+  const reverse = nodes(tree).find(node => node.props.accessibilityLabel?.startsWith('Select NRT to DFW'));
+  reverse.props.onPress(); tree = render();
+  assert.equal(nodes(tree).find(node => node.type === WorldWindowGlobe).props.selectedRouteId, 'return');
+  assert.equal(back(), true); tree = render();
+  assert.equal(nodes(tree).find(node => node.type === WorldWindowGlobe).props.selectedRouteId, undefined);
+  assert.equal(back(), false);
+  globe = nodes(tree).find(node => node.type === WorldWindowGlobe);
+  globe.props.onRoute(globe.props.routes.find(route => route.id === 'return')); tree = render();
+  assert.equal(back(), true); tree = render();
+  assert.equal(nodes(tree).find(node => node.type === WorldWindowGlobe).props.selectedRouteId, 'return', 'First Back collapses date choices');
+  const open = nodes(tree).find(node => node.props.accessibilityLabel?.startsWith('View trip for'));
+  assert(open); open.props.onPress(); render();
+  assert.equal(calls[0][0].id, 'return-trip'); assert.equal(calls[0][1], 'return');
 });
 
 test("pinch hands off continuously to one finger without a jump or accidental route tap", () => {
