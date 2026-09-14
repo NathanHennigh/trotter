@@ -9,7 +9,6 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { fitDisplayFont } from "../displayTextFit";
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 import { colors, fonts } from "../../../theme/trotterTheme";
@@ -31,7 +30,6 @@ export function CountryPostcard({
   const countrySize = fitDisplayFont(
     board.title, 40, photoWidth - 32, fontScale, "italic",
   );
-  const shadeId = `postcard-${React.useId().replace(/:/g, "")}`;
   const turn = React.useRef(new Animated.Value(0)).current;
   const mounted = React.useRef(true),
     opening = React.useRef(false),
@@ -127,25 +125,6 @@ export function CountryPostcard({
             <DreamPhoto item={cover} artworkForCountry={board.title} />
           </View>
           <View style={s.printedTitle}>
-            <Svg
-              pointerEvents="none"
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              style={StyleSheet.absoluteFill}
-              width="100%"
-              height="100%"
-              preserveAspectRatio="none"
-              viewBox="0 0 100 100"
-            >
-              <Defs>
-                <LinearGradient id={shadeId} x1="0" y1="0" x2="0" y2="100%">
-                  <Stop offset="0" stopColor="#132E3C" stopOpacity={0} />
-                  <Stop offset="0.4" stopColor="#132E3C" stopOpacity={0.34} />
-                  <Stop offset="1" stopColor="#132E3C" stopOpacity={0.75} />
-                </LinearGradient>
-              </Defs>
-              <Rect width="100" height="100" fill={`url(#${shadeId})`} />
-            </Svg>
             <Text
               style={[
                 s.country,
