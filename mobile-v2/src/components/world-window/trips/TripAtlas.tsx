@@ -72,38 +72,37 @@ export function TripAtlas({
             strokeLinejoin="round"
           />
         ))}
-        {map.ports.map(({ code, x, y, label }) => (
+        {map.ports.map(({ code, x, y, radius }) => (
+          <Circle
+            key={code}
+            cx={x}
+            cy={y}
+            r={radius}
+            fill={code === destination ? "#b27655" : "#faf8f1"}
+            stroke={code === destination ? "#faf8f1" : "#427494"}
+            strokeWidth={1.2}
+          />
+        ))}
+        {map.ports.map(({ code, label }) => label && (
           <G key={code}>
-            <Circle
-              cx={x}
-              cy={y}
-              r={code === destination ? 4.2 : 2.7}
-              fill={code === destination ? "#b27655" : "#faf8f1"}
-              stroke={code === destination ? "#faf8f1" : "#427494"}
-              strokeWidth={1.2}
+            <Rect
+              x={label.x - 3}
+              y={label.y - 1}
+              width={label.width + 6}
+              height={label.height + 1}
+              rx={2}
+              fill={profile ? "#f2f4e9" : backgroundColor}
             />
-            {label && (
-              <G>
-                <Rect
-                  x={label.x - 3}
-                  y={label.y - 1}
-                  width={label.width + 6}
-                  height={label.height + 1}
-                  rx={2}
-                  fill={profile ? "#f2f4e9" : backgroundColor}
-                />
-                <Text
-                  x={label.x}
-                  y={label.y + 12}
-                  fontFamily={fonts.mono}
-                  fontSize={12}
-                  letterSpacing={0.4}
-                  fill={code === destination ? "#965e42" : "#315b70"}
-                >
-                  {code}
-                </Text>
-              </G>
-            )}
+            <Text
+              x={label.x}
+              y={label.y + 12}
+              fontFamily={fonts.mono}
+              fontSize={12}
+              letterSpacing={0.4}
+              fill={code === destination ? "#965e42" : "#315b70"}
+            >
+              {code}
+            </Text>
           </G>
         ))}
         {!profile && (

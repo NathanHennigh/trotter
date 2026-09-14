@@ -34,6 +34,9 @@ export function ProfileScreen({
     error,
     accountEmail,
     lastSyncedAt,
+    gmailSyncStatus,
+    gmailSyncError,
+    lastGmailSyncedAt,
     refresh,
     syncFromGmail,
     signOut,
@@ -97,6 +100,65 @@ export function ProfileScreen({
             </View>
           ) : null}
         </View>
+        <View style={styles.source}>
+          <View style={styles.sourceHeading}>
+            <Text style={styles.sectionTitle}>Flight confirmations</Text>
+            <View style={styles.sourceStatus}>
+              <View style={styles.statusDot} />
+              <Text style={styles.statusText}>
+                {gmailSyncStatus === "syncing" ? "Checking" : gmailSyncStatus === "synced" ? "Synced" : gmailSyncStatus === "error" ? "Needs attention" : "Not checked"}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.sourceProvider}>
+            <WWIcon name="sync" size={23} color={colors.blue} />
+            <View style={styles.sourceCopy}>
+              <Text style={styles.providerName}>Gmail</Text>
+              <Text style={styles.secondary}>
+                {profile.flights.toLocaleString()} saved{" "}
+                {profile.flights === 1 ? "flight" : "flights"}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Check Gmail for new flights"
+              accessibilityState={{
+                disabled: busy,
+                busy: status === "syncing",
+              }}
+              disabled={busy}
+              onPress={() => void syncFromGmail()}
+              style={({ pressed }) => [
+                styles.syncButton,
+                busy && styles.disabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              {status === "syncing" ? (
+                <ActivityIndicator color={colors.blue} size="small" />
+              ) : (
+                <WWIcon name="sync" size={19} color={colors.blue} />
+              )}
+              <Text style={styles.textButtonLabel}>Check mail</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.sourceNote} accessibilityLiveRegion="polite">
+            {status === "syncing"
+              ? "Finding flight confirmations. Your import continues if you close Trotter."
+              : lastGmailSyncedAt
+                ? `Last successful scan ${formatUpdated(lastGmailSyncedAt)}`
+                : "Check Gmail to add flight confirmations to your archive."}
+          </Text>
+          {gmailSyncError ? (
+            <Text
+              style={styles.error}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+            >
+              {gmailSyncError}
+            </Text>
+          ) : null}
+        </View>
         {airport ? (
           <View style={styles.routeSheet}>
             <View style={styles.routeSheetHeading}>
@@ -130,62 +192,6 @@ export function ProfileScreen({
             ) : null}
           </View>
         ) : null}
-        <View style={styles.source}>
-          <View style={styles.sourceHeading}>
-            <Text style={styles.sectionTitle}>Flight confirmations</Text>
-            <View style={styles.sourceStatus}>
-              <View style={styles.statusDot} />
-              <Text style={styles.statusText}>Connected</Text>
-            </View>
-          </View>
-          <View style={styles.sourceProvider}>
-            <WWIcon name="sync" size={23} color={colors.blue} />
-            <View style={styles.sourceCopy}>
-              <Text style={styles.providerName}>Gmail</Text>
-              <Text style={styles.secondary}>
-                {profile.flights.toLocaleString()} saved{" "}
-                {profile.flights === 1 ? "flight" : "flights"}
-              </Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Check Gmail for new flights"
-              accessibilityState={{
-                disabled: busy,
-                busy: status === "syncing",
-              }}
-              disabled={busy}
-              onPress={() => void syncFromGmail()}
-              style={({ pressed }) => [
-                styles.syncButton,
-                busy && styles.disabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              {status === "syncing" ? (
-                <ActivityIndicator color={colors.blue} size="small" />
-              ) : (
-                <WWIcon name="sync" size={19} color={colors.blue} />
-              )}
-            </Pressable>
-          </View>
-          <Text style={styles.sourceNote} accessibilityLiveRegion="polite">
-            {status === "syncing"
-              ? "Finding flight confirmations. Your import continues if you close Trotter."
-              : lastSyncedAt
-                ? `Last refreshed ${formatUpdated(lastSyncedAt)}`
-                : "Check Gmail to add flight confirmations to your archive."}
-          </Text>
-          {error ? (
-            <Text
-              style={styles.error}
-              accessibilityRole="alert"
-              accessibilityLiveRegion="polite"
-            >
-              {error}
-            </Text>
-          ) : null}
-        </View>
         <View style={styles.history}>
           <Text style={styles.secondary}>Latest recorded flight</Text>
           <Text style={styles.historyDate}>
@@ -207,6 +213,8 @@ export function ProfileScreen({
           <Text style={styles.accountEmail} selectable>
             {accountEmail}
           </Text>
+          {lastSyncedAt ? <Text style={styles.secondary}>Archive refreshed {formatUpdated(lastSyncedAt)}</Text> : null}
+          {error && error !== gmailSyncError ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
           <View style={styles.accountActions}>
             <Pressable
               accessibilityRole="button"
@@ -478,8 +486,11 @@ const styles = StyleSheet.create({
     color: colors.mutedInk,
   },
   syncButton: {
-    height: 44,
-    width: 44,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    gap: 7,
     borderRadius: 3,
     borderWidth: 1,
     borderColor: colors.paperBorder,

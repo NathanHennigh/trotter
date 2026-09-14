@@ -16,7 +16,7 @@ import {
   WWIcon,
 } from "../components/world-window/WorldWindowUI";
 import { WalletCover } from "../components/world-window/trips/WalletCover";
-import { matchesTrip } from "../components/world-window/trips/tripPresentation";
+import { matchesTrip, tripInYear } from "../components/world-window/trips/tripPresentation";
 import type { BottomNavTab, TripSummary } from "../data/trotterMock";
 import { useTravelTrips } from "../services/travelTrips";
 import { colors, fonts, layout } from "../theme/trotterTheme";
@@ -42,7 +42,7 @@ export function TripsListScreen({
   const loading =
     status === "loading" || status === "refreshing" || status === "syncing";
   return (
-    <View style={s.screen}>
+    <View style={[s.screen, { paddingTop: insets.top }]}>
       <FlatList
         data={visible}
         keyExtractor={(trip) => trip.id}
@@ -50,7 +50,6 @@ export function TripsListScreen({
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
-          paddingTop: insets.top,
           paddingBottom: insets.bottom + layout.bottomNavHeight + 24,
         }}
         refreshControl={
@@ -66,7 +65,7 @@ export function TripsListScreen({
           <>
             <WWHeader
               title="Trips"
-              action={<Text style={s.headerCount}>{trips.length}</Text>}
+              action={<Text style={s.headerCount}>{query || yearOnly ? `${visible.length} / ${trips.length}` : trips.length}</Text>}
             />
             <View style={s.searchRow}>
               <WWIcon name="search" size={19} color={colors.mutedInk} />
@@ -96,7 +95,7 @@ export function TripsListScreen({
                     label: "This year",
                     value: true,
                     count: trips.filter((t) =>
-                      t.startDate.startsWith(String(year)),
+                      tripInYear(t, year),
                     ).length,
                   },
                 ].map(({ label, value, count }) => (

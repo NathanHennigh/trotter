@@ -983,7 +983,7 @@ export function BottomNav({
   onChange: (tab: BottomNavTab) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, fontScale = 1 } = useWindowDimensions();
   const tabs: { key: BottomNavTab; label: string; icon: string }[] = [
     { key: "globe", label: "Globe", icon: "globe" },
     { key: "trips", label: "Trips", icon: "trips" },
@@ -993,6 +993,9 @@ export function BottomNav({
   ];
   const navWidth = Platform.OS === "web" ? Math.min(width, 430) : width;
   const tabWidth = (navWidth - 16) / tabs.length;
+  // This compact, persistent control has a bounded scale. The widest label is
+  // Passport: the bundled bold font measures 4.35 × font size. Leave 2px clear.
+  const labelSize = Math.min(12, (tabWidth - 2) / (4.35 * Math.min(fontScale, 1.25)));
   const webViewportNav =
     Platform.OS === "web"
       ? ({
@@ -1036,12 +1039,14 @@ export function BottomNav({
               strokeWidth={isActive ? 1.9 : 1.6}
             />
             <Text
-              allowFontScaling={false}
+              maxFontSizeMultiplier={1.25}
               numberOfLines={1}
               style={[
                 styles.navText,
                 {
                   color: tint,
+                  fontSize: labelSize,
+                  lineHeight: labelSize * 1.25,
                   fontFamily: isActive ? fonts.sansBold : fonts.sansRegular,
                 },
               ]}

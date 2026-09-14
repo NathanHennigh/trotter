@@ -8,6 +8,7 @@ import { makeTextures } from './passport-textures';
 import { stampFootprint } from './passport-footprint';
 import { coverEmblem } from './passport-cover-art';
 import type { BookPayload } from './passport-payload';
+import { passportPageDescription } from './passport-accessibility';
 
 type NativeWindow = Window & { ReactNativeWebView?: { postMessage: (data: string) => void }; __PASSPORT__: BookPayload; updatePassport?: (payload: BookPayload) => void };
 const bridge = window as unknown as NativeWindow;
@@ -19,6 +20,7 @@ const post = (type: string, data: Record<string, unknown> = {}) => {
 const host = document.getElementById('book')!, canvas = document.getElementById('paper') as HTMLCanvasElement;
 const scene = document.getElementById('cover-scene')!, board = document.getElementById('cover-board')!, back = document.getElementById('cover-back') as HTMLCanvasElement;
 const targets = document.getElementById('targets')!, loading = document.getElementById('loading')!, status = document.getElementById('status')!;
+const description = document.getElementById('page-description')!;
 document.getElementById('emblem')!.innerHTML = coverEmblem;
 const pagesFor = (data: BookPayload) => passportPages(chronologicalStamps(data.stamps).map(s => s.code), Object.fromEntries(data.stamps.map(s => [s.code, stampFootprint(s.template)])));
 let payload = bridge.__PASSPORT__, pages = pagesFor(payload), textures: PageTexture[] = [];
@@ -38,6 +40,13 @@ function button(label: string, className: string, action: () => void) {
 function refreshTargets() {
   const blocked = cover.blocksPages, key = `${blocked}-${Boolean(model.fold)}-${ready}-${model.spread}`;
   if (key === lastTargets) return; lastTargets = key; const focused = targets.contains(document.activeElement); targets.replaceChildren();
+  description.replaceChildren();
+  if (ready && !blocked && !model.fold) for (const page of pages.slice(model.spread * 2, model.spread * 2 + 2)) {
+    const copy = passportPageDescription(page, payload); if (!copy) continue;
+    const section = document.createElement('section'); section.setAttribute('aria-label', copy.label);
+    for (const line of copy.lines) { const paragraph = document.createElement('p'); paragraph.textContent = line; section.append(paragraph); }
+    description.append(section);
+  }
   host.tabIndex = blocked ? -1 : 0;
   if (blocked) button('Open passport', 'cover-target', () => { cover.go(1, true); wake(); host.focus(); });
   else {

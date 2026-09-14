@@ -12,6 +12,7 @@ import { colors, fonts } from "../../../theme/trotterTheme";
 import { leafletCSS, leafletJS, clusterJS } from "./leafletAssets";
 import { MapLine, MapPoint } from "./tripPresentation";
 import { placeSymbol, symbolPaths } from "../dreams/placeSymbols";
+import type { CountryRegion } from "../dreams/countryRegion";
 
 type Props = {
   points: MapPoint[];
@@ -22,6 +23,7 @@ type Props = {
   onSelect?: (id: string | undefined) => void;
   onPlace?: (lat: number, lon: number) => void;
   height?: number;
+  overview?: CountryRegion;
 };
 const scriptJSON = (value: unknown) =>
   JSON.stringify(value)
@@ -36,10 +38,10 @@ var tiles=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:
 tiles.on('tileerror',function(){document.getElementById('map-error').style.display='block'});tiles.on('tileload',function(){document.getElementById('map-error').style.display='none'});
 var paths=L.layerGroup().addTo(map),pins=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:35,animate:false,spiderfyOnMaxZoom:true,iconCreateFunction:function(group){var el=document.createElement('span');el.textContent=String(group.getChildCount());return L.divIcon({html:el,className:'travel-cluster',iconSize:[34,34]})}}).addTo(map),data={points:[]},lastKey=null;
 function send(value){if(window.ReactNativeWebView)window.ReactNativeWebView.postMessage(JSON.stringify(value));else window.parent.postMessage({trotterMap:value},'*')}
-function fit(){if(data.points.length)map.fitBounds(L.latLngBounds(data.points.map(function(p){return[p.lat,p.displayLon]})),{padding:[28,28],maxZoom:15,animate:false})}
+function fit(){if(data.points.length)map.fitBounds(L.latLngBounds(data.points.map(function(p){return[p.lat,p.displayLon]})),{padding:[28,28],maxZoom:15,animate:false});else if(data.overview)map.fitBounds(data.overview.bounds,{padding:[18,18],maxZoom:8,animate:false})}
 function anchor(points){var x=points.map(function(p){return(p.lon+360)%360}).sort(function(a,b){return a-b});if(!x.length)return 0;var largest=-1,start=x[0];x.forEach(function(v,i){var next=i===x.length-1?x[0]+360:x[i+1];if(next-v>largest){largest=next-v;start=next%360}});return start}
 window.drawTravelMap=function(next){data=next;var origin=anchor(data.points);data.points.forEach(function(p){p.displayLon=(p.lon+360)%360;if(p.displayLon<origin)p.displayLon+=360});pins.clearLayers();paths.clearLayers();var byId={};data.points.forEach(function(p){byId[p.id]=p});(data.lines||[]).forEach(function(line){var a=byId[line.from],b=byId[line.to];if(a&&b)L.polyline([[a.lat,a.displayLon],[b.lat,b.displayLon]],{color:'#a1663d',weight:2,opacity:.85}).addTo(paths)});
-data.points.forEach(function(p){var wrap=document.createElement('span');if(p.symbol){var svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width','19');svg.setAttribute('height','19');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.5');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');p.symbol.forEach(function(d){var path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',d);svg.appendChild(path)});wrap.appendChild(svg)}else{wrap.textContent=p.id;wrap.style.fontSize='9px'}var marker=L.marker([p.lat,p.displayLon],{title:p.label,bubblingMouseEvents:false,icon:L.divIcon({html:wrap,className:'travel-pin'+(p.id===data.selectedId?' selected':'')+(p.area?' area':''),iconSize:[34,34],iconAnchor:[17,17]})});var label=document.createElement('span');label.textContent=p.label;marker.bindTooltip(label,{className:'travel-label'});marker.on('click',function(){send(data.placing?{type:'place',lat:p.lat,lon:p.lon}:{type:'select',id:p.id})});pins.addLayer(marker)});map.invalidateSize(false);if(lastKey!==data.fitKey){lastKey=data.fitKey;fit()}};
+data.points.forEach(function(p){var wrap=document.createElement('span');if(p.symbol){var svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width','19');svg.setAttribute('height','19');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.5');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');p.symbol.forEach(function(d){var path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',d);svg.appendChild(path)});wrap.appendChild(svg)}else{wrap.textContent=p.id;wrap.style.fontSize='9px'}var marker=L.marker([p.lat,p.displayLon],{title:p.label,bubblingMouseEvents:false,icon:L.divIcon({html:wrap,className:'travel-pin'+(p.id===data.selectedId?' selected':'')+(p.area?' area':''),iconSize:[34,34],iconAnchor:[17,17]})});var label=document.createElement('span');label.textContent=p.label;marker.bindTooltip(label,{className:'travel-label'});marker.on('click',function(){send(data.placing?{type:'place',lat:p.lat,lon:p.lon}:{type:'select',id:p.id})});pins.addLayer(marker)});map.invalidateSize(false);var fitButton=document.getElementById('fit');fitButton.disabled=!data.points.length&&!data.overview;fitButton.textContent=data.points.length?'Fit places':data.overview?'Country view':'Fit places';document.getElementById('map').setAttribute('aria-label',data.overview?data.overview.label+' saved places map':'Travel map');var fitSignature=JSON.stringify([data.fitKey,data.points.map(function(p){return[p.id,p.lat,p.lon]}),data.overview]);if(lastKey!==fitSignature){lastKey=fitSignature;fit()}};
 map.on('click',function(e){send(data.placing?{type:'place',lat:e.latlng.lat,lon:((e.latlng.lng+180)%360+360)%360-180}:{type:'select'})});document.getElementById('fit').onclick=fit;window.addEventListener('message',function(e){if(e.data&&e.data.trotterMapData)window.drawTravelMap(e.data.trotterMapData)});
 </script></body></html>`;
 
@@ -52,6 +54,7 @@ export function PaperMap({
   onSelect,
   onPlace,
   height = 240,
+  overview,
 }: Props) {
   const webview = React.useRef<WebView>(null),
     frame = React.useRef<HTMLIFrameElement>(null);
@@ -70,8 +73,9 @@ export function PaperMap({
       fitKey,
       selectedId,
       placing,
+      overview,
     }),
-    [points, lines, fitKey, selectedId, placing],
+    [points, lines, fitKey, selectedId, placing, overview],
   );
   const receive = React.useCallback(
     (value: unknown) => {
@@ -145,7 +149,7 @@ export function PaperMap({
           key: attempt,
           ref: frame,
           srcDoc: mapHTML,
-          title: "Travel map",
+          title: overview ? `${overview.label} saved places map` : "Travel map",
           onLoad: () => setReady(true),
           sandbox:
             "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",

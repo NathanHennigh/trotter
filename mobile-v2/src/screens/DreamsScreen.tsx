@@ -39,6 +39,8 @@ import {
   filterDreams,
   safeWebUrl,
 } from "../components/world-window/dreams/dreamPresentation";
+import { countryRegion } from "../components/world-window/dreams/countryRegion";
+import { dreamCopy } from "../components/world-window/dreams/dreamCopy";
 import { PaperMap } from "../components/world-window/trips/PaperMap";
 import type { MapPoint } from "../components/world-window/trips/tripPresentation";
 import type { BottomNavTab } from "../data/trotterMock";
@@ -48,9 +50,13 @@ import { colors, fonts, layout } from "../theme/trotterTheme";
 export function DreamsScreen({
   active,
   onChange,
+  visible = true,
+  onBackHandlerChange,
 }: {
   active: BottomNavTab;
   onChange: (tab: BottomNavTab) => void;
+  visible?: boolean;
+  onBackHandlerChange?: (handler: (() => boolean) | null) => void;
 }) {
   const insets = useSafeAreaInsets(),
     store = useDreams();
@@ -64,13 +70,18 @@ export function DreamsScreen({
   const homeOffset = React.useRef(0),
     selected = store.items.find((item) => item.id === selectedId);
   const boards = React.useMemo(() => countryBoards(store.items), [store.items]);
-  const points = React.useMemo(
-    () =>
-      store.items
-        .map(exactMapPoint)
-        .filter((point): point is MapPoint => Boolean(point)),
-    [store.items],
-  );
+  const pointsByCountry = React.useMemo(() => {
+    const grouped = new Map<string, MapPoint[]>();
+    for (const item of store.items) {
+      const point = exactMapPoint(item);
+      if (!point) continue;
+      const key = countryKey(item.country);
+      const entries = grouped.get(key) ?? [];
+      entries.push(point);
+      grouped.set(key, entries);
+    }
+    return grouped;
+  }, [store.items]);
   const countryItems = React.useMemo(
     () =>
       store.items.filter((item) => countryKey(item.country) === country?.key),
@@ -88,13 +99,16 @@ export function DreamsScreen({
     setReview(false);
   };
   React.useEffect(() => {
-    if (!country && !review) return;
-    const handler = BackHandler.addEventListener("hardwareBackPress", () => {
+    const goBack = () => {
+      if (!visible || (!country && !review)) return false;
       back();
       return true;
-    });
-    return () => handler.remove();
-  }, [country, review]);
+    };
+    onBackHandlerChange?.(visible ? goBack : null);
+    const handler = !onBackHandlerChange && visible
+      ? BackHandler.addEventListener("hardwareBackPress", goBack) : undefined;
+    return () => { handler?.remove(); onBackHandlerChange?.(null); };
+  }, [country, review, visible, onBackHandlerChange]);
   const loading = store.status === "loading" || store.status === "refreshing";
   const actions = (
     <Pressable
@@ -107,14 +121,14 @@ export function DreamsScreen({
     </Pressable>
   );
   return (
-    <View style={s.screen}>
+    <View style={[s.screen, { paddingTop: insets.top }]}>
       {country || review ? (
         <CountryPlaces
           key={country?.key || "review"}
           title={review ? "To review" : country?.title || "Saved places"}
           items={review ? reviews : countryItems}
           review={review}
-          topInset={insets.top}
+          topInset={0}
           bottomInset={insets.bottom}
           loading={loading}
           error={store.error}
@@ -133,7 +147,6 @@ export function DreamsScreen({
           scrollEventThrottle={100}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
-            paddingTop: insets.top,
             paddingBottom: insets.bottom + layout.bottomNavHeight + 24,
           }}
           refreshControl={
@@ -210,16 +223,11 @@ export function DreamsScreen({
         />
       )}
       <BottomNav active={active} onChange={onChange} />
-      {selected && (
+      {visible && selected && (
         <DreamEditor
           key={selected.id}
           item={selected}
-          points={points.filter(
-            (point) =>
-              countryKey(
-                store.items.find((item) => item.id === point.id)?.country,
-              ) === countryKey(selected.country),
-          )}
+          points={pointsByCountry.get(countryKey(selected.country)) ?? []}
           onClose={() => setSelectedId(undefined)}
           onSave={store.updateItem}
           onDelete={store.deleteItem}
@@ -228,7 +236,7 @@ export function DreamsScreen({
           }
         />
       )}
-      {capture && (
+      {visible && capture && (
         <CapturePlace
           onClose={() => setCapture(false)}
           onSave={(url, caption) =>
@@ -271,6 +279,7 @@ function CountryPlaces({
     [selected, setSelected] = React.useState<string>();
   const list = React.useRef<FlatList<DreamItem>>(null);
   const mapOffset = React.useRef(0);
+  const region = React.useMemo(() => countryRegion(title), [title]);
   const cities = React.useMemo(() => cityNames(items), [items]),
     visible = React.useMemo(
       () =>
@@ -288,6 +297,11 @@ function CountryPlaces({
         .filter((point): point is MapPoint => Boolean(point)),
     [visible],
   );
+  const cityCounts = React.useMemo(() => {
+    const counts = new Map<string | undefined, number>();
+    for (const place of visible) counts.set(place.city, (counts.get(place.city) ?? 0) + 1);
+    return counts;
+  }, [visible]);
   React.useEffect(() => {
     if (city && !cities.includes(city)) setCity("");
   }, [city, cities]);
@@ -364,17 +378,18 @@ function CountryPlaces({
                 mapOffset.current = event.nativeEvent.layout.y;
               }}
             >
-              <PaperMap
+              {(points.length > 0 || region) && <PaperMap
+                overview={region}
                 points={points}
                 fitKey={`${title}-${city}-${category}`}
-                height={248}
+                height={points.length ? 248 : 174}
                 selectedId={selected}
                 onSelect={(id) => {
                   setSelected(id);
                 }}
-              />
+              />}
               <View style={s.mapFoot}>
-                <Text style={s.mapCount}>{points.length} on map</Text>
+                <Text style={s.mapCount}>{points.length ? `${points.length} on map` : "No pinned places yet"}</Text>
                 {points.length < visible.length && (
                   <Text style={s.mapNote}>
                     {visible.length - points.length}{" "}
@@ -385,6 +400,12 @@ function CountryPlaces({
                   </Text>
                 )}
               </View>
+              {!points.length && visible.length > 0 && (
+                <Pressable accessibilityRole="button" accessibilityLabel="Pin a saved place"
+                  style={s.mapSelection} onPress={() => onSelect(visible[0].id)}>
+                  <Text style={s.actionText}>Pin a saved place</Text><WWIcon name="arrow" size={17} />
+                </Pressable>
+              )}
               {selected && visible.find((item) => item.id === selected) && (
                 <Pressable
                   style={s.mapSelection}
@@ -492,7 +513,7 @@ function CountryPlaces({
               <Text style={s.cityHeading}>{item.city || "Saved places"}</Text>
               <View style={s.cityRule} />
               <Text style={s.cityCount}>
-                {visible.filter((place) => place.city === item.city).length}
+                {cityCounts.get(item.city) ?? 0}
               </Text>
             </View>
           )}
@@ -501,7 +522,7 @@ function CountryPlaces({
             expanded={opened === item.id}
             onPress={() => {
               setOpened(opened === item.id ? undefined : item.id);
-              setSelected(item.id);
+              setSelected(opened !== item.id && exactMapPoint(item) ? item.id : undefined);
             }}
             onEdit={() => onSelect(item.id)}
             onShowMap={() => {
@@ -549,6 +570,8 @@ function PlaceRow({
   onShowMap: () => void;
 }) {
   const processing = item.status === "processing" || item.status === "created";
+  const copy = React.useMemo(() => dreamCopy(item), [item]);
+  const [showOriginal, setShowOriginal] = React.useState(false);
   return (
     <View style={[s.placePaper, expanded && s.placePaperOpen]}>
       <Pressable
@@ -602,9 +625,14 @@ function PlaceRow({
               <DreamPhoto item={item} />
             </View>
           )}
-          {item.summary ? (
-            <Text style={s.placeSummary}>{item.summary}</Text>
-          ) : null}
+          {copy.summary ? <Text style={s.placeSummary}>{copy.summary}</Text> : null}
+          {copy.original && <View>
+            <Pressable style={s.placeAction} accessibilityRole="button"
+              accessibilityState={{ expanded: showOriginal }} onPress={() => setShowOriginal(!showOriginal)}>
+              <Text style={s.actionText}>{showOriginal ? "Hide original text" : "Original post text"}</Text>
+            </Pressable>
+            {showOriginal && <Text selectable style={s.placeSummary}>{copy.original}</Text>}
+          </View>}
           {item.regionOrNeighborhood ? (
             <View style={s.addressLine}>
               <WWIcon name="pin" size={15} />
@@ -801,8 +829,7 @@ const s = StyleSheet.create({
     overflow: "hidden",
   },
   countryTitle: {
-    fontFamily: fonts.display,
-    fontStyle: "italic",
+    fontFamily: fonts.displayItalic,
     fontSize: 43,
     lineHeight: 47,
     letterSpacing: -1,
@@ -910,8 +937,7 @@ const s = StyleSheet.create({
     gap: 12,
   },
   cityHeading: {
-    fontFamily: fonts.display,
-    fontStyle: "italic",
+    fontFamily: fonts.displayItalic,
     fontSize: 25,
     lineHeight: 29,
     color: colors.ink,

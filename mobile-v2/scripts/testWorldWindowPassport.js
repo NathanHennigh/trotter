@@ -126,6 +126,32 @@ assert.equal(buildPassportArchive([connected, gap], profile).years.find(y => y.y
 const empty = buildPassportArchive([], profile); assert.equal(empty.flights, 0); assert.equal(empty.firstFlightDate, ''); assert.deepEqual(empty.arrivals, [], 'Empty accounts cannot inherit a bundled identity');
 const african = trip('africa', 'Ethiopia', 'ET', 'ADD', [segment('5', 'DXB', 'ADD', '2025-01-01', 'Ethiopia', 'ET'), segment('6', 'ADD', 'HGA', '2025-01-03', 'Somalia', 'SO'), segment('7', 'HGA', 'DXB', '2025-01-04', 'United Arab Emirates', 'AE')]);
 const somaliland = buildPassportArrivals([african]).find(a => a.country === 'Somaliland'); assert(somaliland); assert.equal(somaliland.airportCode, 'HGA'); assert.equal(somaliland.tripCount, 1, 'Somaliland is not re-added for every other connection in a multi-country trip'); assert.equal(somaliland.stamp.icon, 'somaliland_laas_geel');
+const { tripsForCountry, activityYearLabelIndices } = component('passport-collection-model.ts');
+const aliases = [
+  trip('us-a', 'Canada', 'CA', 'YUL', [segment('us-a-return', 'YUL', 'IAH', '2024-05-03', 'United States', 'US')]),
+  trip('us-b', 'France', 'FR', 'CDG', [segment('us-b-return', 'CDG', 'JFK', '2025-06-03', 'United States of America', 'US')]),
+];
+const usa = buildPassportArrivals(aliases).find(a => a.travelCountryKey === 'US');
+assert.equal(usa.tripCount, 2);
+const aliasSource = JSON.stringify(aliases);
+assert.deepEqual(tripsForCountry(aliases, usa).map(t => t.id), ['us-a', 'us-b'], 'Country detail includes airport metadata aliases with one ISO identity, including no-coordinate endpoints');
+assert.equal(JSON.stringify(aliases), aliasSource, 'Country matching cannot rewrite flight or destination metadata');
+assert.deepEqual(tripsForCountry([connected], arrivals.find(a => a.travelCountryKey === 'AE')).map(t => t.id), ['connections'], 'Connection-country collection opens its whole journey');
+const somaliaOnly = trip('somalia', 'Somalia', 'SO', 'MGQ', [segment('so', 'ADD', 'MGQ', '2025-01-01', 'Somalia', 'SO')]);
+assert.deepEqual(tripsForCountry([african, somaliaOnly], somaliland).map(t => t.id), ['africa'], 'Somaliland stays distinct from Somalia in collection trip links');
+assert.equal(tripsForCountry([{ ...aliases[0], segments: [...aliases[0].segments, ...aliases[0].segments] }], usa).length, 1, 'Multiple country arrivals in a journey list the trip only once');
+for (const count of [0,1,2,11,12,40,41,100]) for (const width of [120,160,184,232,320]) {
+  const labels = activityYearLabelIndices(count, width);
+  if (count) assert.equal(labels.at(-1), count - 1, 'Latest year remains labeled');
+  if (count > 1) assert.equal(labels[0], 0, 'First year remains labeled');
+  for (let i = 1; i < labels.length; i++) assert((labels[i] - labels[i-1]) * width / (count - 1) >= 42, 'Activity labels reserve enough room even for long flight histories');
+}
+const { passportPageDescription } = component('passport-accessibility.ts');
+const identity = { name: '<Alexandria> Montgomery-Smythe', airportLabel: 'Most used airport', homeAirport: 'DFW', homeAirportName: 'Dallas–Fort Worth', homeAirportCountry: 'United States', firstFlightDate: '2016-05-03', countries: 17, flights: 163, miles: 283884, years: [{year:2025,flights:21}], stamps: [], fonts: {} };
+assert.deepEqual(passportPageDescription({kind:'identity',stamps:[]}, identity), {label:'Traveler identity',lines:['Name: <Alexandria> Montgomery-Smythe','Most used airport: DFW, Dallas–Fort Worth, United States','Since: 2016','Countries: 17']}, 'All visual identity fields have honest screen-reader equivalents');
+assert(passportPageDescription({kind:'record',stamps:[]}, identity).lines.includes('2025: 21 flights'), 'The record page chart also exposes its data');
+assert.equal(passportPageDescription({kind:'stamps',stamps:[]}, identity), undefined, 'Stamp pages use their existing individual arrival controls without duplicate descriptions');
+assert(!passportPageDescription({kind:'identity',stamps:[]}, {...identity,name:'',homeAirport:'',homeAirportName:'',homeAirportCountry:'',firstFlightDate:''}).lines.some(line => line.includes('airport') || line.startsWith('Since:')), 'Empty accounts cannot announce invented airport or date fields');
 const { scriptJSON } = component('passport-document.ts'); assert(!scriptJSON({ name: '</script><script>alert(1)</script>' }).includes('<'), 'Personal names cannot break the inline document script');
 require('node:child_process').execFileSync(process.execPath, [path.join(__dirname, 'buildPassportRuntime.js'), '--check'], { stdio: 'inherit' });
 console.log('Passport checks passed: 241 collection sizes, stable rotated bounds/hit targets, cover/fold gestures, connection countries, first-entry preservation, flight deduplication and year boundaries.');

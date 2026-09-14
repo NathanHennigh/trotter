@@ -5,6 +5,13 @@ export type MapLand = {
   features: { geometry: { type: string; coordinates: unknown } | null }[];
 };
 type Vector = [number, number, number];
+type AtlasLabel = { x: number; y: number; width: number; height: number };
+type AtlasPort = { code: string; x: number; y: number; radius: number; label?: AtlasLabel };
+// These are the painted backgrounds used by TripAtlas, not just text bounds.
+const labelBounds = (label: AtlasLabel) => ({
+  left: label.x - 3, top: label.y - 1,
+  right: label.x + label.width + 3, bottom: label.y + label.height,
+});
 const endpoint = (lon: number, lat: number): Vector => {
   const l = (lon * Math.PI) / 180,
     p = (lat * Math.PI) / 180;
@@ -61,12 +68,7 @@ export function tripAtlasGeometry(
     return {
       landPath: "",
       paths: [] as string[],
-      ports: [] as {
-        code: string;
-        x: number;
-        y: number;
-        label?: { x: number; y: number; width: number; height: number };
-      }[],
+      ports: [] as AtlasPort[],
     };
   const lons = [...airports.values()]
     .map((p) => (p.lon + 360) % 360)
@@ -98,9 +100,11 @@ export function tripAtlasGeometry(
         (-Math.atan2(p[1], Math.hypot(p[0], p[2])) * 180) / Math.PI,
       ]),
     );
-  const points = coordinates.length
-    ? coordinates.flat()
-    : [...airports.values()].map((p) => [normalize(p.lon) * cosine, -p.lat]);
+  // Include known endpoints even when the other end of their route has no pin.
+  const points = [
+    ...coordinates.flat(),
+    ...[...airports.values()].map((p) => [normalize(p.lon) * cosine, -p.lat]),
+  ];
   const xs = points.map((p) => p[0]),
     ys = points.map((p) => p[1]);
   const minX = Math.min(...xs),
@@ -164,35 +168,45 @@ export function tripAtlasGeometry(
         });
       })
       .join("") ?? "";
-  const labels: { x: number; y: number; width: number; height: number }[] = [];
-  const ports = [...airports.keys()]
-    .sort((a, b) => Number(b === destination) - Number(a === destination))
+  const labels: AtlasLabel[] = [];
+  const projected = [...airports.keys()]
+    .sort((a, b) => Number(b === destination) - Number(a === destination) || a.localeCompare(b))
     .map((code) => {
       const airport = airports.get(code)!,
         [x, y] = project([normalize(airport.lon) * cosine, -airport.lat]);
-      const label = [
-        [x + 9, y - 15],
-        [x - 39, y - 15],
-        [x + 9, y + 5],
-        [x - 39, y + 5],
-      ]
-        .map(([x, y]) => ({
-          x: Math.max(7, Math.min(361, x)),
-          y: Math.max(7, Math.min(210, y)),
-          width: 32,
-          height: 16,
-        }))
-        .find((a) =>
-          labels.every(
-            (b) =>
-              a.x > b.x + b.width + 4 ||
-              a.x + a.width + 4 < b.x ||
-              a.y > b.y + b.height + 3 ||
-              a.y + a.height + 3 < b.y,
-          ),
-        );
-      if (label) labels.push(label);
-      return { code, x, y, label };
+      return { code, x, y, radius: code === destination ? 4.2 : 2.7 };
     });
+  const ports: AtlasPort[] = projected.map((port) => {
+    const { x, y } = port;
+    const label = [
+      [x + 9, y - 15],
+      [x - 41, y - 15],
+      [x + 9, y + 5],
+      [x - 41, y + 5],
+      [x - 16, y - 23],
+      [x - 16, y + 9],
+    ]
+      .map(([x, y]) => ({
+        x: Math.max(7, Math.min(361, x)),
+        y: Math.max(7, Math.min(210, y)),
+        width: 32,
+        height: 16,
+      }))
+      .find((candidate) => {
+        const a = labelBounds(candidate);
+        return labels.every((label) => {
+          const b = labelBounds(label);
+          return a.left > b.right + 3 || a.right + 3 < b.left || a.top > b.bottom + 3 || a.bottom + 3 < b.top;
+        }) && projected.every((marker) => {
+          // Circle/rectangle distance also protects neighboring markers that
+          // have not yet received a label. Include stroke and breathing room.
+          const dx = marker.x - Math.max(a.left, Math.min(a.right, marker.x));
+          const dy = marker.y - Math.max(a.top, Math.min(a.bottom, marker.y));
+          return Math.hypot(dx, dy) >= marker.radius + 0.6 + 1;
+        });
+      });
+    if (label) labels.push(label);
+    return { ...port, label };
+  });
   return { landPath, paths: coordinates.map(path), ports };
 }

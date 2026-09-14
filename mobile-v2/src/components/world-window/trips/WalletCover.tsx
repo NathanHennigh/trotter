@@ -4,7 +4,7 @@ import Svg, { Defs, Line, LinearGradient, Rect, Stop } from "react-native-svg";
 import type { TripSummary } from "../../../data/trotterMock";
 import { fonts } from "../../../theme/trotterTheme";
 import { WWEmblem, WWIcon } from "../WorldWindowUI";
-import { tripDates, tripItineraries } from "./tripPresentation";
+import { tripDates, walletSummary } from "./tripPresentation";
 
 export const walletColors = {
   blue: "#427494",
@@ -65,9 +65,7 @@ export function WalletCover({
   trip: TripSummary;
   onPress: (flightId?: string) => void;
 }) {
-  const groups = React.useMemo(() => tripItineraries(trip), [trip]);
-  const shown =
-    groups.length > 2 ? [groups[0], groups[groups.length - 1]] : groups;
+  const { shown, hidden } = React.useMemo(() => walletSummary(trip), [trip]);
   return (
     <View style={s.stack}>
       <View pointerEvents="none" style={s.paperEdgeBack} />
@@ -130,8 +128,8 @@ export function WalletCover({
             style={s.open}
           >
             <Text style={s.openText}>
-              {groups.length > 2
-                ? `${groups.length - 2} more flight ${groups.length === 3 ? "segment" : "segments"}`
+              {hidden > 0
+                ? `${hidden} more ${hidden === 1 ? "flight" : "flights"}`
                 : "Full itinerary"}
             </Text>
             <View style={s.openEnd}>
@@ -150,7 +148,7 @@ export function WalletCover({
   );
 }
 const s = StyleSheet.create({
-  stack: { marginHorizontal: 20, marginBottom: 24 },
+  stack: { marginHorizontal: 20, marginBottom: 18 },
   paperEdgeBack: {
     position: "absolute",
     left: 0,
@@ -194,7 +192,7 @@ const s = StyleSheet.create({
     borderTopLeftRadius: 4,
     borderTopRightRadius: 4,
   },
-  headingCompact: { paddingHorizontal: 12, paddingTop: 9, paddingBottom: 11 },
+  headingCompact: { paddingHorizontal: 12, paddingTop: 7, paddingBottom: 8 },
   top: {
     minHeight: 30,
     flexDirection: "row",
@@ -222,7 +220,7 @@ const s = StyleSheet.create({
     marginBottom: 10,
     includeFontPadding: false,
   },
-  titleCompact: { fontSize: 29, lineHeight: 32, marginTop: 2, marginBottom: 4 },
+  titleCompact: { fontSize: 27, lineHeight: 29, marginTop: 1, marginBottom: 3 },
   date: {
     fontFamily: fonts.sansRegular,
     fontSize: 12,
@@ -244,7 +242,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     minHeight: 46,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: "transparent",
   },
@@ -253,8 +251,8 @@ const s = StyleSheet.create({
   route: { flexDirection: "row", gap: 8, alignItems: "center" },
   airport: {
     fontFamily: fonts.mono,
-    fontSize: 21,
-    lineHeight: 25,
+    fontSize: 19,
+    lineHeight: 23,
     color: walletColors.ink,
     letterSpacing: -0.7,
     includeFontPadding: false,
@@ -262,7 +260,7 @@ const s = StyleSheet.create({
   via: {
     fontFamily: fonts.sansRegular,
     fontSize: 12,
-    lineHeight: 18,
+    lineHeight: 16,
     color: walletColors.muted,
   },
   when: {
@@ -301,15 +299,15 @@ const s = StyleSheet.create({
     borderLeftColor: "#9ab6c080",
     borderLeftWidth: 1,
   },
-  topCompact: { minHeight: 20 },
+  topCompact: { minHeight: 17 },
   compactEmblem: {
     width: 23,
     height: 23,
     alignItems: "center",
     justifyContent: "center",
   },
-  countryCompact: { fontSize: 12, lineHeight: 17, letterSpacing: 0.66 },
-  dateCompact: { fontSize: 13, lineHeight: 18.2 },
+  countryCompact: { fontSize: 11, lineHeight: 15, letterSpacing: 0.66 },
+  dateCompact: { fontSize: 12, lineHeight: 17 },
   topLight: {
     position: "absolute",
     top: 0,

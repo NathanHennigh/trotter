@@ -159,11 +159,10 @@ const s = StyleSheet.create({
   },
   copy: { flex: 1 },
   country: {
-    fontFamily: fonts.display,
     fontSize: 40,
     lineHeight: 43,
     color: colors.ink,
-    fontStyle: "italic",
+    fontFamily: fonts.displayItalic,
     letterSpacing: -1.1,
     includeFontPadding: false,
   },

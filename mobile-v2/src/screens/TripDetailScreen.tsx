@@ -36,15 +36,17 @@ export function TripDetailScreen({
   onBack,
   onChange,
   selectedFlightId,
+  backLabel = "Back to trips",
 }: {
   trip: TripSummary;
   active: BottomNavTab;
   onBack: () => void;
   onChange: (tab: BottomNavTab) => void;
   selectedFlightId?: string;
+  backLabel?: string;
 }) {
   const insets = useSafeAreaInsets(),
-    { loadTripDetail } = useTravelTrips();
+    { loadTripDetail, trips } = useTravelTrips();
   const [hydrated, setHydrated] = React.useState<TripSummary>(),
     [loading, setLoading] = React.useState(false),
     [error, setError] = React.useState<string>(),
@@ -77,7 +79,7 @@ export function TripDetailScreen({
       live = false;
     };
   }, [trip.id, trip.backendId, loadTripDetail, retry]);
-  const current = hydrated || trip,
+  const current = trips.find((entry) => entry.id === trip.id || (trip.backendId != null && entry.backendId === trip.backendId)) || hydrated || trip,
     segments = React.useMemo(
       () => orderedSegments(current.segments),
       [current.segments],
@@ -106,14 +108,13 @@ export function TripDetailScreen({
     }
   };
   return (
-    <View style={s.screen}>
+    <View style={[s.screen, { paddingTop: insets.top }]}>
       <FlatList
         ref={list}
         data={segments}
         keyExtractor={(segment) => segment.id}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
-          paddingTop: insets.top,
           paddingBottom: insets.bottom + layout.bottomNavHeight + 28,
         }}
         onContentSizeChange={focus}
@@ -130,7 +131,7 @@ export function TripDetailScreen({
             <View style={s.detailBar}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Back to trips"
+                accessibilityLabel={backLabel}
                 onPress={onBack}
                 style={s.backButton}
               >

@@ -55,6 +55,7 @@ export const fonts = {
   display: "Newsreader-Regular",
   serif: "Newsreader-Regular",
   displayMedium: "Newsreader-Medium",
+  displayItalic: "Newsreader-Italic",
   sans: "DMSans-Medium",
   sansRegular: "DMSans-Regular",
   sansSemi: "DMSans-SemiBold",

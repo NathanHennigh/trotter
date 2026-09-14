@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -36,6 +35,8 @@ export function PassportStatsScreen({
   initialCollection,
   collectionBackLabel,
   onCloseCollection,
+  visible = true,
+  onBackHandlerChange,
 }: {
   active: BottomNavTab;
   onChange: (tab: BottomNavTab) => void;
@@ -45,9 +46,11 @@ export function PassportStatsScreen({
   initialCollection?: CollectionKind;
   collectionBackLabel?: string;
   onCloseCollection?: () => void;
+  visible?: boolean;
+  onBackHandlerChange?: (handler: (() => boolean) | null) => void;
 }) {
   const insets = useSafeAreaInsets(),
-    { width } = useWindowDimensions(),
+    { width, fontScale } = useWindowDimensions(),
     visualWidth = getMobileVisualWidth(width);
   const { trips, profile, status, refresh } = useTravelTrips();
   const archive = React.useMemo(
@@ -57,10 +60,10 @@ export function PassportStatsScreen({
   const [interacting, setInteracting] = React.useState(false),
     [collection, setCollection] = React.useState<CollectionKind | null>(initialCollection ?? null),
     [country, setCountry] = React.useState<CountryArrival | null>(null);
-  const detailBack = React.useRef<(() => boolean) | null>(null);
-  const registerDetailBack = React.useCallback((handler: (() => boolean) | null) => {
-    detailBack.current = handler;
-  }, []);
+  const collectionBack = React.useRef<(() => boolean) | null>(null);
+  const countryBack = React.useRef<(() => boolean) | null>(null);
+  const registerCollectionBack = React.useCallback((handler: (() => boolean) | null) => { collectionBack.current = handler; }, []);
+  const registerCountryBack = React.useCallback((handler: (() => boolean) | null) => { countryBack.current = handler; }, []);
   React.useEffect(() => {
     setCollection(initialCollection ?? null);
     setCountry(null);
@@ -69,22 +72,29 @@ export function PassportStatsScreen({
     if (kind === "countries" && onOpenCountries) onOpenCountries();
     else setCollection(kind);
   };
-  const close = () => {
+  const close = React.useCallback(() => {
     if (country) setCountry(null);
     else {
       setCollection(null);
       onCloseCollection?.();
     }
-  };
-  const openTrip = onOpenTrip
-    ? (trip: TripSummary) => {
-        setCountry(null);
-        setCollection(null);
-        onOpenTrip(trip);
-      }
-    : undefined;
+  }, [country, onCloseCollection]);
+  const handleBack = React.useCallback(() => {
+    if (country) { if (!countryBack.current?.()) setCountry(null); return true; }
+    if (!collection) return false;
+    if (!collectionBack.current?.()) close();
+    return true;
+  }, [country, collection, close]);
+  React.useEffect(() => {
+    onBackHandlerChange?.(visible ? handleBack : null);
+    return () => onBackHandlerChange?.(null);
+  }, [visible, handleBack, onBackHandlerChange]);
+  const changeTab = (tab: BottomNavTab) => { setCountry(null); setCollection(null); onChange(tab); };
+  const openTrip = onOpenTrip;
+  const hasOverlay = Boolean(country || collection);
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
+      <View style={styles.base} pointerEvents={hasOverlay ? "none" : "auto"} aria-hidden={hasOverlay} accessibilityElementsHidden={hasOverlay} importantForAccessibility={hasOverlay ? "no-hide-descendants" : "auto"}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         scrollEnabled={!interacting}
@@ -143,9 +153,9 @@ export function PassportStatsScreen({
                   ]}
                 >
                   <Text style={styles.recordLabel}>{record.label}</Text>
-                  <View style={styles.recordCopy}>
+                  <View style={[styles.recordCopy, fontScale >= 1.35 && styles.recordStacked]}>
                     <Text style={styles.recordValue}>{record.value}</Text>
-                    <Text style={styles.recordDetail}>{record.detail}</Text>
+                    <Text style={[styles.recordDetail, fontScale >= 1.35 && styles.recordDetailLarge]}>{record.detail}</Text>
                   </View>
                 </Pressable>
               ))}
@@ -153,55 +163,23 @@ export function PassportStatsScreen({
           )}
         </View>
       </ScrollView>
-      <BottomNav active={active} onChange={onChange} />
-      <Modal
-        visible={Boolean(collection || country)}
-        animationType="fade"
-        presentationStyle="fullScreen"
-        onRequestClose={() => { if (!detailBack.current?.()) close(); }}
-      >
-        <View
-          style={[
-            styles.screen,
-            {
-              paddingTop: insets.top,
-              paddingBottom: insets.bottom + layout.bottomNavHeight,
-              maxWidth: visualWidth,
-              width: "100%",
-              alignSelf: "center",
-            },
-          ]}
-        >
-          {country ? (
-            <CountryArrivalDetail
-              arrival={country}
-              trips={trips}
-              onBack={close}
-              onOpenTrip={openTrip}
-              width={visualWidth}
-              backLabel={collection ? "Countries" : "Passport"}
-              onBackHandlerChange={registerDetailBack}
-            />
-          ) : collection ? (
-            <CollectionList
-              key={collection}
-              kind={collection}
-              archive={archive}
-              onBack={close}
-              onSelectCountry={setCountry}
-              onOpenTrip={openTrip}
-              backLabel={collectionBackLabel}
-              onBackHandlerChange={registerDetailBack}
-            />
-          ) : null}
-          <BottomNav active="passport" onChange={(tab) => { setCountry(null); setCollection(null); onChange(tab); }} />
-        </View>
-      </Modal>
+      </View>
+      {collection && <View style={[styles.overlay, { top: insets.top, paddingBottom: insets.bottom + layout.bottomNavHeight }]} pointerEvents={country ? "none" : "auto"} aria-hidden={Boolean(country)} accessibilityElementsHidden={Boolean(country)} importantForAccessibility={country ? "no-hide-descendants" : "auto"}>
+        <CollectionList key={collection} kind={collection} archive={archive} onBack={close} onSelectCountry={setCountry} onOpenTrip={openTrip} backLabel={collectionBackLabel} onBackHandlerChange={registerCollectionBack} />
+      </View>}
+      {country && <View style={[styles.overlay, { top: insets.top, paddingBottom: insets.bottom + layout.bottomNavHeight }]}>
+        <CountryArrivalDetail key={country.travelCountryKey ?? country.country} arrival={country} trips={trips} onBack={close} onOpenTrip={openTrip} width={visualWidth} backLabel={collection ? "Countries" : "Passport"} onBackHandlerChange={registerCountryBack} />
+      </View>}
+      <BottomNav active={active} onChange={changeTab} />
     </View>
   );
 }
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.paperSoft },
+  base: { flex: 1 },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.paperSoft },
+  recordStacked: { flexDirection: "column", alignItems: "flex-start" },
+  recordDetailLarge: { maxWidth: "100%", textAlign: "left" },
   book: { alignItems: "center", marginTop: 8, marginBottom: 24 },
   content: { paddingHorizontal: 24 },
   activity: { marginTop: 28 },

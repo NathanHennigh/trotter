@@ -116,7 +116,7 @@ export function matchesTrip(
   thisYear: boolean,
   year: number,
 ) {
-  if (thisYear && !trip.startDate.startsWith(String(year))) return false;
+  if (thisYear && !tripInYear(trip, year)) return false;
   const text = [
     trip.title,
     trip.city,
@@ -136,6 +136,39 @@ export function matchesTrip(
     .trim()
     .split(/\s+/)
     .every((term) => text.includes(term));
+}
+
+export function tripInYear(trip: TripSummary, year: number) {
+  const prefix = String(year) + "-";
+  return trip.segments?.length
+    ? trip.segments.some((flight) => calendarDate(flight.depTime)?.startsWith(prefix))
+    : trip.startDate.startsWith(prefix) || trip.endDate.startsWith(prefix);
+}
+
+/** Destination-oriented wallet preview; the full itinerary retains its original visit groups. */
+export function walletSummary(trip: TripSummary) {
+  const groups = tripItineraries(trip);
+  const legs = orderedSegments(trip.segments);
+  const destination = trip.airportCode;
+  const arrival = legs.findIndex((flight) => flight.arrAirport === destination);
+  const departure = legs.reduce((last, flight, index) => index > arrival && flight.depAirport === destination ? index : last, -1);
+  const make = (part: TripSegmentSummary[]) => {
+    const first = part[0], last = part[part.length - 1];
+    return {
+      id: first.id, first, last, legs: part,
+      via: part.slice(1).map((flight) => flight.depAirport),
+      dates: `${flightDate(first.depTime, false)}${calendarDate(first.depTime) !== calendarDate(last.arrTime) && calendarDate(last.arrTime) ? ` – ${flightDate(last.arrTime, false)}` : ""}`,
+    };
+  };
+  // Only combine a continuous airport chain. A surface transfer must remain explicit.
+  const continuous = (part: TripSegmentSummary[]) => part.every((leg, i) => i === 0 || part[i - 1].arrAirport === leg.depAirport);
+  const outbound = arrival >= 0 ? legs.slice(0, arrival + 1) : [];
+  const inbound = departure >= 0 ? legs.slice(departure) : [];
+  const shown = outbound.length && continuous(outbound) && (inbound.length === 0 || continuous(inbound))
+    ? [make(outbound), ...(inbound.length ? [make(inbound)] : [])]
+    : groups.length > 2 ? [groups[0], groups[groups.length - 1]] : groups;
+  const represented = new Set(shown.flatMap((group) => group.legs.map((leg) => leg.id)));
+  return { shown, hidden: legs.filter((leg) => !represented.has(leg.id)).length };
 }
 
 export type MapPoint = {

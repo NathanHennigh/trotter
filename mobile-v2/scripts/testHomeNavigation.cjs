@@ -6,6 +6,24 @@ const path = require("node:path");
 const ts = require("typescript");
 const { test } = require("node:test");
 
+const modules = new Map();
+function pure(file) {
+  const absolute = path.resolve(__dirname, "..", file);
+  if (modules.has(absolute)) return modules.get(absolute);
+  if (absolute.endsWith(".json")) return JSON.parse(fs.readFileSync(absolute, "utf8"));
+  const source = fs.readFileSync(absolute, "utf8");
+  const code = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
+  const mod = { exports: {} }; modules.set(absolute, mod.exports);
+  const resolve = ref => {
+    const base=path.resolve(path.dirname(absolute), ref);
+    const found=[base,base+".ts",base+".json"].find(p=>fs.existsSync(p)&&fs.statSync(p).isFile());
+    if (!found) throw Error("Missing pure module: "+ref);
+    return pure(path.relative(path.resolve(__dirname,".."),found));
+  };
+  new Function("require","module","exports",code)(resolve,mod,mod.exports);
+  modules.set(absolute,mod.exports); return mod.exports;
+}
+
 function hookHost() {
   const slots = [];
   let cursor = 0, pending = [], dirty = false, component, props, tree;
@@ -56,7 +74,7 @@ function hookHost() {
 }
 
 const trip = {
-  id: "trip-one", backendId: 1, title: "Singapore", country: "Singapore",
+  id: "trip-one", backendId: 1, title: "Singapore", country: "Singapore", startDate:"2026-01-02", endDate:"2026-01-03", airportCode:"SIN", stamp:{icon:"singapore_marina_bay_sands",date:"2026-01-03"},
   segments: [{ id: "flight-one", depAirport: "LHR", arrAirport: "SIN", depTime: "2026-01-02T12:00:00Z", arrTime: "2026-01-03T01:00:00Z",
     depPoint: { code: "LHR", city: "London", country: "United Kingdom", lat: 51.47, lon: -.454 },
     arrPoint: { code: "SIN", city: "Singapore", country: "Singapore", lat: 1.36, lon: 103.99 } }],
@@ -76,16 +94,16 @@ function load(file, name, overrides = {}) {
   const compiled = ts.transpileModule(`${text.startsWith("export") ? text : "export " + text}\n${styles?.getText(ast) ?? ""}`, {
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  const tags = "View Text Pressable ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionList CountryArrivalDetail CountryIndex CollectionHeading CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen".split(" ");
+  const tags = "View Text Pressable ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionList CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen".split(" ");
   const globals = {
     ...Object.fromEntries(tags.map(tag => [tag, tag])),
-    React: host.React, useState: host.React.useState, useMemo: host.React.useMemo,
+    React: host.React, useState: host.React.useState, useMemo: host.React.useMemo, useEffect: host.React.useEffect, useRef: host.React.useRef,
     StyleSheet: { create: x => x, absoluteFillObject: {}, absoluteFill: {} },
     Platform: { OS: "android" }, colors: {}, fonts: {}, layout: { bottomNavHeight: 62 },
     useSafeAreaInsets: () => ({ top: 24, bottom: 20 }), useWindowDimensions: () => ({ width: 390, height: 844 }), getMobileVisualWidth: x => x,
     useTravelTrips: () => ({ trips: [trip], profile: {}, status: "ready", refresh: noOp, syncFromGmail: noOp }),
     useDreams: () => ({ shareInstagramLink: noOp }), getInitialTab: () => "globe",
-    buildPassportArchive: () => archive, buildPassportArrivals: () => [arrival], flightCountryKey: (_country, code) => code,
+    buildGlobeHistory: pure("src/components/world-window/globe-history.ts").buildGlobeHistory, flightDate: pure("src/components/world-window/trips/tripPresentation.ts").flightDate, tripsForCountry: () => [trip], buildPassportArchive: () => archive, buildPassportArrivals: () => [arrival], flightCountryKey: (_country, code) => code,
     readableDate: x => x, airlineName: x => x, BackHandler: { addEventListener: () => ({ remove: noOp }) },
     ...overrides,
   };
@@ -147,11 +165,11 @@ for (const kind of ["countries", "airports"]) {
     tree = host.render();
     assert.equal(find(tree, "HomeGlobeScreen").props.active, "globe");
     assert.equal(find(tree, "HomeGlobeScreen").props.filterYear, "2026");
-    assert.equal(find(tree, "PassportStatsScreen"), undefined);
+    assert.equal(find(tree, "PassportStatsScreen").props.visible, false);
   });
 }
 
-test("Leaving a Home collection by tab or trip clears its pending return route", () => {
+test("Explicit tab navigation clears a collection; a trip detail preserves its return route", () => {
   const host = appHost();
   let tree = host.render({ consumeShare: noOp });
   find(tree, "HomeGlobeScreen").props.onOpenCollection("airports");
@@ -169,35 +187,36 @@ test("Leaving a Home collection by tab or trip clears its pending return route",
   assert.equal(find(tree, "TripDetailScreen").props.trip.id, trip.id);
   find(tree, "TripDetailScreen").props.onBack();
   tree = host.render();
-  assert(find(tree, "TripsListScreen"));
+  assert.equal(find(tree, "PassportStatsScreen").props.visible, true);
+  assert.equal(find(tree, "PassportStatsScreen").props.initialCollection, "airports");
 });
 
 test("Airport hardware Back steps detail → airport list → Home", () => {
-  let exits = 0;
+  let exits = 0, back;
   const passport = passportHost();
-  let tree = passport.render({ active: "passport", onChange: noOp, initialCollection: "airports", collectionBackLabel: "Globe", onCloseCollection: () => exits++ });
+  let tree = passport.render({ active: "passport", onChange: noOp, initialCollection: "airports", collectionBackLabel: "Globe", onCloseCollection: () => exits++, onBackHandlerChange: handler => back = handler });
   const list = listHost();
   let listTree = list.render(find(tree, "CollectionList").props);
   const airportRow = nodes(listTree).find(n => n.type === "Pressable" && n.props.onPress);
   airportRow.props.onPress();
   listTree = list.render();
   assert(find(listTree, "AirportRouteFan"));
-  find(tree, "Modal").props.onRequestClose();
+  back();
   listTree = list.render();
   assert.equal(find(listTree, "AirportRouteFan"), undefined);
   assert.equal(exits, 0);
   assert.equal(find(listTree, "CollectionHeading").props.backLabel, "Globe");
-  find(tree, "Modal").props.onRequestClose();
+  back();
   tree = passport.render();
-  assert.equal(find(tree, "Modal").props.visible, false);
+  assert.equal(find(tree, "CollectionList"), undefined);
   assert.equal(exits, 1);
   list.unmount();
 });
 
 test("Country hardware Back steps trips → country → country list → Home", () => {
-  let exits = 0;
+  let exits = 0, back;
   const passport = passportHost();
-  let tree = passport.render({ active: "passport", onChange: noOp, initialCollection: "countries", onCloseCollection: () => exits++ });
+  let tree = passport.render({ active: "passport", onChange: noOp, initialCollection: "countries", onCloseCollection: () => exits++, onBackHandlerChange: handler => back = handler });
   find(tree, "CollectionList").props.onSelectCountry(arrival);
   tree = passport.render();
   const detail = load("src/components/world-window/passport/PassportCollections.tsx", "CountryArrivalDetail");
@@ -205,28 +224,58 @@ test("Country hardware Back steps trips → country → country list → Home", 
   find(detailTree, "WWButton").props.onPress();
   detailTree = detail.render();
   assert(find(detailTree, "TripRows"));
-  find(tree, "Modal").props.onRequestClose();
+  back();
   detailTree = detail.render();
   assert.equal(find(detailTree, "TripRows"), undefined);
   assert.equal(exits, 0);
-  find(tree, "Modal").props.onRequestClose();
+  back();
   detail.unmount();
   tree = passport.render();
   assert.equal(find(tree, "CollectionList").props.kind, "countries");
-  find(tree, "Modal").props.onRequestClose();
+  back();
   assert.equal(exits, 1);
 });
 
 test("Normal Passport collection closes to Passport and unregisters detail handlers", () => {
+  let back;
   const passport = passportHost();
-  let tree = passport.render({ active: "passport", onChange: noOp });
+  let tree = passport.render({ active: "passport", onChange: noOp, onBackHandlerChange: handler => back = handler });
   find(tree, "CollectionButtons").props.onOpen("airports");
   tree = passport.render();
   const list = listHost();
   list.render(find(tree, "CollectionList").props);
   list.unmount();
-  find(tree, "Modal").props.onRequestClose();
+  back();
   tree = passport.render();
-  assert.equal(find(tree, "Modal").props.visible, false);
+  assert.equal(find(tree, "CollectionList"), undefined);
   assert(find(tree, "PassportBook"));
+});
+
+
+test("Hidden tab layers cannot receive touches or appear in either accessibility tree", () => {
+  const host=appHost(); let tree=host.render({consumeShare:noOp});
+  find(tree,"HomeGlobeScreen").props.onChange("trips"); tree=host.render();
+  const list=find(tree,"TripsListScreen"); list.props.onOpenTrip(trip); tree=host.render();
+  assert(find(tree,"TripsListScreen"),"Trip list stays mounted beneath detail");
+  const layers=tree.props.children.flat(Infinity).filter(n=>n&&n.type==="View");
+  assert.equal(layers.filter(n=>n.props.pointerEvents==="auto").length,1);
+  for(const layer of layers.filter(n=>n.props.pointerEvents==="none")){
+    assert.equal(layer.props.accessibilityElementsHidden,true);
+    assert.equal(layer.props.importantForAccessibility,"no-hide-descendants");
+    assert.equal(layer.props["aria-hidden"],true);
+  }
+  find(tree,"TripDetailScreen").props.onBack(); tree=host.render();
+  assert.equal(find(tree,"TripsListScreen").props.active,"trips");
+});
+
+test("App hardware Back returns to the collection before delegating its nested Back", () => {
+  let back, childCalls=0;
+  const host=appHost({BackHandler:{addEventListener:(_event,fn)=>{back=fn;return {remove:noOp}}}});
+  let tree=host.render({consumeShare:noOp});
+  find(tree,"HomeGlobeScreen").props.onOpenCollection("countries"); tree=host.render();
+  find(tree,"PassportStatsScreen").props.onBackHandlerChange(()=>{childCalls++;return true});
+  find(tree,"PassportStatsScreen").props.onOpenTrip(trip); tree=host.render();
+  assert.equal(back(),true); tree=host.render(); assert.equal(childCalls,0);
+  assert.equal(find(tree,"PassportStatsScreen").props.visible,true);
+  assert.equal(back(),true); assert.equal(childCalls,1);
 });
