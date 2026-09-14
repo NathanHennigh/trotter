@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -16,11 +16,9 @@ import {
   WWEmblem,
   WWIcon,
 } from "../components/world-window/WorldWindowUI";
-import {
-  flightCountryKey,
-  type GeoCountry,
-} from "../components/world-window/globe-geography";
-import { buildPassportArrivals } from "../components/world-window/passport/passport-arrivals";
+import { type GeoCountry } from "../components/world-window/globe-geography";
+import { buildGlobeHistory } from "../components/world-window/globe-history";
+import { flightDate } from "../components/world-window/trips/tripPresentation";
 import type { BottomNavTab, TripSummary } from "../data/trotterMock";
 import type { FlightRoute } from "../data/demoTravel";
 import { useTravelTrips } from "../services/travelTrips";
@@ -53,97 +51,29 @@ export function HomeGlobeScreen({
     onFilterYear?.(next);
   };
   const [yearOpen, setYearOpen] = useState(false);
+  useEffect(() => {
+    if (active !== "globe") setYearOpen(false);
+  }, [active]);
   const [mapStyle, setMapStyle] = useState<"classic" | "nasa">("classic");
-  const [selected, setSelected] = useState<FlightRoute | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [country, setCountry] = useState<GeoCountry | null>(null);
   const clear = () => {
-    setSelected(null);
+    setSelectedId(null);
     setCountry(null);
   };
-  const years = useMemo(
-    () =>
-      [
-        ...new Set(
-          trips
-            .flatMap((t) =>
-              (t.segments ?? []).map((s) => s.depTime.slice(0, 4)),
-            )
-            .filter((y) => /^\d{4}$/.test(y)),
-        ),
-      ]
-        .sort()
-        .reverse(),
-    [trips],
-  );
-  const routes = useMemo(
-    () =>
-      trips.flatMap((trip) =>
-        (trip.segments ?? []).flatMap((segment) => {
-          if (
-            !segment.depPoint ||
-            !segment.arrPoint ||
-            (year !== "All years" && !segment.depTime.startsWith(year))
-          )
-            return [];
-          return [
-            {
-              id: segment.id,
-              from: segment.depPoint,
-              to: segment.arrPoint,
-              tripId: trip.backendId,
-              tripTitle: trip.title,
-              depTime: segment.depTime,
-              arrTime: segment.arrTime,
-              airline: segment.airline,
-              flightNumber: segment.flightNumber,
-              distanceKm: segment.distanceMiles
-                ? segment.distanceMiles / 0.621371
-                : undefined,
-            } satisfies FlightRoute,
-          ];
-        }),
-      ),
+  const { routes, visited, flightCount, airportCount, years } = useMemo(
+    () => buildGlobeHistory(trips, year),
     [trips, year],
   );
-  const ports = useMemo(
-    () => [
-      ...new Map(
-        routes.flatMap((r) => [
-          [r.from.code, r.from] as const,
-          [r.to.code, r.to] as const,
-        ]),
-      ).values(),
-    ],
-    [routes],
-  );
-  const visited = useMemo(() => {
-    const shown =
-      year === "All years"
-        ? trips
-        : trips
-            .filter((t) => t.segments?.some((s) => s.depTime.startsWith(year)))
-            .map((t) => ({
-              ...t,
-              segments: t.segments?.filter((s) => s.depTime.startsWith(year)),
-            }));
-    return [
-      ...new Set(
-        buildPassportArrivals(shown)
-          .map((a) =>
-            flightCountryKey(a.country, a.travelCountryKey, a.airportCode),
-          )
-          .filter((code): code is string => Boolean(code)),
-      ),
-    ];
-  }, [trips, year]);
-  const flightCount = useMemo(
-    () =>
-      trips
-        .flatMap((t) => t.segments ?? [])
-        .filter((s) => year === "All years" || s.depTime.startsWith(year))
-        .length,
-    [trips, year],
-  );
+  const selected = routes.find((route) => route.id === selectedId) ?? null;
+  const previousYear = useRef(year);
+  useEffect(() => {
+    if (previousYear.current !== year) {
+      previousYear.current = year;
+      setSelectedId(null);
+      setCountry(null);
+    } else if (selectedId && !selected) setSelectedId(null);
+  }, [year, selectedId, selected]);
   const selectedTrip = selected
     ? trips.find((t) => t.segments?.some((s) => s.id === selected.id))
     : null;
@@ -164,8 +94,14 @@ export function HomeGlobeScreen({
         visited={visited}
         selectedRouteId={selected?.id}
         selectedCountryCode={country?.code}
-        onRoute={setSelected}
-        onCountry={setCountry}
+        onRoute={(route: FlightRoute) => {
+          setCountry(null);
+          setSelectedId(route.id);
+        }}
+        onCountry={(next: GeoCountry) => {
+          setSelectedId(null);
+          setCountry(next);
+        }}
         onClear={clear}
       />
       <View
@@ -182,29 +118,31 @@ export function HomeGlobeScreen({
             onPress={() => setYearOpen(true)}
             style={({ pressed }) => [styles.year, pressed && styles.pressed]}
           >
-            <Text style={styles.yearText} numberOfLines={1}>{year}</Text>
+            <Text style={styles.yearText} numberOfLines={1}>
+              {year}
+            </Text>
             <WWIcon name="down" size={15} />
           </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                mapStyle === "classic"
-                  ? "Switch to NASA imagery"
-                  : "Switch to classic globe"
-              }
-              accessibilityState={{ selected: mapStyle === "nasa" }}
-              onPress={() =>
-                setMapStyle((v) => (v === "classic" ? "nasa" : "classic"))
-              }
-              style={({ pressed }) => [
-                styles.iconButton,
-                styles.textureButton,
-                mapStyle === "nasa" && styles.chosen,
-                pressed && styles.pressed,
-              ]}
-            >
-              <WWIcon name="globe" size={21} />
-            </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              mapStyle === "classic"
+                ? "Switch to NASA imagery"
+                : "Switch to classic globe"
+            }
+            accessibilityState={{ selected: mapStyle === "nasa" }}
+            onPress={() =>
+              setMapStyle((v) => (v === "classic" ? "nasa" : "classic"))
+            }
+            style={({ pressed }) => [
+              styles.iconButton,
+              styles.textureButton,
+              mapStyle === "nasa" && styles.chosen,
+              pressed && styles.pressed,
+            ]}
+          >
+            <WWIcon name="globe" size={21} />
+          </Pressable>
         </View>
         {!trips.length && !busy ? (
           <View style={styles.import}>
@@ -236,7 +174,7 @@ export function HomeGlobeScreen({
           <View style={styles.ticket}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`View trip for ${selected.from.code} to ${selected.to.code}`}
+              accessibilityLabel={`View trip for ${selected.from.code} to ${selected.to.code}, ${flightDate(selected.depTime ?? undefined)}${selected.flightNumber ? `, ${selected.flightNumber}` : ""}`}
               onPress={openTrip}
               style={({ pressed }) => [
                 styles.ticketBody,
@@ -270,13 +208,7 @@ export function HomeGlobeScreen({
               </View>
               <View style={styles.tear}>
                 <Text style={styles.ticketDate}>
-                  {selected.depTime
-                    ? new Date(selected.depTime).toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })
-                    : ""}
+                  {flightDate(selected.depTime ?? undefined)}
                 </Text>
                 <View style={styles.ticketLink}>
                   <Text style={styles.link}>View trip</Text>
@@ -326,15 +258,36 @@ export function HomeGlobeScreen({
         ) : null}
         <View style={styles.stats}>
           {[
-            { value: flightCount, label: "Flights", open: () => onChange("trips") },
-            { value: visited.length, label: "Countries", open: () => onOpenCollection ? onOpenCollection("countries") : onChange("passport") },
-            { value: ports.length, label: "Airports", open: () => onOpenCollection ? onOpenCollection("airports") : onChange("passport") },
+            {
+              value: flightCount,
+              label: "Flights",
+              open: () => onChange("trips"),
+            },
+            {
+              value: visited.length,
+              label: "Countries",
+              open: () =>
+                onOpenCollection
+                  ? onOpenCollection("countries")
+                  : onChange("passport"),
+            },
+            {
+              value: airportCount,
+              label: "Airports",
+              open: () =>
+                onOpenCollection
+                  ? onOpenCollection("airports")
+                  : onChange("passport"),
+            },
           ].map(({ value, label, open }) => (
             <Pressable
               key={String(label)}
               accessibilityRole="button"
               accessibilityLabel={`${value} ${label.toLowerCase()}`}
-              onPress={() => { clear(); open(); }}
+              onPress={() => {
+                clear();
+                open();
+              }}
               style={({ pressed }) => [styles.stat, pressed && styles.pressed]}
             >
               <Text style={styles.statNumber}>{value}</Text>
@@ -351,7 +304,7 @@ export function HomeGlobeScreen({
         }}
       />
       <Modal
-        visible={yearOpen}
+        visible={active === "globe" && yearOpen}
         transparent
         animationType="slide"
         onRequestClose={() => setYearOpen(false)}
@@ -411,7 +364,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-  yearText: { flexShrink: 1, fontFamily: fonts.sans, fontSize: 15, color: colors.ink },
+  yearText: {
+    flexShrink: 1,
+    fontFamily: fonts.sans,
+    fontSize: 15,
+    color: colors.ink,
+  },
   iconButton: {
     height: 44,
     minWidth: 44,

@@ -702,6 +702,49 @@ test("late night decode disposes all three textures after zoom out or unmount", 
   }
 });
 
+test("suspending a hidden globe evicts detail and resumes without replacing the base", async () => {
+  const h = detailHarness(),
+    baseUniforms = h.base.uniforms;
+  h.controller.update(4.8, 300, 16);
+  await h.settle();
+  assert.equal(h.controller.stats().resident, 4);
+  h.controller.suspend();
+  assert.equal(h.controller.stats().resident, 0);
+  assert.equal(h.group.children.length, 0);
+  assert(h.all.every((texture) => texture.userData.disposals === 1));
+  assert.equal(h.base.uniforms, baseUniforms);
+  h.controller.update(4.8, 316, 16);
+  await h.settle();
+  assert.equal(
+    h.controller.stats().resident,
+    4,
+    "resume can restore detail immediately without the old 250 ms selection delay",
+  );
+  assert.equal(h.base.uniforms, baseUniforms);
+  h.controller.dispose();
+  assert(h.all.every((texture) => texture.userData.disposals === 1));
+});
+
+test("backgrounding during a night decode releases all pending detail textures", async () => {
+  const h = detailHarness(1);
+  h.controller.update(4.8, 300, 16);
+  h.pending.shift().resolve();
+  await h.flush();
+  h.pending.shift().resolve();
+  await h.flush();
+  h.controller.suspend();
+  h.pending.shift().resolve();
+  await h.flush();
+  assert.equal(h.controller.stats().resident, 0);
+  assert.equal(h.pending.length, 0);
+  assert(h.all.every((texture) => texture.userData.disposals === 1));
+  h.controller.update(4.8, 320, 16);
+  await h.settle();
+  assert.equal(h.controller.stats().resident, 1);
+  h.controller.dispose();
+  assert(h.all.every((texture) => texture.userData.disposals === 1));
+});
+
 test("night detail uses real NASA resolution and matches the unfiltered source pixels", async () => {
   const master = path.join(root, "assets/globe/black-marble-2016-13500.jpg");
   const metadata = await sharp(master).metadata();

@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   AccessibilityInfo,
+  type AccessibilityActionEvent,
   AppState,
   PanResponder,
   Pressable,
@@ -49,6 +50,15 @@ const sunVector = (date: Date) => {
   return vector(p.lat, p.lon, 1);
 };
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
+const flightPathKey = (route: FlightRoute) =>
+  [
+    route.from.code,
+    route.from.lat,
+    route.from.lon,
+    route.to.code,
+    route.to.lat,
+    route.to.lon,
+  ].join(":");
 type Props = {
   routes: FlightRoute[];
   active: boolean;
@@ -96,23 +106,31 @@ export function WorldWindowGlobe(props: Props) {
       distance: 0,
       zoom: 1,
       pinched: false,
+      hasPinched: false,
       dragged: false,
       active: false,
       vx: 0,
       vy: 0,
     });
-  const foreground = useRef(true),
+  const foreground = useRef(
+      AppState.currentState == null || AppState.currentState === "active",
+    ),
     lastInteraction = useRef(-Infinity),
     reduced = useRef(false),
     mounted = useRef(true),
     [error, setError] = useState(false),
-    [attempt, setAttempt] = useState(0);
+    [attempt, setAttempt] = useState(0),
+    [accessibleZoom, setAccessibleZoom] = useState(1);
   const clearResources = useRef<() => void>(() => {}),
-    generation = useRef(0);
+    generation = useRef(0),
+    resumeRendering = useRef<() => void>(() => {}),
+    pauseRendering = useRef<() => void>(() => {});
   useEffect(() => {
     mounted.current = true;
     const app = AppState.addEventListener("change", (s) => {
       foreground.current = s === "active";
+      if (foreground.current && live.current.active) resumeRendering.current();
+      else pauseRendering.current();
     });
     AccessibilityInfo.isReduceMotionEnabled().then((v) => {
       reduced.current = v;
@@ -131,14 +149,28 @@ export function WorldWindowGlobe(props: Props) {
       motion.remove();
     };
   }, []);
+  useEffect(() => {
+    if (props.active && foreground.current) resumeRendering.current();
+    else pauseRendering.current();
+  }, [props.active]);
   const refreshRoutes = useCallback(() => {
     const ctx = context.current;
     if (!ctx) return;
-    for (const group of [ctx.routes, ctx.ports]) {
-      group.children.forEach(disposeObject);
-      group.clear();
-    }
+    const previous = new Map(
+      ctx.routes.children
+        .filter((child) => !child.userData.hit)
+        .map((child) => [child.userData.key as string, child as THREE.Mesh]),
+    );
+    const oldPorts = new Map(
+      ctx.ports.children.map((child) => [
+        child.userData.point.code as string,
+        child as THREE.Mesh,
+      ]),
+    );
+    ctx.routes.clear();
+    ctx.ports.clear();
     const points = new Map<string, RoutePoint>();
+    const paths = new Map<string, FlightRoute[]>();
     for (const route of live.current.routes) {
       if (
         ![route.from.lat, route.from.lon, route.to.lat, route.to.lon].every(
@@ -146,6 +178,35 @@ export function WorldWindowGlobe(props: Props) {
         )
       )
         continue;
+      const key = flightPathKey(route);
+      const path = paths.get(key);
+      if (path) path.push(route);
+      else paths.set(key, [route]);
+      points.set(route.from.code, route.from);
+      points.set(route.to.code, route.to);
+    }
+    for (const [key, flights] of paths) {
+      const route = flights[0];
+      const countries = [
+        flightCountryKey(
+          route.from.country,
+          route.from.countryCode,
+          route.from.code,
+        ),
+        flightCountryKey(route.to.country, route.to.countryCode, route.to.code),
+      ];
+      const retained = previous.get(key);
+      if (retained) {
+        previous.delete(key);
+        retained.userData.route = route;
+        retained.userData.countries = countries;
+        retained.userData.flightIds = new Set(
+          flights.map((flight) => flight.id),
+        );
+        retained.userData.hitMesh.userData.route = route;
+        ctx.routes.add(retained, retained.userData.hitMesh);
+        continue;
+      }
       const from = vector(route.from.lat, route.from.lon, 1),
         to = vector(route.to.lat, route.to.lon, 1),
         angle = Math.acos(clamp(from.dot(to), -1, 1));
@@ -186,20 +247,11 @@ export function WorldWindowGlobe(props: Props) {
       );
       const line = new THREE.Mesh(geometry, material);
       line.userData = {
+        key,
         route,
+        flightIds: new Set(flights.map((flight) => flight.id)),
         normal: from,
-        countries: [
-          flightCountryKey(
-            route.from.country,
-            route.from.countryCode,
-            route.from.code,
-          ),
-          flightCountryKey(
-            route.to.country,
-            route.to.countryCode,
-            route.to.code,
-          ),
-        ],
+        countries,
       };
       ctx.routes.add(line);
       const hit = new THREE.Mesh(
@@ -212,19 +264,26 @@ export function WorldWindowGlobe(props: Props) {
       );
       hit.visible = false;
       hit.userData = { route, hit: true };
+      line.userData.hitMesh = hit;
       ctx.routes.add(hit);
-      points.set(route.from.code, route.from);
-      points.set(route.to.code, route.to);
+    }
+    for (const obsolete of previous.values()) {
+      disposeObject(obsolete.userData.hitMesh);
+      disposeObject(obsolete);
     }
     for (const p of points.values()) {
-      const orb = new THREE.Mesh(
-        new THREE.SphereGeometry(0.022, 8, 6),
-        new THREE.MeshBasicMaterial({ color: "#ebc99d", transparent: true }),
-      );
+      const orb =
+        oldPorts.get(p.code) ??
+        new THREE.Mesh(
+          new THREE.SphereGeometry(0.022, 8, 6),
+          new THREE.MeshBasicMaterial({ color: "#ebc99d", transparent: true }),
+        );
+      oldPorts.delete(p.code);
       orb.position.copy(vector(p.lat, p.lon, R + 0.024));
       orb.userData = { point: p };
       ctx.ports.add(orb);
     }
+    for (const obsolete of oldPorts.values()) disposeObject(obsolete);
   }, []);
   useEffect(refreshRoutes, [props.routes, refreshRoutes]);
   const updateVisited = useCallback(() => {
@@ -286,8 +345,8 @@ export function WorldWindowGlobe(props: Props) {
           lastInteraction.current = Date.now();
           const t = e.nativeEvent.touches;
           pan.current = {
-            x: g.x0,
-            y: g.y0,
+            x: 0,
+            y: 0,
             rx: rotation.current.x,
             ry: rotation.current.y,
             distance:
@@ -296,6 +355,7 @@ export function WorldWindowGlobe(props: Props) {
                 : 0,
             zoom: zoom.current.target,
             pinched: t.length > 1,
+            hasPinched: t.length > 1,
             dragged: false,
             active: true,
             vx: 0,
@@ -315,6 +375,7 @@ export function WorldWindowGlobe(props: Props) {
               p.zoom = zoom.current.target;
             }
             p.pinched = true;
+            p.hasPinched = true;
             zoom.current.target = clamp(
               (p.zoom * distance) / p.distance,
               1,
@@ -323,6 +384,7 @@ export function WorldWindowGlobe(props: Props) {
             return;
           }
           if (p.pinched) {
+            p.pinched = false;
             p.rx = rotation.current.x;
             p.ry = rotation.current.y;
             p.x = g.dx;
@@ -332,9 +394,9 @@ export function WorldWindowGlobe(props: Props) {
           }
           p.dragged = p.dragged || Math.hypot(g.dx, g.dy) > 5;
           rotation.current.y =
-            p.ry + (g.dx * 0.006) / Math.sqrt(zoom.current.current);
+            p.ry + ((g.dx - p.x) * 0.006) / Math.sqrt(zoom.current.current);
           rotation.current.x = clamp(
-            p.rx + (g.dy * 0.004) / Math.sqrt(zoom.current.current),
+            p.rx + ((g.dy - p.y) * 0.004) / Math.sqrt(zoom.current.current),
             -1.25,
             1.25,
           );
@@ -345,9 +407,12 @@ export function WorldWindowGlobe(props: Props) {
           lastInteraction.current = Date.now();
           const p = pan.current;
           p.active = false;
-          if (!p.pinched && !p.dragged && Math.hypot(g.dx, g.dy) < 8)
+          if (!p.hasPinched && !p.dragged && Math.hypot(g.dx, g.dy) < 8)
             pick(e.nativeEvent.locationX, e.nativeEvent.locationY);
-          if (p.pinched) p.vx = p.vy = 0;
+          if (p.hasPinched) {
+            p.vx = p.vy = 0;
+            setAccessibleZoom(zoom.current.target);
+          }
         },
         onPanResponderTerminate: () => {
           pan.current.active = false;
@@ -356,6 +421,62 @@ export function WorldWindowGlobe(props: Props) {
       }),
     [pick],
   );
+  const accessibleAction = useCallback((event: AccessibilityActionEvent) => {
+    const action = event.nativeEvent.actionName;
+    lastInteraction.current = Date.now();
+    pan.current.vx = pan.current.vy = 0;
+    if (action === "increment" || action === "decrement") {
+      zoom.current.target = clamp(
+        zoom.current.target * (action === "increment" ? 1.3 : 1 / 1.3),
+        1,
+        4.8,
+      );
+      setAccessibleZoom(zoom.current.target);
+    } else if (action === "rotateWest" || action === "rotateEast") {
+      rotation.current.y += action === "rotateEast" ? 0.22 : -0.22;
+    } else if (action === "rotateNorth" || action === "rotateSouth") {
+      rotation.current.x = clamp(
+        rotation.current.x + (action === "rotateNorth" ? -0.18 : 0.18),
+        -1.25,
+        1.25,
+      );
+    } else if (action === "clearSelection") live.current.onClear();
+    else if (action === "nextFlight" || action === "previousFlight") {
+      const flights = live.current.routes;
+      const index = flights.findIndex(
+        (route) => route.id === live.current.selectedRouteId,
+      );
+      const step = action === "nextFlight" ? 1 : -1;
+      const next =
+        flights[
+          (index < 0
+            ? step > 0
+              ? 0
+              : flights.length - 1
+            : index + step + flights.length) % flights.length
+        ];
+      if (next) {
+        live.current.onRoute(next);
+        AccessibilityInfo.announceForAccessibility(
+          `Flight ${flights.indexOf(next) + 1} of ${flights.length}. ${next.from.code} to ${next.to.code}${next.flightNumber ? `, ${next.flightNumber}` : ""}${next.depTime ? `, ${next.depTime.slice(0, 10)}` : ""}. Open the ticket below for trip details.`,
+        );
+      }
+    } else if (action === "nextCountry") {
+      const countries = globeCountries
+        .filter((country) => live.current.visited.includes(country.code))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const index = countries.findIndex(
+        (country) => country.code === live.current.selectedCountryCode,
+      );
+      const next = countries[(index + 1) % countries.length];
+      if (next) {
+        live.current.onCountry(next);
+        AccessibilityInfo.announceForAccessibility(
+          `${next.name}. Country details below.`,
+        );
+      }
+    }
+  }, []);
   const create = useCallback(
     async (gl: any) => {
       const ownGeneration = ++generation.current;
@@ -535,6 +656,8 @@ void main(){
         updateVisited();
         clearResources.current = () => {
           cancelAnimationFrame(frame.current);
+          frame.current = 0;
+          resumeRendering.current = pauseRendering.current = () => {};
           detail.dispose();
           disposeObject(scene);
           for (const t of [day, night, index, lookup]) t.dispose();
@@ -546,11 +669,11 @@ void main(){
         const portNight = new THREE.Color("#fbd3a0"),
           portDay = new THREE.Color("#e5bc8d");
         const draw = (time: number) => {
-          if (!mounted.current) return;
-          frame.current = requestAnimationFrame(draw);
+          frame.current = 0;
+          if (!mounted.current || !foreground.current || !live.current.active)
+            return;
           const dt = Math.min(40, previous ? time - previous : 16);
           previous = time;
-          if (!foreground.current || !live.current.active) return;
           if (
             bufferWidth !== gl.drawingBufferWidth ||
             bufferHeight !== gl.drawingBufferHeight
@@ -622,13 +745,10 @@ void main(){
             const m = child as THREE.Mesh;
             const mat = m.material as THREE.ShaderMaterial;
             if (m.userData.hit) continue;
-            const r = m.userData.route as FlightRoute,
-              focused = live.current.selectedRouteId
-                ? r.id === live.current.selectedRouteId
-                : !live.current.selectedCountryCode ||
-                  m.userData.countries.includes(
-                    live.current.selectedCountryCode,
-                  );
+            const focused = live.current.selectedRouteId
+              ? m.userData.flightIds.has(live.current.selectedRouteId)
+              : !live.current.selectedCountryCode ||
+                m.userData.countries.includes(live.current.selectedCountryCode);
             mat.uniforms.alpha.value +=
               ((focused ? 0.72 : 0.075) - mat.uniforms.alpha.value) *
               (1 - Math.exp(-dt / 90));
@@ -636,13 +756,13 @@ void main(){
             mat.uniforms.imagery.value = material.uniforms.textureMix.value;
             mat.uniforms.widthScale.value = 1 / zoom.current.current;
           }
+          const selectedRoute = live.current.routes.find(
+            (route) => route.id === live.current.selectedRouteId,
+          );
           for (const child of ports.children) {
             const m = child as THREE.Mesh;
             const port = m.userData.point as RoutePoint;
             m.scale.setScalar(1 / zoom.current.current);
-            const selectedRoute = live.current.routes.find(
-              (r) => r.id === live.current.selectedRouteId,
-            );
             const related = selectedRoute
               ? [selectedRoute.from.code, selectedRoute.to.code].includes(
                   port.code,
@@ -671,8 +791,34 @@ void main(){
           } catch {
             textureError();
           }
+          if (
+            mounted.current &&
+            context.current?.renderer === renderer &&
+            foreground.current &&
+            live.current.active
+          )
+            frame.current = requestAnimationFrame(draw);
         };
-        frame.current = requestAnimationFrame(draw);
+        pauseRendering.current = () => {
+          cancelAnimationFrame(frame.current);
+          frame.current = 0;
+          previous = 0;
+          pan.current.active = false;
+          pan.current.vx = pan.current.vy = 0;
+          detail.suspend();
+        };
+        resumeRendering.current = () => {
+          if (
+            mounted.current &&
+            foreground.current &&
+            live.current.active &&
+            !frame.current
+          ) {
+            previous = 0;
+            frame.current = requestAnimationFrame(draw);
+          }
+        };
+        resumeRendering.current();
       } catch {
         if (mounted.current && ownGeneration === generation.current) {
           clearResources.current();
@@ -690,6 +836,35 @@ void main(){
         size.current = e.nativeEvent.layout;
       }}
       {...responder.panHandlers}
+      accessible={!error}
+      accessibilityRole="adjustable"
+      accessibilityLabel={`Travel globe. ${props.routes.length} flights, ${props.visited.length} visited countries${props.selectedRouteId ? ". Flight selected" : props.selectedCountryCode ? ". Country selected" : ""}`}
+      accessibilityHint="Use accessibility actions to zoom, rotate, select flights or countries, and clear selection. Selected flights open in the ticket below."
+      accessibilityValue={{
+        min: 1,
+        max: 4.8,
+        now: accessibleZoom,
+        text: `${accessibleZoom.toFixed(1)} times zoom`,
+      }}
+      accessibilityActions={[
+        { name: "increment", label: "Zoom in" },
+        { name: "decrement", label: "Zoom out" },
+        { name: "rotateWest", label: "Rotate west" },
+        { name: "rotateEast", label: "Rotate east" },
+        { name: "rotateNorth", label: "Rotate north" },
+        { name: "rotateSouth", label: "Rotate south" },
+        ...(props.routes.length
+          ? [
+              { name: "nextFlight", label: "Next flight" },
+              { name: "previousFlight", label: "Previous flight" },
+            ]
+          : []),
+        ...(props.visited.length
+          ? [{ name: "nextCountry", label: "Next visited country" }]
+          : []),
+        { name: "clearSelection", label: "Clear selection" },
+      ]}
+      onAccessibilityAction={accessibleAction}
     >
       {error ? (
         <View style={styles.error}>
@@ -710,6 +885,7 @@ void main(){
           style={StyleSheet.absoluteFill}
           msaaSamples={4}
           onContextCreate={create}
+          accessible={false}
         />
       )}
     </View>
@@ -979,6 +1155,12 @@ function createGlobeDetail(
       desired = [];
       for (const key of [...loaded.keys()]) remove(key);
       // The one outstanding decode is disposed by pump when its callback resolves.
+    },
+    suspend() {
+      desired = [];
+      lastSelection = -Infinity;
+      for (const key of [...loaded.keys()]) remove(key);
+      // Preserve base textures and camera state; late detail decodes are released.
     },
     stats: () => ({
       resident: loaded.size,
