@@ -191,3 +191,22 @@ test('year-scoped wallet ghost retains the exact source preview while the real d
   assert.strictEqual(paper.props.trip, preview); assert.equal(paper.props.scopeYear, '2026'); assert.equal(paper.props.totalFlightCount, 2);
   assert.deepEqual(fullTrip.segments.map(s => s.id), ['2025-leg', '2026-leg']); h.dispose();
 });
+
+test('paper handoff never renders both moving and itinerary text at positive opacity', async () => {
+  const env = environment(); await env.ready(); const h = env.mount(surface(env));
+  const tree = h.render(props()), moving = ghost(tree).props.style.opacity;
+  const detail = flatten(tree.props.children[1].props.style).opacity;
+  const at = (interpolation, progress) => {
+    const { inputRange, outputRange } = interpolation;
+    const last = inputRange.length - 1;
+    if (progress <= inputRange[0]) return outputRange[0];
+    if (progress >= inputRange[last]) return outputRange[last];
+    const i = inputRange.findIndex((value, index) => index < last && progress >= value && progress <= inputRange[index + 1]);
+    return outputRange[i] + (outputRange[i + 1] - outputRange[i]) * (progress - inputRange[i]) / (inputRange[i + 1] - inputRange[i]);
+  };
+  for (let step = 0; step <= 1000; step++) {
+    const progress = step / 1000;
+    assert(!(at(moving, progress) > 1e-9 && at(detail, progress) > 1e-9), `Double text at progress ${progress}`);
+  }
+  assert.equal(at(moving, 0), 1); assert.equal(at(detail, 1), 1); h.dispose();
+});

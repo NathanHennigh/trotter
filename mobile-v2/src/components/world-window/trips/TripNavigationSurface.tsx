@@ -39,10 +39,10 @@ export function TripNavigationSurface({ trip, flightId, origin, target, closing,
   const destination = target ?? { x: hostX + 20, y: insets.top + 55, width: visualWidth - 40, height: 220 };
   const flight = trip.segments?.find(segment => segment.id === flightId);
   const source = origin && [origin.x, origin.y, origin.width, origin.height].every(Number.isFinite) && origin.width > 0 && origin.height > 0 ? origin : undefined;
-  const ghostOpacity = progress.interpolate({ inputRange: [0, .55, 1], outputRange: [1, .9, 0] });
+  const ghostOpacity = progress.interpolate({ inputRange: [0, .45, .64, 1], outputRange: [1, 1, 0, 0] });
   return <View style={StyleSheet.absoluteFill} pointerEvents={closing ? "none" : "auto"}>
     <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.paperSoft, opacity: progress.interpolate({ inputRange: [0, .3, 1], outputRange: [0, 1, 1] }) }]} />
-    <Animated.View style={[StyleSheet.absoluteFill, { opacity: source && !reduced ? progress.interpolate({ inputRange: [0, .35, 1], outputRange: [0, 0, 1] }) : progress,
+    <Animated.View style={[StyleSheet.absoluteFill, { opacity: source && !reduced ? progress.interpolate({ inputRange: [0, .64, 1], outputRange: [0, 0, 1] }) : progress,
       transform: source || reduced ? [] : [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }] }]}>
       {children}
     </Animated.View>

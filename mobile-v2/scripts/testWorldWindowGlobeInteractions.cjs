@@ -371,6 +371,22 @@ test("one globe arc exposes both directions and every date; Back dismisses befor
   assert.equal(calls[0][0].id, 'return-trip'); assert.equal(calls[0][1], 'return');
 });
 
+test("Home totals wait for paper exit and a new selection cancels their delayed return", async () => {
+  const env = environment([crossYear]);
+  const { HomeGlobeScreen } = env.load(path.join(root, 'src/screens/HomeGlobeScreen.tsx'));
+  const { WorldWindowGlobe } = env.load(path.join(root, 'src/components/world-window/WorldWindowGlobe.tsx'));
+  const render = () => env.render(() => HomeGlobeScreen({ active: 'globe', onChange() {} }));
+  const stats = tree => nodes(tree).find(node => node.props['aria-hidden'] !== undefined);
+  let tree = render(), globe = nodes(tree).find(node => node.type === WorldWindowGlobe);
+  globe.props.onRoute(globe.props.routes[0]); tree = render(); assert.equal(stats(tree).props.pointerEvents, 'none');
+  const dismiss = nodes(tree).find(node => node.props.accessibilityLabel === 'Dismiss flight');
+  dismiss.props.onPress(); tree = render(); assert.equal(stats(tree).props.pointerEvents, 'none');
+  globe = nodes(tree).find(node => node.type === WorldWindowGlobe); globe.props.onRoute(globe.props.routes[0]); render();
+  await new Promise(resolve => setTimeout(resolve, 180)); tree = render(); assert.equal(stats(tree).props.pointerEvents, 'none');
+  nodes(tree).find(node => node.props.accessibilityLabel === 'Dismiss flight').props.onPress(); render();
+  await new Promise(resolve => setTimeout(resolve, 180)); tree = render(); assert.equal(stats(tree).props.pointerEvents, 'auto');
+});
+
 test("pinch hands off continuously to one finger without a jump or accidental route tap", () => {
   const env = environment(),
     { WorldWindowGlobe } = env.load(

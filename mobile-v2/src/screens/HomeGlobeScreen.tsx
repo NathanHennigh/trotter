@@ -90,6 +90,14 @@ export function HomeGlobeScreen({
     [trips, year],
   );
   const selected = routes.find((route) => route.id === selectedId) ?? null;
+  const [statsVisible, setStatsVisible] = useState(true);
+  useEffect(() => {
+    if (selected || country) { setStatsVisible(false); return; }
+    if (reducedMotion) { setStatsVisible(true); return; }
+    const timer = setTimeout(() => setStatsVisible(true), 150);
+    return () => clearTimeout(timer);
+  }, [Boolean(selected), Boolean(country), reducedMotion]);
+  const showStats = statsVisible && !selected && !country;
   const routeFlights = useMemo(() => flightsOnPath(routes, selected), [routes, selected]);
   const lifetimeVisited = useMemo(() => buildGlobeHistory(trips, "All years").visited, [trips]);
   const statWidth = paperWidth / 3 - 8;
@@ -223,7 +231,7 @@ export function HomeGlobeScreen({
           { bottom: insets.bottom + layout.bottomNavHeight + 12 },
         ]}
       >
-        <PaperPresence>{selected ? (
+        <PaperPresence style={styles.paperLayer}>{selected ? (
           <View ref={ticketRef} collapsable={false} style={styles.ticket}>
             <ScrollView style={{ maxHeight: maxPaperHeight }} nestedScrollEnabled showsVerticalScrollIndicator={largeText}>
             <PressFeedback paper
@@ -331,7 +339,8 @@ export function HomeGlobeScreen({
             </PressFeedback>
           </View>
         ) : null}</PaperPresence>
-        {!selected && !country ? <View style={styles.stats}>
+        <View style={[styles.stats, { opacity: showStats ? 1 : 0 }]} pointerEvents={showStats ? "auto" : "none"}
+          accessibilityElementsHidden={!showStats} importantForAccessibility={showStats ? "auto" : "no-hide-descendants"} aria-hidden={!showStats}>
           {[
             {
               value: flightCount,
@@ -369,7 +378,7 @@ export function HomeGlobeScreen({
               <Text style={[styles.statLabel, { fontSize: statLabelSize, lineHeight: statLabelSize * 1.3 }]}>{label}</Text>
             </PressFeedback>
           ))}
-        </View> : null}
+        </View>
       </View>
       <BottomNav
         active={active}
@@ -469,6 +478,7 @@ const styles = StyleSheet.create({
   flightChoice: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 8 },
   flightChoiceSelected: { backgroundColor: colors.paperDeep },
   bottom: { position: "absolute", left: 24, right: 24, gap: 20 },
+  paperLayer: { position: "absolute", bottom: 0, left: 0, right: 0 },
   stats: {
     flexDirection: "row",
     backgroundColor: colors.paperSoft,

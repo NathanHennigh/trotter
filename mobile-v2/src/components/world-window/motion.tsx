@@ -16,7 +16,7 @@ export function useReducedMotion() {
   return reduced;
 }
 
-export function PaperPresence({ children }: { children: React.ReactNode }) {
+export function PaperPresence({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
   const previous = React.useRef<React.ReactNode>(null);
   const [, refresh] = React.useReducer(value => value + 1, 0);
   if (children) previous.current = children;
@@ -24,7 +24,7 @@ export function PaperPresence({ children }: { children: React.ReactNode }) {
   const showing = React.useRef(visible);
   showing.current = visible;
   if (!previous.current) return null;
-  return <PaperReveal visible={visible} onHidden={() => {
+  return <PaperReveal visible={visible} style={style} onHidden={() => {
     if (!showing.current) { previous.current = null; refresh(); }
   }}>{children || previous.current}</PaperReveal>;
 }
