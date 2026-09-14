@@ -12,9 +12,12 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { fitDisplayFont } from "../components/world-window/displayTextFit";
+import { getMobileVisualWidth } from "../utils/mobileLayout";
 import { BottomNav } from "../components/trotter/TrotterKit";
 import {
   WWButton,
@@ -271,6 +274,8 @@ function CountryPlaces({
   onRefresh: () => void;
   onSelect: (id: string) => void;
 }) {
+  const { width, fontScale } = useWindowDimensions();
+  const countrySize = fitDisplayFont(title, 43, getMobileVisualWidth(width) - 76, fontScale, "italic");
   const [query, setQuery] = React.useState(""),
     [city, setCity] = React.useState(""),
     [category, setCategory] = React.useState<DreamFilter>("All"),
@@ -363,7 +368,7 @@ function CountryPlaces({
                 />
               ))}
             </View>
-            <Text style={s.countryTitle}>{title}</Text>
+            <Text style={[s.countryTitle, { fontSize: countrySize, lineHeight: countrySize * 47 / 43 }]}>{title}</Text>
             <Text style={s.meta}>
               {items.length} saved {items.length === 1 ? "place" : "places"}
               {cities.length

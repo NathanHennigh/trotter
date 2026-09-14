@@ -6,9 +6,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { fitDisplayFont } from "../components/world-window/displayTextFit";
+import { getMobileVisualWidth } from "../utils/mobileLayout";
 import { BottomNav } from "../components/trotter/TrotterKit";
 import { WWEmblem, WWIcon } from "../components/world-window/WorldWindowUI";
 import { TripAtlas } from "../components/world-window/trips/TripAtlas";
@@ -27,6 +30,9 @@ export function ProfileScreen({
   onOpenStamps: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { width, fontScale } = useWindowDimensions();
+  const largeText = fontScale >= 1.35;
+  const visualWidth = getMobileVisualWidth(width);
   const {
     profile,
     trips,
@@ -42,6 +48,7 @@ export function ProfileScreen({
     signOut,
   } = useTravelTrips();
   const busy = ["loading", "refreshing", "syncing"].includes(status);
+  const nameSize = fitDisplayFont(profile.name, 38, visualWidth - 48, fontScale);
   const firstYear = profile.firstFlightDate?.match(/^\d{4}/)?.[0];
   const segments = React.useMemo(
     () => [
@@ -89,7 +96,7 @@ export function ProfileScreen({
           <Text style={styles.signatureLabel}>Profile</Text>
         </View>
         <View style={styles.owner}>
-          <Text accessibilityRole="header" style={styles.name}>
+          <Text accessibilityRole="header" style={[styles.name, { fontSize: nameSize, lineHeight: nameSize * 42 / 38 }]}>
             {profile.name}
           </Text>
           {firstYear ? (
@@ -110,7 +117,7 @@ export function ProfileScreen({
               </Text>
             </View>
           </View>
-          <View style={styles.sourceProvider}>
+          <View style={[styles.sourceProvider, largeText && styles.sourceProviderLarge]}>
             <WWIcon name="sync" size={23} color={colors.blue} />
             <View style={styles.sourceCopy}>
               <Text style={styles.providerName}>Gmail</Text>
@@ -130,6 +137,7 @@ export function ProfileScreen({
               onPress={() => void syncFromGmail()}
               style={({ pressed }) => [
                 styles.syncButton,
+                largeText && styles.syncButtonLarge,
                 busy && styles.disabled,
                 pressed && styles.pressed,
               ]}
@@ -173,7 +181,7 @@ export function ProfileScreen({
               destination={airport.code}
               backgroundColor="#b5ced1"
             />
-            <View style={styles.airport}>
+            <View style={[styles.airport, largeText && styles.airportLarge]}>
               <Text style={styles.airportCode}>{airport.code}</Text>
               <View style={styles.airportCopy}>
                 {airport.point?.city ? (
@@ -472,6 +480,9 @@ const styles = StyleSheet.create({
     gap: 13,
     paddingTop: 19,
   },
+  sourceProviderLarge: { flexWrap: "wrap" },
+  syncButtonLarge: { width: "100%" },
+  airportLarge: { flexDirection: "column", alignItems: "flex-start" },
   sourceCopy: { flex: 1, minWidth: 0, gap: 5 },
   providerName: {
     fontFamily: fonts.display,

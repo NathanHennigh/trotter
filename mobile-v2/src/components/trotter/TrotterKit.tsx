@@ -994,7 +994,7 @@ export function BottomNav({
   const navWidth = Platform.OS === "web" ? Math.min(width, 430) : width;
   const tabWidth = (navWidth - 16) / tabs.length;
   // This compact, persistent control has a bounded scale. The widest label is
-  // Passport: the bundled bold font measures 4.35 × font size. Leave 2px clear.
+  // Passport: the bundled bold font measures 4.35 Ã— font size. Leave 2px clear.
   const labelSize = Math.min(12, (tabWidth - 2) / (4.35 * Math.min(fontScale, 1.25)));
   const webViewportNav =
     Platform.OS === "web"

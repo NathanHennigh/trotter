@@ -37,6 +37,7 @@ export function PassportStatsScreen({
   onCloseCollection,
   visible = true,
   onBackHandlerChange,
+  resetEpoch = 0,
 }: {
   active: BottomNavTab;
   onChange: (tab: BottomNavTab) => void;
@@ -48,6 +49,7 @@ export function PassportStatsScreen({
   onCloseCollection?: () => void;
   visible?: boolean;
   onBackHandlerChange?: (handler: (() => boolean) | null) => void;
+  resetEpoch?: number;
 }) {
   const insets = useSafeAreaInsets(),
     { width, fontScale } = useWindowDimensions(),
@@ -62,6 +64,13 @@ export function PassportStatsScreen({
     [country, setCountry] = React.useState<CountryArrival | null>(null);
   const collectionBack = React.useRef<(() => boolean) | null>(null);
   const countryBack = React.useRef<(() => boolean) | null>(null);
+  const previousReset = React.useRef(resetEpoch);
+  React.useEffect(() => {
+    if (previousReset.current === resetEpoch) return;
+    previousReset.current = resetEpoch;
+    setCountry(null);
+    setCollection(null);
+  }, [resetEpoch]);
   const registerCollectionBack = React.useCallback((handler: (() => boolean) | null) => { collectionBack.current = handler; }, []);
   const registerCountryBack = React.useCallback((handler: (() => boolean) | null) => { countryBack.current = handler; }, []);
   React.useEffect(() => {

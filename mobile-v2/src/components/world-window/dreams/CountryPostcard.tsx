@@ -6,8 +6,11 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
+import { fitDisplayFont } from "../displayTextFit";
+import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 import { colors, fonts } from "../../../theme/trotterTheme";
 import { WWIcon } from "../WorldWindowUI";
 import { CountryBoard } from "./dreamPresentation";
@@ -22,6 +25,8 @@ export function CountryPostcard({
   board: CountryBoard;
   onPress: () => void;
 }) {
+  const { width, fontScale } = useWindowDimensions();
+  const countrySize = fitDisplayFont(board.title, 40, getMobileVisualWidth(width) - 80, fontScale, "italic");
   const turn = React.useRef(new Animated.Value(0)).current;
   const mounted = React.useRef(true),
     opening = React.useRef(false),
@@ -116,7 +121,7 @@ export function CountryPostcard({
           <DreamPhoto item={cover} fallbackCountry={board.title} artworkForCountry={board.title} />
         </View>
         <View style={s.address}>
-          <Text style={s.country}>{board.title}</Text>
+          <Text style={[s.country, { fontSize: countrySize, lineHeight: countrySize * 43 / 40 }]}>{board.title}</Text>
           <Text style={s.cities}>
             {board.items.length} saved{" "}
             {board.items.length === 1 ? "place" : "places"}

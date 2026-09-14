@@ -1,7 +1,9 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import Svg, { Defs, Line, LinearGradient, Rect, Stop } from "react-native-svg";
 import type { TripSummary } from "../../../data/trotterMock";
+import { fitDisplayFont } from "../displayTextFit";
+import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 import { fonts } from "../../../theme/trotterTheme";
 import { WWEmblem, WWIcon } from "../WorldWindowUI";
 import { tripDates, walletSummary } from "./tripPresentation";
@@ -23,6 +25,9 @@ export function WalletHeading({
   compact?: boolean;
 }) {
   const gradient = React.useId();
+  const { width, fontScale } = useWindowDimensions();
+  const baseSize = compact ? 27 : 33;
+  const titleSize = fitDisplayFont(trip.city || trip.title, baseSize, getMobileVisualWidth(width) - (compact ? 78 : 84), fontScale);
   return (
     <View style={[s.heading, compact && s.headingCompact]}>
       <Svg
@@ -42,7 +47,6 @@ export function WalletHeading({
       <View style={[s.top, compact && s.topCompact]}>
         <Text
           style={[s.country, compact && s.countryCompact]}
-          numberOfLines={1}
         >
           {trip.country}
         </Text>
@@ -50,7 +54,7 @@ export function WalletHeading({
           <WWEmblem size={compact ? 17 : 28} color="#e7e6d5" />
         </View>
       </View>
-      <Text style={[s.title, compact && s.titleCompact]}>
+      <Text style={[s.title, compact && s.titleCompact, { fontSize: titleSize, lineHeight: titleSize * (compact ? 29 / 27 : 36 / 33) }]}>
         {trip.city || trip.title}
       </Text>
       <Text style={[s.date, compact && s.dateCompact]}>{tripDates(trip)}</Text>

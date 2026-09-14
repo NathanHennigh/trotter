@@ -221,6 +221,7 @@ function AppShell({
   const [activeTab, setActiveTab] = React.useState<BottomNavTab>(getInitialTab);
   const [visitedTabs, setVisitedTabs] = React.useState<BottomNavTab[]>(() => [getInitialTab()]);
   const [globeYear, setGlobeYear] = React.useState("All years");
+  const [passportReset, setPassportReset] = React.useState(0);
   const [selectedTripId, setSelectedTripId] = React.useState<string | null>(null);
   const [selectedFlightId, setSelectedFlightId] = React.useState<string>();
   const [countries, setCountries] = React.useState<{
@@ -251,6 +252,7 @@ function AppShell({
     setActiveTab(tab);
   };
   const changeTab = (tab: BottomNavTab) => {
+    setPassportReset((value) => value + 1);
     setSelectedTripId(null);
     setSelectedFlightId(undefined);
     setCountries(null);
@@ -342,7 +344,7 @@ function AppShell({
       {visitedTabs.includes("trips") && layer("trips", activeTab === "trips" && mainVisible,
         <TripsListScreen active={activeTab} onChange={changeTab} onOpenTrip={openTrip} />)}
       {visitedTabs.includes("passport") && layer("passport", passportVisible,
-        <PassportStatsScreen visible={passportVisible} onBackHandlerChange={registerPassportBack}
+        <PassportStatsScreen visible={passportVisible} resetEpoch={passportReset} onBackHandlerChange={registerPassportBack}
           initialCollection={passportCollection?.kind}
           collectionBackLabel={passportCollection ? label(passportCollection.returnTab) : undefined}
           onCloseCollection={passportCollection ? closePassportCollection : undefined}

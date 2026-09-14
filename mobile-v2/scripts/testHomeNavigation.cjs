@@ -89,17 +89,17 @@ function load(file, name, overrides = {}) {
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const declaration = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === name);
   assert(declaration, `Load actual ${name}`);
-  const styles = ast.statements.find(n => ts.isVariableStatement(n) && n.declarationList.declarations.some(d => d.name.getText(ast) === "styles"));
+  const styles = ast.statements.find(n => ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ["styles", "s"].includes(d.name.getText(ast))));
   const text = declaration.getText(ast);
   const compiled = ts.transpileModule(`${text.startsWith("export") ? text : "export " + text}\n${styles?.getText(ast) ?? ""}`, {
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  const tags = "View Text Pressable ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionList CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen".split(" ");
+  const tags = "View Text Pressable FlatList BoardingPass TripAtlas WalletHeading WWEmpty ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionList CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen".split(" ");
   const globals = {
     ...Object.fromEntries(tags.map(tag => [tag, tag])),
     React: host.React, useState: host.React.useState, useMemo: host.React.useMemo, useEffect: host.React.useEffect, useRef: host.React.useRef,
     StyleSheet: { create: x => x, absoluteFillObject: {}, absoluteFill: {} },
-    Platform: { OS: "android" }, colors: {}, fonts: {}, layout: { bottomNavHeight: 62 },
+    ...pure("src/components/world-window/trips/tripPresentation.ts"), walletColors: {}, Platform: { OS: "android" }, colors: {}, fonts: {}, layout: { bottomNavHeight: 62 },
     useSafeAreaInsets: () => ({ top: 24, bottom: 20 }), useWindowDimensions: () => ({ width: 390, height: 844 }), getMobileVisualWidth: x => x,
     useTravelTrips: () => ({ trips: [trip], profile: {}, status: "ready", refresh: noOp, syncFromGmail: noOp }),
     useDreams: () => ({ shareInstagramLink: noOp }), getInitialTab: () => "globe",
@@ -278,4 +278,42 @@ test("App hardware Back returns to the collection before delegating its nested B
   assert.equal(back(),true); tree=host.render(); assert.equal(childCalls,0);
   assert.equal(find(tree,"PassportStatsScreen").props.visible,true);
   assert.equal(back(),true); assert.equal(childCalls,1);
+});
+
+
+test("Detail follows fresh provider flights while an older detail response is still held", async () => {
+  let finish;
+  const oldTrip={...trip,startDate:'2026-01-02',endDate:'2026-01-03'};
+  let current=oldTrip;
+  const response=new Promise(resolve=>finish=resolve);
+  const detail=load("src/screens/TripDetailScreen.tsx","TripDetailScreen",{useTravelTrips:()=>({trips:[current],loadTripDetail:()=>response})});
+  let tree=detail.render({trip:oldTrip,active:'trips',onBack:noOp,onChange:noOp});
+  finish(oldTrip); await response; await Promise.resolve(); tree=detail.render();
+  current={...oldTrip,segments:[...oldTrip.segments,{...oldTrip.segments[0],id:'return',depAirport:'SIN',arrAirport:'LHR',depTime:'2026-01-09T10:00:00'}]};
+  tree=detail.render();
+  assert.deepEqual(find(tree,'FlatList').props.data.map(f=>f.id),['flight-one','return']);
+  detail.unmount();
+});
+
+test("Removing a selected trip in a newer archive returns to its origin without a stale detail", () => {
+  let records=[trip];
+  const host=appHost({useTravelTrips:()=>({trips:records})}); let tree=host.render({consumeShare:noOp});
+  find(tree,'HomeGlobeScreen').props.onOpenTrip(trip); tree=host.render(); assert(find(tree,'TripDetailScreen'));
+  records=[]; tree=host.render(); assert.equal(find(tree,'TripDetailScreen'),undefined);
+  assert.equal(find(tree,'HomeGlobeScreen').props.active,'globe');
+});
+
+
+test("Explicit navigation from a trip clears its retained passport overlay; ordinary Back preserves it", () => {
+  const host=appHost(); let tree=host.render({consumeShare:noOp});
+  find(tree,'HomeGlobeScreen').props.onChange('passport'); tree=host.render();
+  const passport=passportHost(); let book=passport.render(find(tree,'PassportStatsScreen').props);
+  find(book,'CollectionButtons').props.onOpen('airports'); book=passport.render();
+  find(book,'CollectionList').props.onOpenTrip(trip); tree=host.render();
+  book=passport.render(find(tree,'PassportStatsScreen').props); assert(find(book,'CollectionList'));
+  find(tree,'TripDetailScreen').props.onBack(); tree=host.render();
+  book=passport.render(find(tree,'PassportStatsScreen').props); assert(find(book,'CollectionList'));
+  find(book,'CollectionList').props.onOpenTrip(trip); tree=host.render();
+  find(tree,'TripDetailScreen').props.onChange('profile'); tree=host.render();
+  book=passport.render(find(tree,'PassportStatsScreen').props); assert.equal(find(book,'CollectionList'),undefined);
 });

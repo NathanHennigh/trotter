@@ -1,7 +1,9 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import Svg, { Path, Circle, Ellipse, Rect } from "react-native-svg";
 import paths from "./emblem-paths.json";
+import { fitDisplayFont } from "./displayTextFit";
+import { getMobileVisualWidth } from "../../utils/mobileLayout";
 import { colors, fonts } from "../../theme/trotterTheme";
 
 export function WWEmblem({
@@ -178,6 +180,9 @@ export function WWHeader({
   onBack?: () => void;
   action?: React.ReactNode;
 }) {
+  const { width, fontScale } = useWindowDimensions();
+  const available = getMobileVisualWidth(width) - 48 - (onBack ? 46 : 0) - (action ? 58 : 0);
+  const titleSize = fitDisplayFont(title, 38, available, fontScale);
   return (
     <View style={s.header}>
       {onBack && (
@@ -191,10 +196,10 @@ export function WWHeader({
           <WWIcon name="back" />
         </Pressable>
       )}
-      <Text accessibilityRole="header" style={s.title}>
+      <Text accessibilityRole="header" style={[s.title, { fontSize: titleSize, lineHeight: titleSize * 42 / 38 }]}>
         {title}
       </Text>
-      {action}
+      {action && <View style={{ flexShrink: 0 }}>{action}</View>}
     </View>
   );
 }
@@ -243,6 +248,7 @@ const s = StyleSheet.create({
   back: { width: 32, minHeight: 44, justifyContent: "center" },
   title: {
     flex: 1,
+    minWidth: 0,
     fontFamily: fonts.display,
     fontSize: 38,
     lineHeight: 42,
