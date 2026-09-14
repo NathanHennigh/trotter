@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import get_db
 from app.main import app
-from app.models import Dream, DreamItem, DreamLocation, User
+from app.models import Dream, DreamItem, DreamLocation, DreamGoogleIdentity, User
 from app.routers.auth import get_current_user
 from app.services.dream_parser import DreamParseItem, DreamParseResponse
 
@@ -26,6 +26,7 @@ def test_db():
     Dream.__table__.create(engine)
     DreamItem.__table__.create(engine)
     DreamLocation.__table__.create(engine)
+    DreamGoogleIdentity.__table__.create(engine)
     Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override_get_db():
@@ -40,6 +41,7 @@ def test_db():
     yield session
     session.close()
     app.dependency_overrides.pop(get_db, None)
+    DreamGoogleIdentity.__table__.drop(engine)
     DreamLocation.__table__.drop(engine)
     DreamItem.__table__.drop(engine)
     Dream.__table__.drop(engine)
@@ -216,7 +218,8 @@ def test_review_location_change_invalidates_old_pin_but_keeps_provenance(client,
     assert item.google_maps_url is None
     assert item.google_place_id is None
     assert item.raw_metadata_json["instagram_metadata"] == old_metadata["instagram_metadata"]
-    assert item.raw_metadata_json["previous_place_matches"][0]["place_match"] == old_metadata["place_match"]
+    assert item.raw_metadata_json["previous_place_matches"][0]["place_match"] is None
+    assert item.raw_metadata_json["previous_place_matches"][0]["google_place_id"] == "old-place"
     assert test_db.query(DreamItem).count() == 1
     assert item.city == "Barcelona"
 
@@ -528,6 +531,8 @@ def test_parse_item_applies_parser_result_and_regroups(client, test_user, test_d
 
 
 def test_parse_item_without_caption_fetches_metadata(client, test_user, test_db, monkeypatch):
+    from app.services.instagram_metadata import InstagramMetadataError
+    monkeypatch.setattr("app.routers.dreams.fetch_instagram_metadata", lambda _: (_ for _ in ()).throw(InstagramMetadataError("Synthetic unavailable source")))
     created = client.post(
         "/dreams/share",
         json={"source_url": "https://instagram.com/reel/url-metadata"},
@@ -573,6 +578,9 @@ def test_parse_item_without_caption_fetches_metadata(client, test_user, test_db,
 
 
 def test_duplicate_url_enrichment_uses_caption_fallback_when_model_is_down(client, test_user, test_db, monkeypatch):
+    from app.services.instagram_metadata import InstagramMetadataError
+    monkeypatch.setattr("app.routers.dreams.fetch_instagram_metadata", lambda _: (_ for _ in ()).throw(InstagramMetadataError("Synthetic unavailable source")))
+    monkeypatch.setattr("app.routers.dreams.cache_thumbnail", lambda *_: None)
     caption = (
         "Save this for your Thailand trip 🇹🇭 "
         "📍 Kuan Nom Saow Cafe, Krabi tag the person you'd go here with "

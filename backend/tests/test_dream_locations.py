@@ -311,7 +311,7 @@ def test_candidate_confirmation_uses_current_item_evidence_and_returns_compatibl
     assert run_job(sessions, job_id, "needs_review", [candidate]) == "needs_review"
     response = api.get("/dream-items").json()
     first = next(item for item in response if item["id"] == 1)
-    assert set(first["location_candidates"][0]) == {"id", "name", "address", "latitude", "longitude", "google_maps_url"}
+    assert set(first["location_candidates"][0]) == {"id", "name", "address", "latitude", "longitude", "google_maps_url", "attributions"}
     assert api.post("/dream-items/2/location-confirm", json={"candidate_id": candidate["id"]}).status_code == 422
     response = api.post("/dream-items/1/location-confirm", json={"candidate_id": candidate["id"]})
     assert response.status_code == 200

@@ -23,7 +23,7 @@ def migration():
 
 def test_migration_preserves_every_old_table_schema_and_raw_row():
     engine = create_engine("sqlite://")
-    old_tables = [table for table in Base.metadata.sorted_tables if table.name != "dream_locations"]
+    old_tables = [table for table in Base.metadata.sorted_tables if table.name not in {"dream_locations", "dream_google_identities"}]
     Base.metadata.create_all(engine, tables=old_tables)
     with Session(engine) as db:
         db.add(User(id=1, email="fixture@example.invalid"))

@@ -21,6 +21,8 @@ def dispatch_pending_locations(*, session_factory=None, publish=None, now=None):
     publish = publish or resolve_dream_location.delay
     now = now or utcnow()
     with session_factory() as db:
+        from app.services.google_location_lifecycle import queue_google_refreshes
+        queue_google_refreshes(db, now=now, limit=setting("DREAM_LOCATION_BATCH_SIZE", 25, 100))
         discovery = queue_missing(db, limit=setting("DREAM_LOCATION_BATCH_SIZE", 25, 100), only_undiscovered=True, now=now)
         jobs = due_jobs(db, now=now, limit=setting("DREAM_LOCATION_BATCH_SIZE", 25, 100))
         ids = [row.id for row in jobs]

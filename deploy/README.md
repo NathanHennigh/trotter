@@ -149,6 +149,18 @@ Restore is intentionally guarded because it replaces the current database:
 
 ## Dreams AI
 
+Dreams location lookup runs in the `dream_locations` queue on Oracle using Google
+Places API (New). Use a Places-only `GOOGLE_PLACES_API_KEY` restricted to the
+server's outbound IP; the mobile Maps SDK uses a separate Android-restricted key.
+Google Place IDs and user choices are durable. Business details are fetched live
+with no-store responses. Coordinates expire after 29 days in the `places-cache`
+service, which disables Redis snapshots and AOF and uses tmpfs without a volume
+or published port. Do not include this disposable cache in backups or enable
+persistence. A cache restart triggers location refresh while preserving all saved
+places and confirmed Place IDs. Outside Compose, explicitly set
+`GOOGLE_PLACES_CACHE_URL` to a nonpersistent Redis instance; there is no fallback
+to the persistent task broker.
+
 Dream parsing uses Venice by default with `qwen3-5-9b` as the primary extractor and `kimi-k2-5` as the selective fallback. Put the API key in the ignored secret file without a trailing explanation or quotes:
 
 ```bash

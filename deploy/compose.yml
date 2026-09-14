@@ -39,6 +39,7 @@ x-backend-environment: &backend-environment
   DREAM_LOCATION_BATCH_SIZE: ${DREAM_LOCATION_BATCH_SIZE:-25}
   DREAM_LOCATION_MAX_ATTEMPTS: ${DREAM_LOCATION_MAX_ATTEMPTS:-5}
   GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
+  GOOGLE_PLACES_CACHE_URL: redis://places-cache:6379/0
   VENICE_API_KEY_FILE: /run/secrets/venice_api_key
   DREAM_AI_PROVIDER: ${DREAM_AI_PROVIDER:-venice}
   DREAM_AI_BASE_URL: ${DREAM_AI_BASE_URL:-https://api.venice.ai/api/v1}
@@ -102,6 +103,22 @@ services:
       start_period: 10s
     logging: *default-logging
 
+  # Google coordinates are a disposable cache, never part of broker persistence
+  # or database backups. Place IDs and user choices remain in PostgreSQL.
+  places-cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    tmpfs:
+      - /data:size=16m,mode=700,uid=999,gid=1000
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging: *default-logging
+
   migrate:
     image: trotter-backend:local
     build:
@@ -114,6 +131,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      places-cache:
         condition: service_healthy
     restart: "no"
     logging: *default-logging

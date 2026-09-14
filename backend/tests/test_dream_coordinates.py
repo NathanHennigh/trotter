@@ -29,9 +29,10 @@ def test_existing_geoapify_match_distinguishes_places_areas_and_city_centres(res
     assert dream_item_coordinates(saved(raw=raw)) == ((38.711, -9.13, precision) if precision else (None, None, None))
 
 
-def test_saved_google_location_and_manual_pin_precedence():
+def test_unversioned_google_location_is_hidden_and_separate_manual_pin_wins():
     raw = {"place_match": {"raw": {"location": {"latitude": 38.711, "longitude": -9.13}}}}
-    assert dream_item_coordinates(saved(raw=raw)) == (38.711, -9.13, "place")
+    assert dream_item_coordinates(saved(raw=raw)) == (None, None, None)
+    assert dream_item_coordinates(saved(raw=raw, url="https://www.google.com/maps/?q=38.711,-9.13")) == (None, None, None)
     assert dream_item_coordinates(saved(raw=raw, url="https://www.google.com/maps/?q=41.15,-8.6")) == (41.15, -8.6, "place")
 
 

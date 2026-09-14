@@ -341,3 +341,17 @@ class DreamLocation(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     item = relationship("DreamItem", back_populates="location")
+    google_identity = relationship("DreamGoogleIdentity", uselist=False, back_populates="location", cascade="all, delete-orphan")
+
+
+class DreamGoogleIdentity(Base):
+    """Persistable Google IDs and user choices only; provider content is never stored here."""
+    __tablename__ = "dream_google_identities"
+    location_id = Column(BigInteger, ForeignKey("dream_locations.id", ondelete="CASCADE"), primary_key=True)
+    selected_place_id = Column(Text, nullable=True)
+    confirmed_place_id = Column(Text, nullable=True)
+    place_fingerprint = Column(String(64), nullable=True)
+    candidate_place_ids = Column(JSON, nullable=False, default=list, server_default="[]")
+    coordinates_expires_at = Column(DateTime(timezone=True), nullable=True)
+    refresh_after = Column(DateTime(timezone=True), nullable=True, index=True)
+    location = relationship("DreamLocation", back_populates="google_identity")

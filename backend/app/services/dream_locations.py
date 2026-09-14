@@ -43,7 +43,8 @@ def fingerprint(item):
 
 
 def pin_fingerprint(item):
-    raw = item.raw_metadata_json if isinstance(item.raw_metadata_json, dict) else {}
+    raw = getattr(item, "raw_metadata_json", None)
+    raw = raw if isinstance(raw, dict) else {}
     return digest([item.google_maps_url, item.google_place_id, raw.get("place_match")])
 
 
@@ -68,7 +69,15 @@ def explicit_pin(item):
     query = parse_qs(parsed.query)
     value = (query.get("query") or query.get("q") or [""])[0]
     match = match or re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*", value)
-    return checked_coordinates(match[1], match[2]) if match else (None, None, None)
+    pin = checked_coordinates(match[1], match[2]) if match else (None, None, None)
+    # Historical provider-created coordinate links are not manual user evidence.
+    raw = getattr(item, "raw_metadata_json", None)
+    raw = raw if isinstance(raw, dict) else {}
+    evidence = (raw.get("place_match") or {}).get("raw") if isinstance(raw.get("place_match"), dict) else None
+    location = evidence.get("location") if isinstance(evidence, dict) else None
+    if isinstance(location, dict) and pin[:2] == checked_coordinates(location.get("latitude"), location.get("longitude"))[:2]:
+        return None, None, None
+    return pin
 
 
 def legacy_coordinates(item):
@@ -82,7 +91,8 @@ def legacy_coordinates(item):
         return None, None, None
     location = evidence.get("location")
     if isinstance(location, dict):
-        return checked_coordinates(location.get("latitude"), location.get("longitude"))
+        # No trustworthy retrieval time exists for legacy Google content.
+        return None, None, None
     properties, geometry = evidence.get("properties") or {}, evidence.get("geometry") or {}
     if not isinstance(properties, dict) or not isinstance(geometry, dict):
         return None, None, None
@@ -106,6 +116,9 @@ def location_coordinates(item):
     if manual[0] is not None:
         return manual
     row = current_resolution(item)
+    if row and row.provider == "google_places":
+        from .google_location_lifecycle import cached_coordinates
+        return cached_coordinates(row) if row.status in {"resolved", "manual", "queued", "running", "failed", "blocked"} else (None, None, None)
     if row and row.status in {"resolved", "manual"}:
         if row.provider == "saved_evidence":
             return legacy_coordinates(item)
@@ -115,7 +128,7 @@ def location_coordinates(item):
 
 def public_location(item):
     row = current_resolution(item)
-    return {
+    result = {
         "location_status": row.status if row else "manual" if explicit_pin(item)[0] is not None else None,
         "location_address": row.address if row else None,
         "location_provider": row.provider if row else None,
@@ -123,15 +136,27 @@ def public_location(item):
         "location_message": row.message if row else None,
         "location_checked_at": row.checked_at if row else None,
     }
+    if row and row.provider == "google_places":
+        from .google_location_lifecycle import google_public_fields
+        result.update(google_public_fields(row))
+    return result
 
 
 def location_maps_url(item):
     if explicit_pin(item)[0] is not None:
         return item.google_maps_url
     row = current_resolution(item)
+    if row and row.provider == "google_places":
+        from .google_location_lifecycle import place_maps_url
+        identity = row.google_identity
+        if identity and identity.selected_place_id:
+            return place_maps_url(item, identity.selected_place_id)
     if row and row.status in {"resolved", "manual"} and row.google_maps_url:
         return row.google_maps_url
-    if item.google_maps_url:
+    raw = item.raw_metadata_json if isinstance(item.raw_metadata_json, dict) else {}
+    match = raw.get("place_match")
+    google_legacy = isinstance(match, dict) and isinstance(match.get("raw"), dict) and isinstance(match["raw"].get("location"), dict)
+    if item.google_maps_url and not google_legacy:
         return item.google_maps_url
     if not (item.place_name or "").strip():
         return None
@@ -143,12 +168,17 @@ def location_maps_url(item):
 
 
 def archive_resolution(row, reason, now):
-    row.history = [*(row.history or []), {
+    entry = {
         "reason": reason, "at": now.isoformat(), "fingerprint": row.fingerprint,
         "generation": row.generation, "status": row.status, "provider": row.provider,
         "address": row.address, "latitude": row.latitude, "longitude": row.longitude,
         "google_maps_url": row.google_maps_url, "candidates": row.candidates,
-    }]
+    }
+    if row.provider == "google_places":
+        from .google_location_lifecycle import ids_history
+        entry = {key: entry[key] for key in ("reason", "at", "fingerprint", "generation", "status", "provider")}
+        entry.update(ids_history(row))
+    row.history = [*(row.history or []), entry]
 
 
 def enqueue_location(db: Session, item: DreamItem, *, force=False, now=None):
@@ -157,9 +187,14 @@ def enqueue_location(db: Session, item: DreamItem, *, force=False, now=None):
     row = db.query(DreamLocation).filter_by(item_id=item.id, user_id=item.user_id).with_for_update().first()
     identity, pin = fingerprint(item), pin_fingerprint(item)
     changed = row is not None and (row.fingerprint != identity or row.pin_fingerprint != pin)
-    if row and not changed and not force:
+    google = row.google_identity if row and row.provider == "google_places" else None
+    google_expired = bool(google and google.selected_place_id and (not google.coordinates_expires_at or aware(google.coordinates_expires_at) <= now))
+    from .google_location_lifecycle import source_place_fingerprint
+    preserve_google_choice = bool(google and google.confirmed_place_id and row.pin_fingerprint == pin
+                                  and google.place_fingerprint == source_place_fingerprint(item))
+    if row and not changed and not force and not google_expired:
         return row, False
-    if row and not changed and force and row.status in ACTIVE | {"manual", "resolved"}:
+    if row and not changed and force and row.status in ACTIVE | {"manual", "resolved"} and not google_expired:
         return row, False
     if row:
         archive_resolution(row, "location_inputs_changed" if changed else "requested_retry", now)
@@ -174,6 +209,12 @@ def enqueue_location(db: Session, item: DreamItem, *, force=False, now=None):
     row.provider, row.address, row.latitude, row.longitude, row.google_maps_url = None, None, None, None, None
     row.candidates, row.message, row.checked_at, row.last_dispatched_at = [], None, None, None
     row.updated_at = now
+    if google:
+        if changed and not preserve_google_choice:
+            google.selected_place_id = google.confirmed_place_id = None
+            google.candidate_place_ids = []
+        google.coordinates_expires_at = google.refresh_after = None
+        row.provider = "google_places"
     saved = legacy_coordinates(item)
     if saved[0] is not None:
         row.status = "manual" if explicit_pin(item)[0] is not None else "resolved"
@@ -239,7 +280,8 @@ def claim_job(db: Session, job_id: int, *, now=None):
         return None
     return {"job_id": row.id, "item_id": item.id, "user_id": item.user_id, "token": token,
             "fingerprint": row.fingerprint, "pin_fingerprint": row.pin_fingerprint,
-            "inputs": [item.place_name, item.city, item.country, item.region_or_neighborhood, item.category]}
+            "inputs": [item.place_name, item.city, item.country, item.region_or_neighborhood, item.category],
+            "google_place_id": row.google_identity.selected_place_id if row.provider == "google_places" and row.google_identity else None}
 
 
 def apply_candidate(row, candidate):
@@ -250,8 +292,9 @@ def apply_candidate(row, candidate):
 
 async def resolve_location_job(job_id, *, session_factory=None, resolver=None, now=None):
     from ..db import SessionLocal
-    from .dream_place_search import search_dream_place, RetryableDreamPlaceLookupError
-    session_factory, resolver = session_factory or SessionLocal, resolver or search_dream_place
+    from .dream_place_search import RetryableDreamPlaceLookupError
+    from .google_dream_place_search import search_google_dream_place, fetch_google_place_details, GooglePlacesBlockedError
+    session_factory, resolver = session_factory or SessionLocal, resolver or search_google_dream_place
     with session_factory() as db:
         claim = claim_job(db, job_id, now=now)
         db.commit()
@@ -259,11 +302,16 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
         return "skipped"
     retryable = False
     try:
-        result = await resolver(*claim["inputs"])
+        if claim.get("google_place_id") and resolver is search_google_dream_place:
+            refreshed = await fetch_google_place_details(claim["google_place_id"])
+            result = {"status": "resolved" if refreshed else "not_found", "provider": "google_places", "candidates": [refreshed.model_dump()] if refreshed else []}
+        else:
+            result = await resolver(*claim["inputs"])
         result = result.model_dump() if hasattr(result, "model_dump") else result
         if result.get("status") not in {"resolved", "needs_review", "not_found", "blocked"}:
             raise ValueError("Invalid provider status")
         candidates = result.get("candidates", [])
+        result["provider"] = result.get("provider") or (candidates[0].get("provider") if candidates else None) or "google_places"
         if not isinstance(candidates, list) or len(candidates) > 10:
             raise ValueError("Invalid candidate list")
         for candidate in candidates:
@@ -275,6 +323,8 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
             raise ValueError("Resolved location requires one candidate")
     except RetryableDreamPlaceLookupError:
         retryable, result = True, None
+    except GooglePlacesBlockedError:
+        result = {"status": "blocked", "provider": "google_places", "candidates": []}
     except Exception:
         # Do not persist exception URLs, credentials, request headers or payloads.
         retryable, result = True, None
@@ -299,18 +349,26 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
                 row.status, row.message = "failed", "Location lookup could not finish. You can retry."
         else:
             row.status = result["status"]
-            row.candidates = result.get("candidates", [])
-            row.provider = "geoapify"
+            row.candidates = result.get("candidates", []) if result["provider"] != "google_places" else []
+            row.provider = result["provider"]
             row.message = {
                 "resolved": "Location found.", "needs_review": "Choose the place that matches your save.",
                 "not_found": "No reliable match yet. Check the place name or add a pin.",
                 "blocked": "Location lookup is temporarily unavailable.",
             }.get(row.status, "Location lookup could not finish. You can retry.")
-            if row.status == "needs_review" and not row.candidates:
+            if row.status == "needs_review" and not result.get("candidates"):
                 row.message = "Add a more specific place name, city, or country to find its location."
-            if row.status == "resolved" and len(row.candidates) == 1:
+            if row.provider == "google_places":
+                from .google_location_lifecycle import apply_google_result
+                try:
+                    apply_google_result(db, row, result, finished)
+                except Exception:
+                    row.status = "queued" if row.attempts < setting("DREAM_LOCATION_MAX_ATTEMPTS", 5, 10) else "failed"
+                    row.next_attempt_at = finished + timedelta(minutes=1) if row.status == "queued" else None
+                    row.message = "The location cache is temporarily unavailable. We will retry."
+            elif row.status == "resolved" and len(row.candidates) == 1:
                 apply_candidate(row, row.candidates[0])
-            elif row.status == "blocked":
+            if row.status == "blocked":
                 row.next_attempt_at = finished + timedelta(hours=6)
                 row.attempts = 0
         db.commit()
@@ -321,6 +379,8 @@ def confirm_candidate(db: Session, item: DreamItem, candidate_id: str):
     row = db.query(DreamLocation).filter_by(item_id=item.id, user_id=item.user_id).with_for_update().first()
     if not row or row.status != "needs_review" or row.fingerprint != fingerprint(item) or row.pin_fingerprint != pin_fingerprint(item):
         raise ValueError("This location choice is no longer current. Find the place again.")
+    if row.provider == "google_places":
+        raise ValueError("Google choices require fresh place details before confirmation.")
     candidate = next((candidate for candidate in row.candidates if candidate.get("id") == candidate_id), None)
     if not candidate:
         raise ValueError("This location choice does not belong to this saved place.")

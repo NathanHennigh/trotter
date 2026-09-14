@@ -6,17 +6,18 @@ from __future__ import annotations
 
 import re
 import math
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, Literal, Optional
 from urllib.parse import parse_qs, unquote, urlparse, urlunparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, selectinload
 
 from ..db import get_db
-from ..models import Dream, DreamItem, User
+from ..models import Dream, DreamItem, DreamLocation, User
 from ..services.dream_parser import (
     DreamParserError,
     DreamParseItem,
@@ -42,7 +43,19 @@ from ..services.dream_locations import (
 )
 from .auth import get_current_user
 
-router = APIRouter(tags=["dreams"])
+google_map_capable = ContextVar("dreams_google_map_capable", default=False)
+
+
+async def private_dream_response(response: Response, request: Request):
+    response.headers["Cache-Control"] = "private, no-store"
+    token = google_map_capable.set(request.headers.get("X-Trotter-Maps", "").lower() == "google")
+    try:
+        yield
+    finally:
+        google_map_capable.reset(token)
+
+
+router = APIRouter(tags=["dreams"], dependencies=[Depends(private_dream_response)])
 
 KNOWN_COUNTRIES = [
     "France",
@@ -129,6 +142,7 @@ class LocationCandidateOut(BaseModel):
     latitude: float
     longitude: float
     google_maps_url: str
+    attributions: list[dict[str, str]] = Field(default_factory=list)
 
 
 class LocateMissingRequest(BaseModel):
@@ -136,7 +150,7 @@ class LocateMissingRequest(BaseModel):
 
 
 class ConfirmLocationRequest(BaseModel):
-    candidate_id: str = Field(min_length=1, max_length=512)
+    candidate_id: str = Field(min_length=1, max_length=4096)
 
 
 class DreamItemOut(BaseModel):
@@ -167,6 +181,10 @@ class DreamItemOut(BaseModel):
     location_candidates: list[LocationCandidateOut] = Field(default_factory=list)
     location_message: Optional[str] = None
     location_checked_at: Optional[datetime] = None
+    location_place_id: Optional[str] = None
+    location_candidate_ids: list[str] = Field(default_factory=list)
+    location_expires_at: Optional[datetime] = None
+    location_user_confirmed: bool = False
     status: str
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -558,6 +576,10 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
     metadata = raw.get("instagram_metadata") if isinstance(raw, dict) else None
     thumbnail_url = f"/dream-items/{item.id}/thumbnail" if isinstance(metadata, dict) and metadata.get("thumbnail_url") else None
     latitude, longitude, coordinate_precision = dream_item_coordinates(item)
+    location_fields = public_location(item)
+    if location_fields.get("location_provider") == "google_places" and not google_map_capable.get():
+        latitude = longitude = coordinate_precision = None
+        location_fields["location_expires_at"] = None
     return DreamItemOut(
         id=item.id,
         dream_id=item.dream_id,
@@ -576,7 +598,7 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         needs_google_places_lookup=item.needs_google_places_lookup,
         google_place_id=item.google_place_id,
         google_maps_url=location_maps_url(item),
-        **public_location(item),
+        **location_fields,
         thumbnail_url=thumbnail_url,
         latitude=latitude,
         longitude=longitude,
@@ -968,7 +990,7 @@ def list_dream_items(
     items = (
         db.query(DreamItem)
         .filter(DreamItem.dream_id == dream_id, DreamItem.user_id == current_user.id)
-        .options(selectinload(DreamItem.location))
+        .options(selectinload(DreamItem.location).selectinload(DreamLocation.google_identity))
         .order_by(DreamItem.created_at.desc())
         .all()
     )
@@ -981,7 +1003,7 @@ def list_items(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[DreamItemOut]:
-    query = db.query(DreamItem).options(selectinload(DreamItem.location)).filter(DreamItem.user_id == current_user.id)
+    query = db.query(DreamItem).options(selectinload(DreamItem.location).selectinload(DreamLocation.google_identity)).filter(DreamItem.user_id == current_user.id)
     if item_status:
         if item_status == "needs_review":
             query = query.filter(DreamItem.needs_review.is_(True))
@@ -1058,19 +1080,29 @@ def review_item(
             for field in ("place_name", "city", "country", "region_or_neighborhood", "category")
         )
         maps_changed = "google_maps_url" in edits and edits["google_maps_url"] != item.google_maps_url
-        if identity_changed or maps_changed:
+        from ..services.dream_locations import explicit_pin
+        had_manual_pin = explicit_pin(item)[0] is not None
+        place_identity_changed = any(
+            field in edits and str(edits[field] or "").strip().casefold() != str(getattr(item, field) or "").strip().casefold()
+            for field in ("place_name", "city", "country", "region_or_neighborhood")
+        )
+        preserve_google_category_choice = bool(item.location and item.location.provider == "google_places"
+            and item.location.google_identity and item.location.google_identity.confirmed_place_id
+            and not place_identity_changed and not maps_changed)
+        if (identity_changed or maps_changed) and not preserve_google_category_choice:
             raw = dict(item.raw_metadata_json or {})
             previous = raw.pop("place_match", None)
             if previous or item.google_maps_url or item.google_place_id:
                 history = raw.get("previous_place_matches")
+                google_content = isinstance(previous, dict) and isinstance(previous.get("raw"), dict) and isinstance(previous["raw"].get("location"), dict)
                 raw["previous_place_matches"] = [*(history if isinstance(history, list) else []), {
-                    "place_match": previous, "google_maps_url": item.google_maps_url,
+                    "place_match": None if google_content else previous, "google_maps_url": None if google_content else item.google_maps_url,
                     "google_place_id": item.google_place_id, "replaced_at": datetime.utcnow().isoformat(),
                 }]
             item.raw_metadata_json = raw
             if "google_place_id" not in edits:
                 item.google_place_id = None
-            if identity_changed and not maps_changed:
+            if identity_changed and not maps_changed and not had_manual_pin:
                 edits["google_maps_url"] = None
         dream_id = edits.pop("dream_id", None)
         if dream_id is not None:
@@ -1136,16 +1168,50 @@ def locate_item(item_id: int, current_user: User = Depends(get_current_user), db
     return dream_item_out(item)
 
 
+@router.get("/dream-items/{item_id}/location-details")
+async def get_item_location_details(item_id: int, response: Response,
+                                    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from ..services.google_location_lifecycle import live_google_details
+    from ..services.dream_place_search import RetryableDreamPlaceLookupError
+    response.headers["Cache-Control"] = "private, no-store"
+    if not db.query(DreamItem.id).filter_by(id=item_id, user_id=current_user.id).first():
+        raise HTTPException(status_code=404, detail="Dream item not found")
+    if not google_map_capable.get():
+        raise HTTPException(status_code=409, detail="Google Maps support is required to display these place details.",
+                            headers={"Cache-Control": "private, no-store"})
+    try:
+        return await live_google_details(db, item_id, current_user.id)
+    except RetryableDreamPlaceLookupError:
+        raise HTTPException(status_code=503, detail="Place details are temporarily unavailable. Try again.",
+                            headers={"Cache-Control": "private, no-store"})
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Dream item not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @router.post("/dream-items/{item_id}/location-confirm", response_model=DreamItemOut)
-def confirm_item_location(item_id: int, payload: ConfirmLocationRequest,
+async def confirm_item_location(item_id: int, payload: ConfirmLocationRequest,
                           current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     item = db.query(DreamItem).filter_by(id=item_id, user_id=current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=404, detail="Dream item not found")
     try:
-        confirm_candidate(db, item, payload.candidate_id)
+        if item.location and item.location.provider == "google_places":
+            from ..services.google_location_lifecycle import confirm_google_candidate
+            from ..services.google_dream_place_search import GooglePlacesBlockedError
+            from ..services.dream_place_search import RetryableDreamPlaceLookupError
+            try:
+                item = await confirm_google_candidate(db, item_id, current_user.id, payload.candidate_id)
+            except (GooglePlacesBlockedError, RetryableDreamPlaceLookupError):
+                db.rollback()
+                raise HTTPException(status_code=503, detail="Place details are temporarily unavailable. Try again.")
+        else:
+            confirm_candidate(db, item, payload.candidate_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Dream item not found")
     db.commit()
     db.refresh(item)
     return dream_item_out(item)
