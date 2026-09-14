@@ -1,0 +1,167 @@
+{
+  "preparedOn": "2026-09-04",
+  "source": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/9380cca83db5f9aef52d5e762765100745f84b27/geojson/ne_10m_admin_0_countries.geojson",
+  "sourceSha256": "239eec57ac17f100a11e2536cffc56752c318b50ae765b0918ff7aab4ce8f255",
+  "mappingSourceSha256": "dbf9d26a890d39a9c710305a434557aa4ed747210269aacd91d81a2f86bbd07b",
+  "license": "Public domain",
+  "licenseUrl": "https://www.naturalearthdata.com/about/terms-of-use/",
+  "credit": "Made with Natural Earth.",
+  "processing": "Join local 10m geometry to all 242 existing product features by ADM0_A3/adm0A3. Keep exact current properties and feature order. Simplify each feature with Shapely 2.1.2, preserve_topology=True, tolerance 0.0125 degrees. Round resulting coordinates to six decimals; fallback to original source geometry if polygon/hole count changes or valid geometry becomes invalid.",
+  "topologyScope": "Per-feature polygon topology is preserved; independent adjacent features can differ by less than the simplify tolerance along a common border. At 4096px width, the tolerance is well below one raster pixel.",
+  "geometryBefore": {
+    "polygons": 4232,
+    "holes": 18,
+    "vertices": 547672
+  },
+  "geometryAfter": {
+    "polygons": 4232,
+    "holes": 18,
+    "vertices": 164780
+  },
+  "featureCount": 242,
+  "unmatchedCurrentFeatures": [],
+  "excluded10mFeatures": [
+    {
+      "adm0A3": "ESB",
+      "name": "Dhekelia"
+    },
+    {
+      "adm0A3": "USG",
+      "name": "USNB Guantanamo Bay"
+    },
+    {
+      "adm0A3": "BRI",
+      "name": "Brazilian I."
+    },
+    {
+      "adm0A3": "GIB",
+      "name": "Gibraltar"
+    },
+    {
+      "adm0A3": "CNM",
+      "name": "Cyprus U.N. Buffer Zone"
+    },
+    {
+      "adm0A3": "KAB",
+      "name": "Baikonur"
+    },
+    {
+      "adm0A3": "WSB",
+      "name": "Akrotiri"
+    },
+    {
+      "adm0A3": "SPI",
+      "name": "Southern Patagonian Ice Field"
+    },
+    {
+      "adm0A3": "BRT",
+      "name": "Bir Tawil"
+    },
+    {
+      "adm0A3": "UMI",
+      "name": "U.S. Minor Outlying Is."
+    },
+    {
+      "adm0A3": "CSI",
+      "name": "Coral Sea Is."
+    },
+    {
+      "adm0A3": "PGA",
+      "name": "Spratly Is."
+    },
+    {
+      "adm0A3": "CLP",
+      "name": "Clipperton I."
+    },
+    {
+      "adm0A3": "BJN",
+      "name": "Bajo Nuevo Bank"
+    },
+    {
+      "adm0A3": "SER",
+      "name": "Serranilla Bank"
+    },
+    {
+      "adm0A3": "SCR",
+      "name": "Scarborough Reef"
+    }
+  ],
+  "specialMappings": [
+    {
+      "countryCode": "TW",
+      "name": "Taiwan",
+      "isoA2": "CN-TW",
+      "isoA2Eh": "TW",
+      "adm0A3": "TWN",
+      "adm0Iso": "TWN",
+      "label": [
+        120.868204,
+        23.652408
+      ],
+      "mappingSource": "ISO_A2_EH"
+    },
+    {
+      "countryCode": "SO",
+      "name": "Somalia",
+      "isoA2": "SO",
+      "isoA2Eh": "SO",
+      "adm0A3": "SOM",
+      "adm0Iso": "SOM",
+      "label": [
+        45.19238,
+        3.568925
+      ],
+      "mappingSource": "ISO_A2_EH"
+    },
+    {
+      "countryCode": "SO",
+      "name": "Somaliland",
+      "isoA2": "-99",
+      "isoA2Eh": "-99",
+      "adm0A3": "SOL",
+      "adm0Iso": "SOM",
+      "label": [
+        46.731595,
+        9.443889
+      ],
+      "mappingSource": "ADM0_ISO via upstream ISO_A3_EH"
+    },
+    {
+      "countryCode": "SG",
+      "name": "Singapore",
+      "isoA2": "SG",
+      "isoA2Eh": "SG",
+      "adm0A3": "SGP",
+      "adm0Iso": "SGP",
+      "label": [
+        103.816925,
+        1.366587
+      ],
+      "mappingSource": "ISO_A2_EH"
+    }
+  ],
+  "simplificationTrials": [
+    {
+      "toleranceDegrees": 0.025,
+      "vertices": 102774,
+      "fallbackFeatures": []
+    },
+    {
+      "toleranceDegrees": 0.0125,
+      "vertices": 164780,
+      "fallbackFeatures": []
+    }
+  ],
+  "fallbackFeatures": [],
+  "originalInvalidFeatures": [
+    "EGY"
+  ],
+  "outputInvalidFeatures": [
+    "EGY"
+  ],
+  "output": "C:\\Users\\natha\\projects\\trotter\\artifacts\\globe-upgrade-assets\\world-countries-10m-simplified.json",
+  "outputBytes": 3797892,
+  "outputSha256": "06e9d4a19c3a56f630787d9899300eaff56944a1fa4db6ff11661ac0abf504ec",
+  "sourceCommit": "9380cca83db5f9aef52d5e762765100745f84b27",
+  "sourceVerified": "SHA-256 byte-for-byte against primary upstream pinned commit on2026-09-04"
+}

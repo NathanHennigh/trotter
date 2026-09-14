@@ -1,6 +1,7 @@
 {
   "archedCountryCanonical": {
     "default": {
+      "coordinateSpace": "frame",
       "frame": {
         "left": 0.08,
         "top": 0.03,
@@ -9,316 +10,118 @@
       },
       "titleMode": "arc",
       "arcDepth": 0.78,
-      "arcTextLength": 0.66,
-      "maxCountryChars": 14,
-      "maxPlaceChars": 12,
+      "arcCenterYOffset": 0,
+      "circleTitleRadius": 0.28,
+      "maxCountryChars": 60,
+      "maxPlaceChars": 0,
       "country": {
-        "left": 0.16,
-        "top": 0.19,
-        "width": 0.68,
-        "height": 0.16,
-        "fontScale": 0.56,
-        "minScale": 0.32,
-        "charFactor": 0.95,
-        "tracking": 0.34
+        "left": 0.12,
+        "top": 0.17,
+        "width": 0.76,
+        "height": 0.1,
+        "fontScale": 0.64,
+        "minScale": 0.1,
+        "charFactor": 0.73,
+        "tracking": 0.12,
+        "adaptiveLength": false
       },
       "icon": {
-        "left": 0.285,
-        "top": 0.356,
-        "width": 0.429,
-        "height": 0.402
+        "left": 0.22,
+        "top": 0.34,
+        "width": 0.56,
+        "height": 0.42
       },
       "place": {
-        "left": 0.19,
-        "top": 0.7,
-        "width": 0.62,
-        "height": 0.07,
-        "fontScale": 0.86,
-        "minScale": 0.52
+        "left": 0.5,
+        "top": 0.5,
+        "width": 0,
+        "height": 0
       },
       "date": {
-        "left": 0.19,
-        "top": 0.818,
-        "width": 0.62,
-        "height": 0.08,
+        "left": 0.13,
+        "top": 0.858,
+        "width": 0.51,
+        "height": 0.06,
         "fontScale": 0.7,
-        "minScale": 0.52
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       },
       "airport": {
-        "left": 0.21,
-        "top": 0.91,
-        "width": 0.58,
+        "left": 0.71,
+        "top": 0.858,
+        "width": 0.16,
         "height": 0.06,
-        "fontScale": 0.9,
-        "minScale": 0.62
+        "fontScale": 1,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       }
-    },
-    "presets": [
-      {
-        "name": "4ch",
-        "charRange": [
-          2,
-          7
-        ],
-        "overrides": {
-          "frame": {
-            "top": 0.03
-          },
-          "country": {
-            "top": 0.113,
-            "height": 0.172
-          },
-          "titleMode": "straight",
-          "date": {
-            "top": 0.8079999999999999,
-            "left": 0.11999999999999995
-          },
-          "airport": {
-            "left": 0.3400000000000001,
-            "top": 0.82
-          }
-        }
-      },
-      {
-        "name": "8ch",
-        "charRange": [
-          8,
-          10
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.158
-          },
-          "date": {
-            "top": 0.8079999999999999,
-            "left": 0.11999999999999995
-          },
-          "airport": {
-            "left": 0.3400000000000001,
-            "top": 0.82
-          }
-        }
-      },
-      {
-        "name": "11ch",
-        "charRange": [
-          11,
-          14
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.161
-          },
-          "date": {
-            "left": 0.11999999999999995,
-            "top": 0.8079999999999999
-          },
-          "airport": {
-            "left": 0.3400000000000001,
-            "top": 0.82
-          }
-        }
-      },
-      {
-        "name": "16ch",
-        "charRange": [
-          15,
-          19
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.158
-          },
-          "date": {
-            "top": 0.8079999999999999,
-            "left": 0.11999999999999995
-          },
-          "airport": {
-            "left": 0.3400000000000001,
-            "top": 0.82
-          }
-        }
-      }
-    ]
+    }
   },
   "archedCountryBanner": {
     "default": {
+      "coordinateSpace": "frame",
       "frame": {
         "left": 0.08,
         "top": 0.068,
         "width": 0.84,
         "height": 0.92
       },
-      "titleMode": "straight",
-      "arcDepth": 0.74,
-      "arcTextLength": 0.66,
-      "maxCountryChars": 14,
-      "maxPlaceChars": 12,
+      "titleMode": "arc",
+      "arcDepth": 0.78,
+      "arcCenterYOffset": 0,
+      "circleTitleRadius": 0.28,
+      "maxCountryChars": 60,
+      "maxPlaceChars": 0,
       "country": {
-        "left": 0.16,
-        "top": 0.115,
-        "width": 0.68,
-        "height": 0.16,
-        "fontScale": 0.6,
-        "minScale": 0.4,
-        "charFactor": 0.74,
-        "tracking": 0.5
+        "left": 0.12,
+        "top": 0.16,
+        "width": 0.76,
+        "height": 0.1,
+        "fontScale": 0.64,
+        "minScale": 0.1,
+        "charFactor": 0.73,
+        "tracking": 0.12,
+        "adaptiveLength": false
       },
       "icon": {
-        "left": 0.303,
-        "top": 0.345,
-        "width": 0.396,
-        "height": 0.372
+        "left": 0.2,
+        "top": 0.32,
+        "width": 0.6,
+        "height": 0.385
       },
       "place": {
-        "left": 0.18,
-        "top": 0.66,
-        "width": 0.64,
-        "height": 0.07,
-        "fontScale": 0.96,
-        "minScale": 0.58
+        "left": 0.5,
+        "top": 0.5,
+        "width": 0,
+        "height": 0
       },
       "date": {
-        "left": 0.18,
-        "top": 0.799,
-        "width": 0.64,
-        "height": 0.08,
-        "fontScale": 0.7,
-        "minScale": 0.52
-      },
-      "airport": {
         "left": 0.2,
         "top": 0.86,
         "width": 0.6,
-        "height": 0.07,
-        "fontScale": 0.9,
-        "minScale": 0.62
+        "height": 0.055,
+        "fontScale": 0.7,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
+      },
+      "airport": {
+        "left": 0.37,
+        "top": 0.79,
+        "width": 0.26,
+        "height": 0.065,
+        "fontScale": 1,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       }
-    },
-    "presets": [
-      {
-        "charRange": [
-          3,
-          3
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.14500000000000002
-          },
-          "airport": {
-            "top": 0.85
-          },
-          "date": {
-            "top": 0.779
-          }
-        }
-      },
-      {
-        "name": "9ch",
-        "charRange": [
-          7,
-          9
-        ],
-        "overrides": {
-          "titleMode": "arc",
-          "frame": {
-            "top": 0.068
-          },
-          "country": {
-            "top": 0.19400000000000003
-          },
-          "date": {
-            "top": 0.779
-          },
-          "airport": {
-            "top": 0.85,
-            "fontScale": 0.88
-          }
-        }
-      },
-      {
-        "name": "10ch",
-        "charRange": [
-          10,
-          10
-        ],
-        "overrides": {
-          "titleMode": "arc",
-          "frame": {
-            "top": 0.081
-          },
-          "country": {
-            "top": 0.141
-          }
-        }
-      },
-      {
-        "name": "11ch",
-        "charRange": [
-          11,
-          12
-        ],
-        "overrides": {
-          "titleMode": "arc",
-          "country": {
-            "fontScale": 0.523,
-            "top": 0.20300000000000004,
-            "charFactor": 0.74
-          },
-          "date": {
-            "top": 0.779
-          },
-          "airport": {
-            "top": 0.85,
-            "fontScale": 0.9
-          }
-        }
-      },
-      {
-        "name": "14ch",
-        "charRange": [
-          14,
-          16
-        ],
-        "overrides": {
-          "titleMode": "arc",
-          "country": {
-            "top": 0.20200000000000004,
-            "fontScale": 0.49
-          },
-          "airport": {
-            "fontScale": 0.86,
-            "top": 0.85
-          },
-          "date": {
-            "top": 0.779
-          }
-        }
-      },
-      {
-        "name": "18ch",
-        "charRange": [
-          18,
-          20
-        ],
-        "overrides": {
-          "titleMode": "arc",
-          "country": {
-            "fontScale": 0.419,
-            "top": 0.19300000000000003
-          },
-          "date": {
-            "top": 0.779
-          },
-          "airport": {
-            "top": 0.85
-          }
-        }
-      }
-    ]
+    }
   },
   "archedCountryVariant": {
     "default": {
+      "coordinateSpace": "frame",
       "frame": {
         "left": 0.08,
         "top": 0.04,
@@ -326,192 +129,59 @@
         "height": 0.9
       },
       "titleMode": "arc",
-      "arcDepth": 0.58,
-      "arcTextLength": 0.62,
-      "maxCountryChars": 12,
-      "maxPlaceChars": 11,
+      "arcDepth": 0.78,
+      "arcCenterYOffset": 0,
+      "circleTitleRadius": 0.28,
+      "maxCountryChars": 60,
+      "maxPlaceChars": 0,
       "country": {
-        "left": 0.17,
-        "top": 0.169,
-        "width": 0.66,
-        "height": 0.14,
-        "fontScale": 0.613,
-        "minScale": 0.4,
-        "charFactor": 0.76,
-        "tracking": 0.45
+        "left": 0.12,
+        "top": 0.17,
+        "width": 0.76,
+        "height": 0.11,
+        "fontScale": 0.64,
+        "minScale": 0.1,
+        "charFactor": 0.73,
+        "tracking": 0.12,
+        "adaptiveLength": false
       },
       "icon": {
-        "left": 0.35,
-        "top": 0.4,
-        "width": 0.3,
-        "height": 0.21
+        "left": 0.22,
+        "top": 0.35,
+        "width": 0.56,
+        "height": 0.38
       },
       "place": {
-        "left": 0.2,
-        "top": 0.66,
-        "width": 0.6,
-        "height": 0.07,
-        "fontScale": 0.94,
-        "minScale": 0.58
+        "left": 0.5,
+        "top": 0.5,
+        "width": 0,
+        "height": 0
       },
       "date": {
-        "left": 0.2,
-        "top": 0.808,
-        "width": 0.6,
-        "height": 0.08,
+        "left": 0.12,
+        "top": 0.815,
+        "width": 0.51,
+        "height": 0.065,
         "fontScale": 0.7,
-        "minScale": 0.52
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       },
       "airport": {
-        "left": 0.22,
-        "top": 0.86,
-        "width": 0.56,
-        "height": 0.07,
-        "fontScale": 0.9,
-        "minScale": 0.62
+        "left": 0.69,
+        "top": 0.815,
+        "width": 0.18,
+        "height": 0.065,
+        "fontScale": 1,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       }
-    },
-    "presets": [
-      {
-        "name": "3ch",
-        "charRange": [
-          2,
-          9
-        ],
-        "overrides": {
-          "titleMode": "straight",
-          "country": {
-            "top": 0.162
-          },
-          "date": {
-            "top": 0.768,
-            "left": 0.12999999999999995
-          },
-          "icon": {
-            "width": 0.444,
-            "left": 0.279,
-            "height": 0.396,
-            "top": 0.348
-          },
-          "airport": {
-            "top": 0.7699999999999999,
-            "left": 0.3500000000000001
-          }
-        }
-      },
-      {
-        "name": "10ch",
-        "charRange": [
-          10,
-          10
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.184
-          },
-          "date": {
-            "top": 0.768,
-            "left": 0.12999999999999995
-          },
-          "icon": {
-            "width": 0.444,
-            "height": 0.396,
-            "top": 0.348,
-            "left": 0.279
-          },
-          "airport": {
-            "left": 0.3500000000000001,
-            "top": 0.7699999999999999
-          }
-        }
-      },
-      {
-        "name": "11ch",
-        "charRange": [
-          11,
-          13
-        ],
-        "overrides": {
-          "country": {
-            "fontScale": 0.57,
-            "top": 0.17900000000000002
-          },
-          "icon": {
-            "left": 0.279,
-            "width": 0.444,
-            "top": 0.348,
-            "height": 0.396
-          },
-          "date": {
-            "top": 0.768,
-            "left": 0.11999999999999995
-          },
-          "airport": {
-            "left": 0.3500000000000001,
-            "top": 0.7699999999999999
-          }
-        }
-      },
-      {
-        "name": "14-16ch",
-        "charRange": [
-          14,
-          16
-        ],
-        "overrides": {
-          "icon": {
-            "width": 0.444,
-            "left": 0.279,
-            "top": 0.348,
-            "height": 0.396
-          },
-          "country": {
-            "fontScale": 0.5009999999999999,
-            "top": 0.17900000000000002
-          },
-          "date": {
-            "top": 0.768,
-            "left": 0.10999999999999996
-          },
-          "airport": {
-            "left": 0.3500000000000001,
-            "top": 0.7699999999999999
-          }
-        }
-      },
-      {
-        "name": "16ch",
-        "charRange": [
-          17,
-          18
-        ],
-        "overrides": {
-          "icon": {
-            "width": 0.444,
-            "left": 0.279,
-            "top": 0.348,
-            "height": 0.396
-          },
-          "country": {
-            "fontScale": 0.46699999999999986,
-            "height": 0.14,
-            "charFactor": 0.791,
-            "top": 0.17900000000000002
-          },
-          "date": {
-            "top": 0.768,
-            "left": 0.12999999999999995
-          },
-          "airport": {
-            "left": 0.3700000000000001,
-            "top": 0.7699999999999999
-          }
-        }
-      }
-    ]
+    }
   },
   "circularCityClean": {
     "default": {
+      "coordinateSpace": "frame",
       "frame": {
         "left": 0.08,
         "top": 0.06,
@@ -519,160 +189,59 @@
         "height": 0.84
       },
       "titleMode": "arc",
-      "arcDepth": 2.35,
-      "arcTextLength": 0.88,
-      "straightTitleMaxChars": 6,
-      "arcCenterYOffset": -0.05,
-      "maxCountryChars": 13,
-      "maxPlaceChars": 11,
+      "arcDepth": 0.78,
+      "arcCenterYOffset": 0,
+      "circleTitleRadius": 0.28,
+      "maxCountryChars": 60,
+      "maxPlaceChars": 0,
       "country": {
-        "left": 0.08,
-        "top": 0.07,
-        "width": 0.84,
-        "height": 0.18,
-        "fontScale": 0.56,
-        "minScale": 0.3,
-        "charFactor": 0.9,
-        "tracking": 0.24
+        "left": 0.22,
+        "top": 0.137,
+        "width": 0.56,
+        "height": 0.1,
+        "fontScale": 0.64,
+        "minScale": 0.1,
+        "charFactor": 0.73,
+        "tracking": 0.12,
+        "adaptiveLength": false
       },
       "icon": {
-        "left": 0.304,
-        "top": 0.332,
-        "width": 0.4,
-        "height": 0.359
+        "left": 0.27,
+        "top": 0.3,
+        "width": 0.46,
+        "height": 0.38
       },
       "place": {
-        "left": 0.21,
-        "top": 0.55,
-        "width": 0.58,
-        "height": 0.08,
-        "fontScale": 0.72,
-        "minScale": 0.46
+        "left": 0.5,
+        "top": 0.5,
+        "width": 0,
+        "height": 0
       },
       "date": {
-        "left": 0.21,
-        "top": 0.799,
-        "width": 0.58,
-        "height": 0.08,
-        "fontScale": 0.62,
-        "minScale": 0.48
+        "left": 0.3,
+        "top": 0.816,
+        "width": 0.4,
+        "height": 0.06,
+        "fontScale": 0.7,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       },
       "airport": {
-        "left": 0.22,
-        "top": 0.81,
-        "width": 0.56,
-        "height": 0.08,
-        "fontScale": 0.82,
-        "minScale": 0.56
+        "left": 0.37,
+        "top": 0.695,
+        "width": 0.26,
+        "height": 0.06,
+        "fontScale": 1,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       }
-    },
-    "presets": [
-      {
-        "name": "6ch",
-        "charRange": [
-          2,
-          6
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.10999999999999999
-          },
-          "date": {
-            "top": 0.719,
-            "left": 0.21
-          },
-          "airport": {
-            "top": 0.77
-          }
-        }
-      },
-      {
-        "name": "7ch",
-        "charRange": [
-          7,
-          9
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.22500000000000003
-          },
-          "date": {
-            "top": 0.709
-          },
-          "airport": {
-            "top": 0.77
-          }
-        }
-      },
-      {
-        "name": "9ch",
-        "charRange": [
-          10,
-          10
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.22500000000000003
-          },
-          "date": {
-            "top": 0.719
-          },
-          "airport": {
-            "top": 0.77
-          }
-        }
-      },
-      {
-        "name": "10ch",
-        "charRange": [
-          11,
-          14
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.192,
-            "fontScale": 0.526
-          }
-        }
-      },
-      {
-        "name": "16ch",
-        "charRange": [
-          15,
-          17
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.187,
-            "fontScale": 0.498
-          },
-          "titleMode": "arc"
-        }
-      },
-      {
-        "name": "16ch",
-        "charRange": [
-          18,
-          20
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.23300000000000004,
-            "fontScale": 0.41
-          },
-          "arcCenterYOffset": -0.08,
-          "date": {
-            "top": 0.709
-          },
-          "airport": {
-            "top": 0.77
-          }
-        }
-      }
-    ]
+    }
   },
   "circularCityDoubleLine": {
     "default": {
+      "coordinateSpace": "frame",
       "frame": {
         "left": 0.08,
         "top": 0.06,
@@ -680,185 +249,59 @@
         "height": 0.84
       },
       "titleMode": "circleArc",
-      "arcDepth": 2.4,
-      "arcTextLength": 0.9,
-      "straightTitleMaxChars": 5,
-      "arcCenterYOffset": 0.08,
-      "maxCountryChars": 13,
-      "maxPlaceChars": 11,
+      "arcDepth": 0.78,
+      "arcCenterYOffset": 0,
+      "circleTitleRadius": 0.25,
+      "maxCountryChars": 60,
+      "maxPlaceChars": 0,
       "country": {
-        "left": 0.08,
-        "top": 0.145,
-        "width": 0.84,
+        "left": 0.15,
+        "top": 0.15,
+        "width": 0.7,
         "height": 0.18,
-        "fontScale": 0.54,
-        "minScale": 0.3,
-        "charFactor": 0.92,
-        "tracking": 0.22
+        "fontScale": 0.64,
+        "minScale": 0.1,
+        "charFactor": 0.73,
+        "tracking": 0.12,
+        "adaptiveLength": false
       },
       "icon": {
-        "left": 0.35,
-        "top": 0.34,
-        "width": 0.3,
-        "height": 0.297
+        "left": 0.29,
+        "top": 0.365,
+        "width": 0.42,
+        "height": 0.29
       },
       "place": {
-        "left": 0.21,
-        "top": 0.55,
-        "width": 0.58,
-        "height": 0.08,
-        "fontScale": 0.72,
-        "minScale": 0.46
+        "left": 0.5,
+        "top": 0.5,
+        "width": 0,
+        "height": 0
       },
       "date": {
-        "left": 0.21,
-        "top": 0.632,
-        "width": 0.58,
-        "height": 0.08,
-        "fontScale": 0.62,
-        "minScale": 0.48
+        "left": 0.29,
+        "top": 0.778,
+        "width": 0.42,
+        "height": 0.055,
+        "fontScale": 0.7,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       },
       "airport": {
-        "left": 0.22,
-        "top": 0.6999999999999998,
-        "width": 0.56,
-        "height": 0.08,
-        "fontScale": 0.82,
-        "minScale": 0.56
+        "left": 0.37,
+        "top": 0.698,
+        "width": 0.26,
+        "height": 0.065,
+        "fontScale": 1,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       }
-    },
-    "presets": [
-      {
-        "name": "3ch",
-        "charRange": [
-          3,
-          3
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.165
-          },
-          "date": {
-            "top": 0.632
-          },
-          "airport": {
-            "top": 0.6999999999999998
-          }
-        }
-      },
-      {
-        "name": "6ch",
-        "charRange": [
-          6,
-          8
-        ],
-        "overrides": {
-          "frame": {
-            "top": 0.095
-          },
-          "arcCenterYOffset": 0.09999999999999999,
-          "date": {
-            "top": 0.662
-          },
-          "airport": {
-            "width": 0.56,
-            "top": 0.7299999999999999
-          }
-        }
-      },
-      {
-        "name": "9ch",
-        "charRange": [
-          9,
-          9
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.151,
-            "height": 0.18,
-            "minScale": 0.265,
-            "width": 0.845
-          },
-          "titleMode": "circleArc",
-          "arcCenterYOffset": 0.08999999999999998,
-          "date": {
-            "top": 0.642
-          },
-          "airport": {
-            "top": 0.6999999999999998
-          }
-        }
-      },
-      {
-        "name": "10ch",
-        "charRange": [
-          10,
-          10
-        ],
-        "overrides": {
-          "arcCenterYOffset": 0.04,
-          "country": {
-            "width": 0.845
-          }
-        }
-      },
-      {
-        "name": "14ch",
-        "charRange": [
-          12,
-          12
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.127,
-            "height": 0.19,
-            "width": 0.845,
-            "fontScale": 0.543
-          },
-          "arcTextLength": -0.01,
-          "straightTitleMaxChars": 5,
-          "arcCenterYOffset": 0.07
-        }
-      },
-      {
-        "name": "14ch",
-        "charRange": [
-          14,
-          14
-        ],
-        "overrides": {
-          "country": {
-            "fontScale": 0.55
-          },
-          "arcCenterYOffset": 0.05
-        }
-      },
-      {
-        "name": "16ch",
-        "charRange": [
-          16,
-          16
-        ],
-        "overrides": {
-          "arcCenterYOffset": 0.01
-        }
-      },
-      {
-        "name": "18ch",
-        "charRange": [
-          18,
-          18
-        ],
-        "overrides": {
-          "arcCenterYOffset": 0.03,
-          "arcDepth": -0.17,
-          "arcTextLength": -0.15
-        }
-      }
-    ]
+    }
   },
   "roundedImmigrationCanonical": {
     "default": {
+      "coordinateSpace": "frame",
       "frame": {
         "left": 0.04,
         "top": 0.124,
@@ -866,61 +309,59 @@
         "height": 0.73
       },
       "titleMode": "straight",
-      "maxCountryChars": 20,
-      "maxPlaceChars": 12,
+      "arcDepth": 0.78,
+      "arcCenterYOffset": 0,
+      "circleTitleRadius": 0.28,
+      "maxCountryChars": 60,
+      "maxPlaceChars": 0,
       "country": {
-        "left": 0.12,
-        "top": 0.199,
-        "width": 0.76,
-        "height": 0.141,
+        "left": 0.14,
+        "top": 0.17,
+        "width": 0.72,
+        "height": 0.115,
         "fontScale": 0.64,
-        "minScale": 0.36,
-        "charFactor": 0.82,
-        "tracking": 0.28
+        "minScale": 0.1,
+        "charFactor": 0.73,
+        "tracking": 0.12,
+        "adaptiveLength": false
       },
       "icon": {
-        "left": 0.314,
-        "top": 0.33799999999999997,
-        "width": 0.385,
-        "height": 0.353
+        "left": 0.28,
+        "top": 0.33,
+        "width": 0.44,
+        "height": 0.33
       },
       "place": {
-        "left": 0.16,
-        "top": 0.6,
-        "width": 0.68,
-        "height": 0.08,
-        "fontScale": 0.92,
-        "minScale": 0.54
+        "left": 0.5,
+        "top": 0.5,
+        "width": 0,
+        "height": 0
       },
       "date": {
-        "left": 0.07,
-        "top": 0.688,
-        "width": 0.66,
-        "height": 0.08,
-        "fontScale": 0.66,
-        "minScale": 0.5
+        "left": 0.14,
+        "top": 0.745,
+        "width": 0.48,
+        "height": 0.075,
+        "fontScale": 0.7,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       },
       "airport": {
-        "left": 0.3100000000000001,
-        "top": 0.69,
-        "width": 0.6,
-        "height": 0.07,
-        "fontScale": 0.78,
-        "minScale": 0.52
+        "left": 0.69,
+        "top": 0.745,
+        "width": 0.17,
+        "height": 0.075,
+        "fontScale": 1,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       }
-    },
-    "presets": [
-      {
-        "charRange": [
-          3,
-          3
-        ],
-        "overrides": {}
-      }
-    ]
+    }
   },
   "roundedImmigrationWithBand": {
     "default": {
+      "coordinateSpace": "frame",
       "frame": {
         "left": 0.04,
         "top": 0.137,
@@ -928,62 +369,59 @@
         "height": 0.72
       },
       "titleMode": "straight",
-      "maxCountryChars": 20,
-      "maxPlaceChars": 12,
+      "arcDepth": 0.78,
+      "arcCenterYOffset": 0,
+      "circleTitleRadius": 0.28,
+      "maxCountryChars": 60,
+      "maxPlaceChars": 0,
       "country": {
         "left": 0.12,
-        "top": 0.22500000000000003,
+        "top": 0.151,
         "width": 0.76,
-        "height": 0.097,
+        "height": 0.082,
         "fontScale": 0.64,
-        "minScale": 0.36,
-        "charFactor": 0.82,
-        "tracking": 0.28
+        "minScale": 0.1,
+        "charFactor": 0.73,
+        "tracking": 0.12,
+        "adaptiveLength": false
       },
       "icon": {
-        "left": 0.317,
-        "top": 0.356,
-        "width": 0.346,
-        "height": 0.32
+        "left": 0.27,
+        "top": 0.335,
+        "width": 0.46,
+        "height": 0.34
       },
       "place": {
-        "left": 0.16,
-        "top": 0.6,
-        "width": 0.765,
-        "height": 0.15,
-        "fontScale": 0.92,
-        "minScale": 0.54
+        "left": 0.5,
+        "top": 0.5,
+        "width": 0,
+        "height": 0
       },
       "date": {
-        "left": 0.04,
-        "top": 0.702,
-        "width": 0.66,
-        "height": 0.08,
-        "fontScale": 0.66,
-        "minScale": 0.5
+        "left": 0.14,
+        "top": 0.76,
+        "width": 0.48,
+        "height": 0.075,
+        "fontScale": 0.7,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       },
       "airport": {
-        "left": 0.2900000000000001,
-        "top": 0.71,
-        "width": 0.6,
-        "height": 0.07,
-        "fontScale": 0.78,
-        "minScale": 0.52
+        "left": 0.69,
+        "top": 0.76,
+        "width": 0.17,
+        "height": 0.075,
+        "fontScale": 1,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       }
-    },
-    "presets": [
-      {
-        "name": "6ch",
-        "charRange": [
-          6,
-          6
-        ],
-        "overrides": {}
-      }
-    ]
+    }
   },
   "shieldBadgeRounded": {
     "default": {
+      "coordinateSpace": "frame",
       "frame": {
         "left": 0.1,
         "top": 0.04,
@@ -991,113 +429,55 @@
         "height": 0.9
       },
       "titleMode": "arc",
-      "arcDepth": 0.35,
-      "arcTextLength": 0.58,
-      "maxCountryChars": 11,
-      "maxPlaceChars": 10,
+      "arcDepth": 0.78,
+      "arcCenterYOffset": 0,
+      "circleTitleRadius": 0.28,
+      "maxCountryChars": 60,
+      "maxPlaceChars": 0,
       "country": {
-        "left": 0.19,
-        "top": 0.134,
-        "width": 0.62,
-        "height": 0.13,
-        "fontScale": 0.7,
-        "minScale": 0.36,
-        "charFactor": 0.76,
-        "tracking": 0.4
+        "left": 0.12,
+        "top": 0.14,
+        "width": 0.76,
+        "height": 0.085,
+        "fontScale": 0.64,
+        "minScale": 0.1,
+        "charFactor": 0.73,
+        "tracking": 0.12,
+        "adaptiveLength": false
       },
       "icon": {
-        "left": 0.3,
-        "top": 0.296,
-        "width": 0.402,
-        "height": 0.382
+        "left": 0.26,
+        "top": 0.3,
+        "width": 0.48,
+        "height": 0.29
       },
       "place": {
-        "left": 0.2,
-        "top": 0.58,
-        "width": 0.6,
-        "height": 0.07,
-        "fontScale": 0.88,
-        "minScale": 0.52
+        "left": 0.5,
+        "top": 0.5,
+        "width": 0,
+        "height": 0
       },
       "date": {
-        "left": 0.21,
-        "top": 0.735,
-        "width": 0.58,
-        "height": 0.08,
-        "fontScale": 0.64,
-        "minScale": 0.48
+        "left": 0.24,
+        "top": 0.641,
+        "width": 0.52,
+        "height": 0.055,
+        "fontScale": 0.7,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       },
       "airport": {
-        "left": 0.22,
-        "top": 0.78,
-        "width": 0.56,
-        "height": 0.07,
-        "fontScale": 0.78,
-        "minScale": 0.52
+        "left": 0.35,
+        "top": 0.772,
+        "width": 0.3,
+        "height": 0.068,
+        "fontScale": 1,
+        "minScale": 0.1,
+        "charFactor": 0.62,
+        "adaptiveLength": false
       }
-    },
-    "presets": [
-      {
-        "charRange": [
-          3,
-          5
-        ],
-        "overrides": {
-          "date": {
-            "top": 0.695
-          },
-          "airport": {
-            "top": 0.76
-          },
-          "country": {
-            "top": 0.14400000000000002
-          }
-        }
-      },
-      {
-        "charRange": [
-          3,
-          3
-        ],
-        "overrides": {}
-      },
-      {
-        "charRange": [
-          7,
-          9
-        ],
-        "overrides": {
-          "country": {
-            "top": 0.14400000000000002,
-            "fontScale": 0.6599999999999999
-          },
-          "date": {
-            "top": 0.6849999999999999
-          },
-          "airport": {
-            "top": 0.76
-          }
-        }
-      },
-      {
-        "charRange": [
-          10,
-          12
-        ],
-        "overrides": {
-          "country": {
-            "fontScale": 0.6199999999999999,
-            "top": 0.14400000000000002
-          },
-          "date": {
-            "top": 0.6849999999999999
-          },
-          "airport": {
-            "top": 0.76
-          }
-        }
-      }
-    ]
+    }
   },
   "ticketStubNotched": {
     "default": {
@@ -1134,19 +514,22 @@
         "minScale": 0.54
       },
       "date": {
-        "left": 0.16,
-        "top": 0.71,
-        "width": 0.68,
-        "height": 0.08,
-        "minScale": 0.58
+        "left": 0.15,
+        "top": 0.685,
+        "width": 0.46,
+        "height": 0.065,
+        "fontScale": 0.7,
+        "minScale": 0.25,
+        "adaptiveLength": false
       },
       "airport": {
-        "left": 0.2,
-        "top": 0.79,
-        "width": 0.6,
-        "height": 0.07,
-        "fontScale": 0.74,
-        "minScale": 0.52
+        "left": 0.68,
+        "top": 0.685,
+        "width": 0.17,
+        "height": 0.065,
+        "fontScale": 1.02,
+        "minScale": 0.25,
+        "adaptiveLength": false
       }
     },
     "presets": []
@@ -1186,19 +569,22 @@
         "minScale": 0.5
       },
       "date": {
-        "left": 0.16,
-        "top": 0.67,
-        "width": 0.68,
-        "height": 0.07,
-        "minScale": 0.54
+        "left": 0.15,
+        "top": 0.64,
+        "width": 0.46,
+        "height": 0.065,
+        "fontScale": 0.7,
+        "minScale": 0.25,
+        "adaptiveLength": false
       },
       "airport": {
-        "left": 0.2,
-        "top": 0.75,
-        "width": 0.6,
-        "height": 0.06,
-        "fontScale": 0.7,
-        "minScale": 0.5
+        "left": 0.68,
+        "top": 0.64,
+        "width": 0.17,
+        "height": 0.065,
+        "fontScale": 1.02,
+        "minScale": 0.25,
+        "adaptiveLength": false
       }
     },
     "presets": []

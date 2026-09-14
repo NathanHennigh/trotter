@@ -1,1036 +1,1085 @@
-import React from 'react';
+import React from "react";
 import {
-  Image,
+  BackHandler,
+  FlatList,
+  KeyboardAvoidingView,
   Linking,
+  Modal,
+  Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BottomNav, IconButton, IconGlyph, PaperSurface, ScreenHeader } from '../components/trotter/TrotterKit';
-import { BottomNavTab } from '../data/trotterMock';
-import { Dream, DreamItem, DreamItemCategory, useDreams } from '../services/dreams';
-import { getApiBaseUrl, getStoredToken } from '../services/travelTrips';
-import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
-import { getMobileVisualWidth } from '../utils/mobileLayout';
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BottomNav } from "../components/trotter/TrotterKit";
+import {
+  WWButton,
+  WWEmpty,
+  WWHeader,
+  WWIcon,
+} from "../components/world-window/WorldWindowUI";
+import { CountryPostcard } from "../components/world-window/dreams/CountryPostcard";
+import { DreamEditor } from "../components/world-window/dreams/DreamEditor";
+import {
+  DreamPhoto,
+  PlaceSymbol,
+} from "../components/world-window/dreams/DreamPhoto";
+import {
+  categoryLabel,
+  cityNames,
+  countryBoards,
+  countryKey,
+  dreamCategories,
+  DreamFilter,
+  exactMapPoint,
+  filterDreams,
+  safeWebUrl,
+} from "../components/world-window/dreams/dreamPresentation";
+import { PaperMap } from "../components/world-window/trips/PaperMap";
+import type { MapPoint } from "../components/world-window/trips/tripPresentation";
+import type { BottomNavTab } from "../data/trotterMock";
+import { DreamItem, useDreams } from "../services/dreams";
+import { colors, fonts, layout } from "../theme/trotterTheme";
 
-type DreamsView =
-  | { name: 'home' }
-  | { name: 'detail'; dreamId: string }
-  | { name: 'review' };
-
-const CATEGORY_OPTIONS: DreamItemCategory[] = [
-  'restaurant',
-  'cafe',
-  'bar',
-  'hotel',
-  'attraction',
-  'activity',
-  'beach',
-  'shopping',
-  'nature',
-  'museum',
-  'event',
-  'unknown',
-];
-
-const COVER_IMAGES: Record<string, number> = {
-  France: require('../../assets/country-icons/17_france_eiffel-tower.png'),
-  Greece: require('../../assets/country-icons/21_greece_parthenon.png'),
-  Iceland: require('../../assets/country-icons/14_iceland_northern-lights.png'),
-  Italy: require('../../assets/country-icons/20_italy_colosseum.png'),
-  Japan: require('../../assets/country-icons/56_japan_mount-fuji.png'),
-  Malaysia: require('../../assets/country-icons/52_malaysia_petronas-towers.png'),
-  Mexico: require('../../assets/country-icons/03_mexico_chichen-itza.png'),
-  Morocco: require('../../assets/country-icons/35_morocco_hassan_ii_mosque.png'),
-  Portugal: require('../../assets/country-icons/19_portugal_belem-tower.png'),
-  Spain: require('../../assets/country-icons/18_spain_sagrada-familia.png'),
-  Thailand: require('../../assets/country-icons/48_thailand_wat_arun.png'),
-  'United States': require('../../assets/country-icons/01_united-states_golden-gate-bridge.png'),
-};
-
-const fallbackCoverImage = require('../../assets/objects/globe.png');
-
-export function DreamsScreen({ active, onChange }: { active: BottomNavTab; onChange: (tab: BottomNavTab) => void }) {
-  const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const visualWidth = getMobileVisualWidth(width);
-  const screenPadding = visualWidth < 390 ? 16 : layout.screenPadding;
-  const contentWidth = visualWidth - screenPadding * 2;
-  const dreamsStore = useDreams();
-  const [view, setView] = React.useState<DreamsView>({ name: 'home' });
-  const selectedDream = view.name === 'detail' ? dreamsStore.dreams.find((dream) => dream.id === view.dreamId) : undefined;
-  const selectedItems = selectedDream ? dreamsStore.items.filter((item) => item.dreamId === selectedDream.id) : [];
-
+export function DreamsScreen({
+  active,
+  onChange,
+}: {
+  active: BottomNavTab;
+  onChange: (tab: BottomNavTab) => void;
+}) {
+  const insets = useSafeAreaInsets(),
+    store = useDreams();
+  const [country, setCountry] = React.useState<{
+      key: string;
+      title: string;
+    }>(),
+    [review, setReview] = React.useState(false),
+    [capture, setCapture] = React.useState(false),
+    [selectedId, setSelectedId] = React.useState<string>();
+  const homeOffset = React.useRef(0),
+    selected = store.items.find((item) => item.id === selectedId);
+  const boards = React.useMemo(() => countryBoards(store.items), [store.items]);
+  const points = React.useMemo(
+    () =>
+      store.items
+        .map(exactMapPoint)
+        .filter((point): point is MapPoint => Boolean(point)),
+    [store.items],
+  );
+  const countryItems = React.useMemo(
+    () =>
+      store.items.filter((item) => countryKey(item.country) === country?.key),
+    [store.items, country?.key],
+  );
+  const reviews = React.useMemo(
+    () =>
+      store.items.filter(
+        (item) => item.needsReview || item.status === "failed",
+      ),
+    [store.items],
+  );
+  const back = () => {
+    setCountry(undefined);
+    setReview(false);
+  };
+  React.useEffect(() => {
+    if (!country && !review) return;
+    const handler = BackHandler.addEventListener("hardwareBackPress", () => {
+      back();
+      return true;
+    });
+    return () => handler.remove();
+  }, [country, review]);
+  const loading = store.status === "loading" || store.status === "refreshing";
+  const actions = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Save an Instagram place"
+      onPress={() => setCapture(true)}
+      style={s.icon}
+    >
+      <WWIcon name="plus" size={23} />
+    </Pressable>
+  );
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24, width: visualWidth }}
-      >
-        <ScreenHeader
-          title={view.name === 'home' ? 'DREAMS' : view.name === 'review' ? 'REVIEW' : 'DREAM'}
-          subtitle={view.name === 'home' ? 'SAVED INSPIRATION' : view.name === 'review' ? 'NEEDS REVIEW' : selectedDream?.title.toUpperCase()}
-          leftAction={
-            view.name === 'home'
-              ? <IconButton variant="paper" shape="circle" icon={<IconGlyph name="tag" color={colors.ink} size={22} />} />
-              : <BackButton onPress={() => setView({ name: 'home' })} />
-          }
-          rightActions={[
-            <IconButton key="refresh" variant="paper" shape="circle" onPress={() => dreamsStore.refresh()} icon={<Text allowFontScaling={false} style={styles.refreshIcon}>R</Text>} />,
-          ]}
+    <View style={s.screen}>
+      {country || review ? (
+        <CountryPlaces
+          key={country?.key || "review"}
+          title={review ? "To review" : country?.title || "Saved places"}
+          items={review ? reviews : countryItems}
+          review={review}
+          topInset={insets.top}
+          bottomInset={insets.bottom}
+          loading={loading}
+          error={store.error}
+          onBack={back}
+          onRefresh={() => void store.refresh()}
+          onSelect={setSelectedId}
         />
-
-        {view.name === 'home' ? (
-          <>
-            <PasteInstagramCard
-              screenPadding={screenPadding}
-              contentWidth={contentWidth}
-              onSave={(url, caption) => {
-                dreamsStore.shareInstagramLink(url, caption);
-                setView({ name: 'home' });
-              }}
+      ) : (
+        <FlatList
+          data={boards}
+          keyExtractor={(board) => board.key}
+          contentOffset={{ x: 0, y: homeOffset.current }}
+          onScroll={(event) => {
+            homeOffset.current = event.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={100}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingTop: insets.top,
+            paddingBottom: insets.bottom + layout.bottomNavHeight + 24,
+          }}
+          refreshControl={
+            <RefreshControl
+              refreshing={loading}
+              onRefresh={() => void store.refresh()}
+              tintColor={colors.blue}
             />
-            <ProcessingPanel
-              items={dreamsStore.processingItems}
-              status={dreamsStore.status}
-              error={dreamsStore.error}
-              screenPadding={screenPadding}
-              contentWidth={contentWidth}
+          }
+          initialNumToRender={4}
+          windowSize={5}
+          ListHeaderComponent={
+            <>
+              <WWHeader title="Dreams" action={actions} />
+              {reviews.length > 0 && (
+                <View style={s.homeMeta}>
+                  {reviews.length > 0 && (
+                    <Pressable
+                      onPress={() => setReview(true)}
+                      accessibilityRole="button"
+                      style={s.reviewButton}
+                    >
+                      <Text style={s.reviewText}>Review {reviews.length}</Text>
+                      <WWIcon name="chevron" size={13} color={colors.red} />
+                    </Pressable>
+                  )}
+                </View>
+              )}
+              {store.processingItems.length > 0 && (
+                <View style={s.notice}>
+                  <Text style={s.noticeText}>
+                    Reading {store.processingItems.length}{" "}
+                    {store.processingItems.length === 1
+                      ? "shared post"
+                      : "shared posts"}
+                    …
+                  </Text>
+                </View>
+              )}
+              {store.error && (
+                <ErrorLine
+                  error={store.error}
+                  onRetry={() => void store.refresh()}
+                />
+              )}
+            </>
+          }
+          renderItem={({ item }) => (
+            <CountryPostcard
+              board={item}
+              onPress={() => setCountry({ key: item.key, title: item.title })}
             />
-            <DreamsHome
-              dreams={dreamsStore.dreams}
-              status={dreamsStore.status}
-              screenPadding={screenPadding}
-              contentWidth={contentWidth}
-              onOpenDream={(dream) => setView({ name: 'detail', dreamId: dream.id })}
+          )}
+          ListEmptyComponent={
+            <WWEmpty
+              title={
+                loading ? "Loading your saved places…" : "Your next places"
+              }
+              body={
+                loading
+                  ? undefined
+                  : "Share an Instagram post to Trotter, or paste its link here. Your saves come together by country."
+              }
+              action={
+                !loading ? (
+                  <WWButton
+                    label="Save a place"
+                    onPress={() => setCapture(true)}
+                  />
+                ) : undefined
+              }
             />
-          </>
-        ) : null}
-
-        {view.name === 'detail' && selectedDream ? (
-          <DreamDetail
-            dream={selectedDream}
-            items={selectedItems}
-            screenPadding={screenPadding}
-            contentWidth={contentWidth}
-            onConfirm={dreamsStore.confirmItem}
-            onDelete={dreamsStore.deleteItem}
-            onUpdate={dreamsStore.updateItem}
-          />
-        ) : null}
-
-        {view.name === 'review' ? (
-          <ReviewInbox
-            items={dreamsStore.needsReviewItems}
-            screenPadding={screenPadding}
-            contentWidth={contentWidth}
-            onConfirm={dreamsStore.confirmItem}
-            onDelete={dreamsStore.deleteItem}
-            onUpdate={dreamsStore.updateItem}
-          />
-        ) : null}
-      </ScrollView>
+          }
+        />
+      )}
       <BottomNav active={active} onChange={onChange} />
+      {selected && (
+        <DreamEditor
+          key={selected.id}
+          item={selected}
+          points={points.filter(
+            (point) =>
+              countryKey(
+                store.items.find((item) => item.id === point.id)?.country,
+              ) === countryKey(selected.country),
+          )}
+          onClose={() => setSelectedId(undefined)}
+          onSave={store.updateItem}
+          onDelete={store.deleteItem}
+          onRetry={() =>
+            store.shareInstagramLink(selected.sourceUrl, selected.caption)
+          }
+        />
+      )}
+      {capture && (
+        <CapturePlace
+          onClose={() => setCapture(false)}
+          onSave={(url, caption) =>
+            Boolean(store.shareInstagramLink(url, caption))
+          }
+        />
+      )}
     </View>
   );
 }
 
-function PasteInstagramCard({
-  screenPadding,
-  contentWidth,
+function CountryPlaces({
+  title,
+  items,
+  review,
+  topInset,
+  bottomInset,
+  loading,
+  error,
+  onBack,
+  onRefresh,
+  onSelect,
+}: {
+  title: string;
+  items: DreamItem[];
+  review: boolean;
+  topInset: number;
+  bottomInset: number;
+  loading: boolean;
+  error?: string;
+  onBack: () => void;
+  onRefresh: () => void;
+  onSelect: (id: string) => void;
+}) {
+  const [query, setQuery] = React.useState(""),
+    [city, setCity] = React.useState(""),
+    [category, setCategory] = React.useState<DreamFilter>("All"),
+    [searching, setSearching] = React.useState(false),
+    [opened, setOpened] = React.useState<string>(),
+    [selected, setSelected] = React.useState<string>();
+  const list = React.useRef<FlatList<DreamItem>>(null);
+  const mapOffset = React.useRef(0);
+  const cities = React.useMemo(() => cityNames(items), [items]),
+    visible = React.useMemo(
+      () =>
+        filterDreams(items, query, city, category).sort(
+          (a, b) =>
+            (a.city || "").localeCompare(b.city || "") ||
+            (a.placeName || "").localeCompare(b.placeName || ""),
+        ),
+      [items, query, city, category],
+    );
+  const points = React.useMemo(
+    () =>
+      visible
+        .map(exactMapPoint)
+        .filter((point): point is MapPoint => Boolean(point)),
+    [visible],
+  );
+  React.useEffect(() => {
+    if (city && !cities.includes(city)) setCity("");
+  }, [city, cities]);
+  return (
+    <FlatList
+      ref={list}
+      data={visible}
+      keyExtractor={(item) => item.id}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={{
+        paddingTop: topInset,
+        paddingBottom: bottomInset + layout.bottomNavHeight + 24,
+      }}
+      initialNumToRender={8}
+      windowSize={7}
+      refreshControl={
+        <RefreshControl
+          refreshing={loading}
+          onRefresh={onRefresh}
+          tintColor={colors.blue}
+        />
+      }
+      ListHeaderComponent={
+        <>
+          <WWHeader
+            title="Dreams"
+            onBack={onBack}
+            action={
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  searching ? "Close search" : "Search saved places"
+                }
+                onPress={() => {
+                  setSearching(!searching);
+                  setQuery("");
+                }}
+                style={s.icon}
+              >
+                <WWIcon name={searching ? "close" : "search"} size={20} />
+              </Pressable>
+            }
+          />
+          <View style={s.countryMeta}>
+            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+              {Array.from({ length: 6 }, (_, i) => (
+                <View
+                  key={i}
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: 30 + i * 31,
+                    height: 1,
+                    backgroundColor: "#f2f0e4",
+                  }}
+                />
+              ))}
+            </View>
+            <Text style={s.countryTitle}>{title}</Text>
+            <Text style={s.meta}>
+              {items.length} saved {items.length === 1 ? "place" : "places"}
+              {cities.length
+                ? ` · ${cities.length} ${cities.length === 1 ? "city" : "cities"}`
+                : ""}
+            </Text>
+          </View>
+          {!review && (
+            <View
+              style={s.mapPaper}
+              onLayout={(event) => {
+                mapOffset.current = event.nativeEvent.layout.y;
+              }}
+            >
+              <PaperMap
+                points={points}
+                fitKey={`${title}-${city}-${category}`}
+                height={248}
+                selectedId={selected}
+                onSelect={(id) => {
+                  setSelected(id);
+                }}
+              />
+              <View style={s.mapFoot}>
+                <Text style={s.mapCount}>{points.length} on map</Text>
+                {points.length < visible.length && (
+                  <Text style={s.mapNote}>
+                    {visible.length - points.length}{" "}
+                    {visible.length - points.length === 1
+                      ? "place needs"
+                      : "places need"}{" "}
+                    a pin
+                  </Text>
+                )}
+              </View>
+              {selected && visible.find((item) => item.id === selected) && (
+                <Pressable
+                  style={s.mapSelection}
+                  onPress={() => {
+                    setOpened(selected);
+                    const index = visible.findIndex(
+                      (item) => item.id === selected,
+                    );
+                    if (index >= 0)
+                      list.current?.scrollToIndex({
+                        index,
+                        animated: true,
+                        viewPosition: 0.12,
+                      });
+                  }}
+                >
+                  <Text style={s.mapSelectionTitle}>
+                    {visible.find((item) => item.id === selected)?.placeName ||
+                      "Saved place"}
+                  </Text>
+                  <WWIcon name="arrow" size={17} />
+                </Pressable>
+              )}
+            </View>
+          )}
+          {searching && (
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search saved places"
+              accessibilityLabel="Search saved places"
+              placeholderTextColor={colors.mutedInk}
+              style={s.search}
+            />
+          )}
+          {cities.length > 1 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.cityFilters}
+            >
+              {["", ...cities].map((value) => (
+                <Pressable
+                  key={value || "all"}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: city === value }}
+                  onPress={() => setCity(value)}
+                  style={[s.city, city === value && s.cityActive]}
+                >
+                  <Text
+                    style={[s.cityText, city === value && s.cityTextActive]}
+                  >
+                    {value || "All cities"}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          )}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.categories}
+          >
+            {dreamCategories
+              .filter(
+                (value) =>
+                  value === "All" ||
+                  filterDreams(items, "", "", value).length > 0,
+              )
+              .map((value) => (
+                <Pressable
+                  key={value}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: category === value }}
+                  onPress={() => setCategory(value)}
+                  style={[s.category, category === value && s.categoryActive]}
+                >
+                  <Text
+                    style={[
+                      s.categoryText,
+                      category === value && s.categoryTextActive,
+                    ]}
+                  >
+                    {value}{" "}
+                    <Text style={s.filterCount}>
+                      {filterDreams(items, query, city, value).length}
+                    </Text>
+                  </Text>
+                </Pressable>
+              ))}
+          </ScrollView>
+          {error && <ErrorLine error={error} onRetry={onRefresh} />}
+        </>
+      }
+      onScrollToIndexFailed={({ index, averageItemLength }) =>
+        list.current?.scrollToOffset({
+          offset: mapOffset.current + 248 + averageItemLength * index,
+          animated: true,
+        })
+      }
+      renderItem={({ item, index }) => (
+        <View>
+          {(index === 0 || item.city !== visible[index - 1].city) && (
+            <View style={s.cityDivider}>
+              <Text style={s.cityHeading}>{item.city || "Saved places"}</Text>
+              <View style={s.cityRule} />
+              <Text style={s.cityCount}>
+                {visible.filter((place) => place.city === item.city).length}
+              </Text>
+            </View>
+          )}
+          <PlaceRow
+            item={item}
+            expanded={opened === item.id}
+            onPress={() => {
+              setOpened(opened === item.id ? undefined : item.id);
+              setSelected(item.id);
+            }}
+            onEdit={() => onSelect(item.id)}
+            onShowMap={() => {
+              if (!exactMapPoint(item)) {
+                onSelect(item.id);
+                return;
+              }
+              setSelected(item.id);
+              list.current?.scrollToOffset({
+                offset: mapOffset.current,
+                animated: true,
+              });
+            }}
+          />
+        </View>
+      )}
+      ListEmptyComponent={
+        <WWEmpty
+          title={
+            items.length
+              ? "No matching places"
+              : review
+                ? "All caught up"
+                : "No saved places here"
+          }
+          body={
+            items.length ? "Try another category, city or search." : undefined
+          }
+        />
+      }
+    />
+  );
+}
+function PlaceRow({
+  item,
+  onPress,
+  expanded,
+  onEdit,
+  onShowMap,
+}: {
+  item: DreamItem;
+  onPress: () => void;
+  expanded: boolean;
+  onEdit: () => void;
+  onShowMap: () => void;
+}) {
+  const processing = item.status === "processing" || item.status === "created";
+  return (
+    <View style={[s.placePaper, expanded && s.placePaperOpen]}>
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        style={({ pressed }) => [
+          s.place,
+          pressed && { backgroundColor: colors.paperDeep },
+        ]}
+      >
+        <View style={[s.thumbnail, !item.thumbnailUrl && s.symbolThumbnail]}>
+          <DreamPhoto item={item} compact />
+        </View>
+        <View style={s.placeCopy}>
+          <View style={s.placeCategory}>
+            <Text style={s.placeType}>{categoryLabel(item.category)}</Text>
+          </View>
+          <Text style={s.placeTitle} numberOfLines={2}>
+            {item.placeName || item.city || "Saved inspiration"}
+          </Text>
+          <Text style={s.placeCity} numberOfLines={1}>
+            {[item.city, item.regionOrNeighborhood]
+              .filter(Boolean)
+              .join(" · ") ||
+              item.country ||
+              "Location to review"}
+          </Text>
+          {item.status === "failed" || item.needsReview || processing ? (
+            <Text style={s.status}>
+              {processing
+                ? "Reading post…"
+                : item.status === "failed"
+                  ? "Save needs attention"
+                  : "Review place"}
+            </Text>
+          ) : (
+            !exactMapPoint(item) && <Text style={s.pinNote}>Add map pin</Text>
+          )}
+        </View>
+        <WWIcon
+          name={expanded ? "close" : "plus"}
+          size={17}
+          color={colors.mutedInk}
+        />
+      </Pressable>
+      {expanded && (
+        <View style={s.placeBody}>
+          {item.thumbnailUrl && (
+            <View style={s.expandedPhoto}>
+              <DreamPhoto item={item} />
+            </View>
+          )}
+          {item.summary ? (
+            <Text style={s.placeSummary}>{item.summary}</Text>
+          ) : null}
+          {item.regionOrNeighborhood ? (
+            <View style={s.addressLine}>
+              <WWIcon name="pin" size={15} />
+              <Text style={s.addressText}>
+                {[item.regionOrNeighborhood, item.city]
+                  .filter(Boolean)
+                  .join(", ")}
+              </Text>
+            </View>
+          ) : null}
+          <View style={s.placeActions}>
+            <Pressable onPress={onShowMap} style={s.placeAction}>
+              <Text style={s.actionText}>
+                {exactMapPoint(item) ? "Show on map" : "Add map pin"}
+              </Text>
+            </Pressable>
+            {safeWebUrl(item.sourceUrl) && (
+              <Pressable
+                onPress={() =>
+                  void Linking.openURL(safeWebUrl(item.sourceUrl)!).catch(
+                    () => {},
+                  )
+                }
+                style={s.placeAction}
+              >
+                <Text style={s.actionText}>Source ↗</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={onEdit} style={s.placeAction}>
+              <Text style={s.actionText}>Edit</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+function ErrorLine({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <Pressable onPress={onRetry} style={s.notice}>
+      <Text accessibilityRole="alert" style={s.error}>
+        {error} · Tap to retry
+      </Text>
+    </Pressable>
+  );
+}
+function CapturePlace({
+  onClose,
   onSave,
 }: {
-  screenPadding: number;
-  contentWidth: number;
-  onSave: (url: string, caption?: string) => void;
+  onClose: () => void;
+  onSave: (url: string, caption?: string) => boolean;
 }) {
-  const [url, setUrl] = React.useState('');
-  const [caption, setCaption] = React.useState('');
-  const [showCaption, setShowCaption] = React.useState(false);
-  const canSave = url.trim().length > 0;
-
+  const insets = useSafeAreaInsets(),
+    [url, setUrl] = React.useState(""),
+    [caption, setCaption] = React.useState(""),
+    [error, setError] = React.useState(false);
   return (
-    <PaperSurface radius={14} padding={spacing.md} style={[styles.pasteCard, { marginHorizontal: screenPadding, width: contentWidth }]}>
-      <View style={styles.panelHeader}>
-        <View>
-          <Text allowFontScaling={false} style={styles.panelTitle}>DEV LINK TESTER</Text>
-          <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.panelSub}>Production capture uses Instagram Share to Trotter.</Text>
-        </View>
-        <IconGlyph name="tag" color={colors.red} size={25} />
-      </View>
-      <TextInput
-        value={url}
-        onChangeText={setUrl}
-        autoCapitalize="none"
-        autoCorrect={false}
-        placeholder="instagram.com/reel/..."
-        placeholderTextColor={colors.mutedInk}
-        style={styles.input}
-      />
-      {showCaption ? (
-        <TextInput
-          value={caption}
-          onChangeText={setCaption}
-          multiline
-          placeholder="Optional caption for parser testing"
-          placeholderTextColor={colors.mutedInk}
-          style={[styles.input, styles.captionInput]}
-        />
-      ) : null}
-      <View style={styles.actionRow}>
-        <Pressable onPress={() => setShowCaption((current) => !current)} style={styles.secondaryButton}>
-          <Text allowFontScaling={false} style={styles.secondaryButtonText}>{showCaption ? 'HIDE CAPTION' : 'ADD CAPTION'}</Text>
-        </Pressable>
-        <Pressable
-          disabled={!canSave}
-          onPress={() => {
-            onSave(url, caption);
-            setUrl('');
-            setCaption('');
-          }}
-          style={[styles.primaryButton, !canSave && styles.disabledButton]}
-        >
-          <Text allowFontScaling={false} style={styles.primaryButtonText}>SAVE</Text>
-        </Pressable>
-      </View>
-    </PaperSurface>
-  );
-}
-
-function DreamsHome({
-  dreams,
-  status,
-  screenPadding,
-  contentWidth,
-  onOpenDream,
-}: {
-  dreams: Dream[];
-  status: 'idle' | 'loading' | 'refreshing' | 'error';
-  screenPadding: number;
-  contentWidth: number;
-  onOpenDream: (dream: Dream) => void;
-}) {
-  const isLoading = status === 'loading' || status === 'refreshing';
-  return (
-    <View style={{ marginHorizontal: screenPadding, width: contentWidth, marginTop: spacing.lg }}>
-      <Text allowFontScaling={false} style={styles.sectionTitle}>DESTINATIONS</Text>
-      {dreams.length === 0 && isLoading ? (
-        <PaperSurface radius={12} padding={spacing.lg} style={styles.emptyDreamsPanel}>
-          <Text allowFontScaling={false} style={styles.emptyDreamsTitle}>LOADING DREAMS</Text>
-          <Text maxFontSizeMultiplier={1.05} style={styles.emptyDreamsSub}>Pulling your saved travel ideas from Trotter.</Text>
-        </PaperSurface>
-      ) : dreams.length === 0 ? (
-        <PaperSurface radius={12} padding={spacing.lg} style={styles.emptyDreamsPanel}>
-          <Text allowFontScaling={false} style={styles.emptyDreamsTitle}>NO DREAMS YET</Text>
-          <Text maxFontSizeMultiplier={1.05} style={styles.emptyDreamsSub}>Share or paste an Instagram travel post to start building your saved ideas.</Text>
-        </PaperSurface>
-      ) : (
-        <View style={styles.dreamGrid}>
-          {dreams.map((dream) => (
-            <DreamCard key={dream.id} dream={dream} onPress={() => onOpenDream(dream)} />
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
-function ProcessingPanel({
-  items,
-  status,
-  error,
-  screenPadding,
-  contentWidth,
-}: {
-  items: DreamItem[];
-  status: 'idle' | 'loading' | 'refreshing' | 'error';
-  error?: string;
-  screenPadding: number;
-  contentWidth: number;
-}) {
-  const isRefreshing = status === 'loading' || status === 'refreshing';
-  if (items.length === 0 && !isRefreshing && !error) return null;
-
-  const title = items.length > 1 ? `${items.length} ideas processing` : items.length === 1 ? '1 idea processing' : isRefreshing ? 'Refreshing Dreams' : 'Dreams needs attention';
-  const subtitle = error
-    ? error
-    : items.length > 0
-      ? 'Fetching caption metadata, parsing the place, and attaching a Maps link.'
-      : 'Checking the latest saved ideas from the backend.';
-
-  return (
-    <PaperSurface radius={12} padding={spacing.md} style={[styles.processingPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
-      <View style={styles.processingTop}>
-        <View style={styles.processingPulse}>
-          <View style={styles.processingDot} />
-        </View>
-        <View style={styles.processingCopy}>
-          <Text allowFontScaling={false} numberOfLines={1} style={styles.processingTitle}>{title.toUpperCase()}</Text>
-          <Text maxFontSizeMultiplier={1.05} numberOfLines={2} style={styles.processingSub}>{subtitle}</Text>
-        </View>
-      </View>
-      {items.length > 0 ? (
-        <View style={styles.processingList}>
-          {items.slice(0, 3).map((item) => (
-            <Text key={item.id} maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.processingItem}>
-              {item.sourceUrl.replace(/^https?:\/\/(www\.)?/i, '')}
-            </Text>
-          ))}
-        </View>
-      ) : null}
-    </PaperSurface>
-  );
-}
-
-function DreamCard({ dream, onPress }: { dream: Dream; onPress: () => void }) {
-  const visual = dreamVisual(dream.country, dream.city, dream.title);
-  const destinationLine = [dream.city, dream.region, dream.country].filter(Boolean).join(', ') || 'Saved inspiration';
-  return (
-    <Pressable onPress={onPress} style={styles.dreamCardWrap}>
-      <PaperSurface radius={10} padding={0} style={styles.dreamCard}>
-        <View style={styles.dreamPhotoWrap}>
-          <Image source={visual.image} resizeMode="cover" style={styles.dreamPhoto} />
-          <View style={[styles.photoWash, { backgroundColor: visual.tint }]} />
-        </View>
-        <View style={styles.dreamCardBody}>
-          <View style={styles.dreamCardTop}>
-            <View style={styles.dreamCardCopy}>
-              <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.dreamTitle}>{dream.title}</Text>
-              <Text allowFontScaling={false} numberOfLines={1} style={styles.dreamMeta}>{destinationLine}</Text>
-            </View>
-            <Text allowFontScaling={false} style={styles.cardMenu}>...</Text>
-          </View>
-          <View style={styles.dreamBottomRow}>
-            <Text allowFontScaling={false} numberOfLines={1} style={styles.ideaCount}>{dream.itemCount} {dream.itemCount === 1 ? 'idea' : 'ideas'}</Text>
-            {dream.processingCount > 0 ? <StatusBadge label="processing" tone="processing" /> : null}
-          </View>
-        </View>
-      </PaperSurface>
-    </Pressable>
-  );
-}
-
-function DreamDetail({
-  dream,
-  items,
-  screenPadding,
-  contentWidth,
-  onConfirm,
-  onDelete,
-  onUpdate,
-}: {
-  dream: Dream;
-  items: DreamItem[];
-  screenPadding: number;
-  contentWidth: number;
-  onConfirm: (id: string) => void;
-  onDelete: (id: string) => void;
-  onUpdate: (id: string, patch: Partial<DreamItem>) => void;
-}) {
-  return (
-    <View style={{ marginHorizontal: screenPadding, width: contentWidth }}>
-      <PaperSurface radius={14} padding={spacing.md} style={styles.detailSummary}>
-        <Text allowFontScaling={false} style={styles.panelTitle}>{dream.title.toUpperCase()}</Text>
-        <Text maxFontSizeMultiplier={1.05} style={styles.panelSub}>{dream.itemCount} saved ideas</Text>
-      </PaperSurface>
-      <View style={styles.itemList}>
-        {items.map((item) => (
-          <DreamItemCard key={item.id} item={item} onConfirm={onConfirm} onDelete={onDelete} onUpdate={onUpdate} />
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function ReviewInbox({
-  items,
-  screenPadding,
-  contentWidth,
-  onConfirm,
-  onDelete,
-  onUpdate,
-}: {
-  items: DreamItem[];
-  screenPadding: number;
-  contentWidth: number;
-  onConfirm: (id: string) => void;
-  onDelete: (id: string) => void;
-  onUpdate: (id: string, patch: Partial<DreamItem>) => void;
-}) {
-  return (
-    <View style={{ marginHorizontal: screenPadding, width: contentWidth }}>
-      {items.length === 0 ? (
-        <PaperSurface radius={14} padding={spacing.lg} style={styles.emptyPanel}>
-          <Text allowFontScaling={false} style={styles.panelTitle}>ALL CLEAR</Text>
-          <Text maxFontSizeMultiplier={1.05} style={styles.panelSub}>Saved ideas that need review will show up here.</Text>
-        </PaperSurface>
-      ) : (
-        <View style={styles.itemList}>
-          {items.map((item) => (
-            <DreamItemCard key={item.id} item={item} reviewMode onConfirm={onConfirm} onDelete={onDelete} onUpdate={onUpdate} />
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
-function DreamItemCard({
-  item,
-  onConfirm,
-  onDelete,
-  onUpdate,
-  reviewMode,
-}: {
-  item: DreamItem;
-  onConfirm: (id: string) => void;
-  onDelete: (id: string) => void;
-  onUpdate: (id: string, patch: Partial<DreamItem>) => void;
-  reviewMode?: boolean;
-}) {
-  const [editing, setEditing] = React.useState(false);
-  const visual = dreamVisual(item.country, item.city, item.placeName || item.country || item.city, item.thumbnailUrl);
-
-  return (
-    <PaperSurface radius={10} padding={0} style={styles.itemCard}>
-      <View style={styles.itemCardInner}>
-        <View style={styles.itemPhotoWrap}>
-          <Image source={visual.image} resizeMode="cover" style={styles.itemPhoto} />
-          <View style={[styles.itemPhotoTint, { backgroundColor: visual.tint }]} />
-        </View>
-        <View style={styles.itemCopy}>
-          <View style={styles.itemTop}>
-            <View style={styles.itemTitleBlock}>
-              <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.itemTitle}>
-                {item.placeName || item.city || item.country || 'Instagram idea'}
-              </Text>
-              <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.itemLocation}>{[item.city, item.country].filter(Boolean).join(', ') || 'Unsorted'}</Text>
-            </View>
-            {item.status === 'processing' ? <StatusBadge label="processing" tone="processing" /> : null}
-            {item.status === 'failed' ? <StatusBadge label="failed" tone="failed" /> : null}
-          </View>
-          <Text maxFontSizeMultiplier={1.05} numberOfLines={3} style={styles.itemSummary}>{item.summary}</Text>
-          <View style={styles.itemMetaRow}>
-            <Text allowFontScaling={false} numberOfLines={1} style={styles.categoryChip}>{item.category.toUpperCase()}</Text>
-          </View>
-        </View>
-      </View>
-      {editing || reviewMode ? (
-        <View style={styles.itemEditorWrap}>
-          <DreamItemEditor item={item} onUpdate={onUpdate} onDone={() => setEditing(false)} />
-        </View>
-      ) : null}
-      <View style={styles.itemActions}>
-        <Pressable onPress={() => Linking.openURL(item.sourceUrl).catch(() => undefined)} style={styles.textButton}>
-          <Text allowFontScaling={false} style={styles.textButtonText}>SOURCE</Text>
-        </Pressable>
-        <Pressable onPress={() => setEditing((current) => !current)} style={styles.textButton}>
-          <Text allowFontScaling={false} style={styles.textButtonText}>{editing ? 'CLOSE' : 'EDIT'}</Text>
-        </Pressable>
-        {item.googleMapsUrl ? (
-          <Pressable onPress={() => Linking.openURL(item.googleMapsUrl as string).catch(() => undefined)} style={styles.confirmButton}>
-            <Text allowFontScaling={false} style={styles.confirmButtonText}>MAPS</Text>
-          </Pressable>
-        ) : null}
-        <Pressable onPress={() => onDelete(item.id)} style={styles.deleteButton}>
-          <Text allowFontScaling={false} style={styles.deleteButtonText}>DELETE</Text>
-        </Pressable>
-      </View>
-    </PaperSurface>
-  );
-}
-
-function BackButton({ onPress }: { onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={styles.backButton}>
-      <Text allowFontScaling={false} style={styles.backArrow}>‹</Text>
-    </Pressable>
-  );
-}
-
-function dreamVisual(country?: string, city?: string, title?: string, thumbnailUrl?: string) {
-  const image = thumbnailUrl
-    ? {
-        uri: thumbnailUrl.startsWith('http') ? thumbnailUrl : `${getApiBaseUrl()}${thumbnailUrl}`,
-        headers: {
-          ...(getStoredToken() ? { Authorization: `Bearer ${getStoredToken()}` } : {}),
-          'ngrok-skip-browser-warning': 'true',
-        },
-      }
-    : (country && COVER_IMAGES[country]) || fallbackCoverImage;
-  const key = (country || city || title || '').toLowerCase();
-  const accent = key.includes('japan') ? colors.red : key.includes('mexico') ? colors.green : key.includes('guatemala') ? colors.teal : key.includes('portugal') ? colors.blue : colors.brass;
-  const tint = key.includes('guatemala') ? 'rgba(79,135,128,0.18)' : key.includes('japan') ? 'rgba(182,84,63,0.15)' : 'rgba(21,20,18,0.08)';
-  return { image, accent, tint };
-}
-
-function DreamItemEditor({
-  item,
-  onUpdate,
-  onDone,
-}: {
-  item: DreamItem;
-  onUpdate: (id: string, patch: Partial<DreamItem>) => void;
-  onDone: () => void;
-}) {
-  const [placeName, setPlaceName] = React.useState(item.placeName ?? '');
-  const [city, setCity] = React.useState(item.city ?? '');
-  const [country, setCountry] = React.useState(item.country ?? '');
-  const [summary, setSummary] = React.useState(item.summary);
-  const [category, setCategory] = React.useState<DreamItemCategory>(item.category);
-
-  return (
-    <View style={styles.editor}>
-      <TextInput value={placeName} onChangeText={setPlaceName} placeholder="Place name" placeholderTextColor={colors.mutedInk} style={styles.editorInput} />
-      <View style={styles.editorRow}>
-        <TextInput value={city} onChangeText={setCity} placeholder="City" placeholderTextColor={colors.mutedInk} style={[styles.editorInput, styles.editorHalf]} />
-        <TextInput value={country} onChangeText={setCountry} placeholder="Country" placeholderTextColor={colors.mutedInk} style={[styles.editorInput, styles.editorHalf]} />
-      </View>
-      <TextInput value={summary} onChangeText={setSummary} multiline placeholder="Summary" placeholderTextColor={colors.mutedInk} style={[styles.editorInput, styles.editorSummary]} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroller}>
-        {CATEGORY_OPTIONS.map((option) => (
-          <Pressable key={option} onPress={() => setCategory(option)} style={[styles.categoryOption, category === option && styles.categoryOptionActive]}>
-            <Text allowFontScaling={false} style={[styles.categoryOptionText, category === option && styles.categoryOptionTextActive]}>{option}</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-      <Pressable
-        onPress={() => {
-          onUpdate(item.id, {
-            placeName: placeName.trim() || undefined,
-            city: city.trim() || undefined,
-            country: country.trim() || undefined,
-            summary: summary.trim() || item.summary,
-            category,
-            needsReview: !(placeName.trim() && (city.trim() || country.trim())),
-            status: placeName.trim() && (city.trim() || country.trim()) ? 'parsed' : 'needs_review',
-          });
-          onDone();
-        }}
-        style={styles.editorSave}
+    <Modal
+      visible
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <KeyboardAvoidingView
+        style={[s.screen, { paddingTop: insets.top }]}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Text allowFontScaling={false} style={styles.editorSaveText}>SAVE EDITS</Text>
-      </Pressable>
-    </View>
+        <WWHeader
+          title="Save a place"
+          action={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              onPress={onClose}
+              style={s.icon}
+            >
+              <WWIcon name="close" />
+            </Pressable>
+          }
+        />
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
+        >
+          <Text style={s.captureBody}>
+            Paste an Instagram post or reel. You can also share directly to
+            Trotter from Instagram.
+          </Text>
+          <Text style={s.inputLabel}>Instagram link</Text>
+          <TextInput
+            autoFocus
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            value={url}
+            onChangeText={(value) => {
+              setUrl(value);
+              setError(false);
+            }}
+            placeholder="https://www.instagram.com/reel/…"
+            placeholderTextColor={colors.mutedInk}
+            accessibilityLabel="Instagram link"
+            style={s.captureInput}
+          />
+          <Text style={s.inputLabel}>Caption (optional)</Text>
+          <TextInput
+            value={caption}
+            onChangeText={setCaption}
+            multiline
+            placeholder="Add the original caption to help identify the place"
+            placeholderTextColor={colors.mutedInk}
+            accessibilityLabel="Original caption"
+            style={[s.captureInput, s.caption]}
+          />
+          {error && (
+            <Text accessibilityRole="alert" style={s.error}>
+              Paste a valid Instagram post or reel link.
+            </Text>
+          )}
+          <View style={{ marginTop: 20 }}>
+            <WWButton
+              label="Save place"
+              disabled={!url.trim()}
+              onPress={() => {
+                if (onSave(url, caption)) onClose();
+                else setError(true);
+              }}
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
-function StatusBadge({ label, tone }: { label: string; tone: 'review' | 'confirmed' | 'processing' | 'failed' }) {
-  const color = tone === 'review' || tone === 'failed' ? colors.red : tone === 'confirmed' ? colors.green : colors.mustard;
-  return (
-    <View style={[styles.statusBadge, { borderColor: color }]}>
-      <Text allowFontScaling={false} numberOfLines={1} style={[styles.statusBadgeText, { color }]}>{label.toUpperCase()}</Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.paperSoft,
-  },
-  backButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.dashboard,
+const s = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.paperSoft },
+  icon: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
-    borderColor: colors.darkBorder,
+    borderColor: colors.paperBorder,
+    borderRadius: 22,
   },
-  backArrow: {
-    color: colors.brassSoft,
-    fontFamily: fonts.sansBold,
-    fontSize: 34,
-    lineHeight: 38,
-    marginTop: -2,
+  homeMeta: {
+    marginHorizontal: 24,
+    marginTop: -9,
+    marginBottom: 23,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
   },
-  refreshIcon: {
-    color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 22,
-  },
-  pasteCard: {
-    marginTop: spacing.sm,
-    opacity: 0.92,
-  },
-  processingPanel: {
-    marginTop: spacing.md,
-    gap: spacing.sm,
-    borderColor: colors.mustard,
-  },
-  processingTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  processingPulse: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: colors.mustard,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  processingDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.mustard,
-  },
-  processingCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  processingTitle: {
-    color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-    letterSpacing: 1,
-  },
-  processingSub: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansRegular,
-    fontSize: 12,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  processingList: {
-    borderTopWidth: 1,
-    borderTopColor: colors.paperBorder,
-    paddingTop: spacing.sm,
+  meta: { fontFamily: fonts.sansRegular, fontSize: 11, color: colors.mutedInk },
+  reviewButton: {
+    minHeight: 35,
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
   },
-  processingItem: {
-    color: colors.mutedInk,
-    fontFamily: fonts.mono,
-    fontSize: 10,
-  },
-  panelHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  panelTitle: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-    letterSpacing: 1,
-  },
-  panelSub: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansRegular,
-    fontSize: 12,
-    marginTop: 3,
-  },
-  input: {
-    minHeight: 44,
-    marginTop: spacing.md,
-    borderRadius: 8,
+  reviewText: { fontFamily: fonts.sansSemi, fontSize: 11, color: colors.red },
+  notice: {
+    marginHorizontal: 24,
+    marginBottom: 18,
+    padding: 12,
     borderWidth: 1,
     borderColor: colors.paperBorder,
-    backgroundColor: colors.paperSoft,
+    backgroundColor: colors.paper,
+  },
+  noticeText: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 12,
+    color: colors.mutedInk,
+  },
+  error: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.red,
+  },
+  countryMeta: {
+    marginHorizontal: 20,
+    marginTop: 4,
+    marginBottom: 15,
+    paddingHorizontal: 17,
+    paddingTop: 17,
+    paddingBottom: 22,
+    borderWidth: 1,
+    borderColor: "#d0d1bf",
+    backgroundColor: "#fffdf5",
+    overflow: "hidden",
+  },
+  countryTitle: {
+    fontFamily: fonts.display,
+    fontStyle: "italic",
+    fontSize: 43,
+    lineHeight: 47,
+    letterSpacing: -1,
     color: colors.ink,
+    marginBottom: 9,
+    includeFontPadding: false,
+  },
+  mapPaper: {
+    marginHorizontal: 24,
+    padding: 0,
+    paddingBottom: 0,
+    borderWidth: 1,
+    borderColor: colors.paperBorder,
+    backgroundColor: "#fcfaf3",
+    marginBottom: 18,
+  },
+  mapFoot: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 11,
+  },
+  mapCount: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 11,
+    color: colors.mutedInk,
+  },
+  mapSelection: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.paperBorder,
+  },
+  mapSelectionTitle: {
+    flex: 1,
+    fontFamily: fonts.display,
+    fontSize: 23,
+    color: colors.ink,
+  },
+  mapNote: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 10,
+    color: colors.mutedInk,
+    flexShrink: 1,
+  },
+  search: {
+    marginHorizontal: 24,
+    minHeight: 46,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: colors.paperBorder,
     fontFamily: fonts.sansRegular,
     fontSize: 14,
-    paddingHorizontal: spacing.md,
-  },
-  captionInput: {
-    minHeight: 78,
-    paddingTop: spacing.sm,
-    textAlignVertical: 'top',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  primaryButton: {
-    minHeight: 40,
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    backgroundColor: colors.dashboard,
-  },
-  disabledButton: {
-    opacity: 0.45,
-  },
-  primaryButtonText: {
-    color: colors.creamText,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-  },
-  secondaryButton: {
-    minHeight: 40,
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
-  },
-  secondaryButtonText: {
     color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-  },
-  reviewCallout: {
-    minHeight: 78,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.red,
     backgroundColor: colors.paper,
-    padding: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  reviewCalloutTitle: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 13,
-  },
-  reviewCalloutSub: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansRegular,
-    fontSize: 12,
-    marginTop: 3,
-  },
-  reviewCalloutCount: {
-    color: colors.red,
-    fontFamily: fonts.display,
-    fontSize: 36,
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 13,
-    letterSpacing: 1,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  dreamGrid: {
-    gap: spacing.md,
-  },
-  emptyDreamsPanel: {
-    minHeight: 110,
-    justifyContent: 'center',
-  },
-  emptyDreamsTitle: {
-    color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-    letterSpacing: 1,
-  },
-  emptyDreamsSub: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 5,
-  },
-  dreamCardWrap: {
-    width: '100%',
-    minWidth: 0,
-  },
-  dreamCard: {
-    minHeight: 148,
-    flexDirection: 'row',
-    overflow: 'hidden',
-  },
-  dreamPhotoWrap: {
-    width: 122,
-    minHeight: 148,
-    backgroundColor: colors.paperDeep,
-    borderRightWidth: 1,
-    borderRightColor: colors.paperBorder,
-    overflow: 'hidden',
-  },
-  dreamPhoto: {
-    width: '100%',
-    height: '100%',
-    position: 'absolute',
-  },
-  photoWash: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  dreamCardBody: {
-    flex: 1,
-    minWidth: 0,
-    padding: spacing.md,
-    justifyContent: 'space-between',
-  },
-  dreamCardTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-  dreamCardCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  dreamTitle: {
-    color: colors.ink,
-    fontFamily: fonts.display,
-    fontSize: 29,
-    lineHeight: 32,
-  },
-  dreamMeta: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-    marginTop: 3,
-  },
-  cardMenu: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansBold,
-    fontSize: 18,
-    lineHeight: 18,
-  },
-  dreamBottomRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  ideaCount: {
-    color: colors.mutedInk,
-    fontFamily: fonts.mono,
-    fontSize: 12,
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-    marginTop: spacing.md,
-    marginLeft: 4,
-  },
-  detailSummary: {
-    marginTop: spacing.sm,
-  },
-  itemList: {
-    gap: spacing.md,
-    marginTop: spacing.md,
-  },
-  itemCard: {
-    overflow: 'hidden',
-  },
-  itemCardInner: {
-    flexDirection: 'row',
-    minHeight: 148,
-  },
-  itemPhotoWrap: {
-    width: 116,
-    backgroundColor: colors.paperDeep,
-    borderRightWidth: 1,
-    borderRightColor: colors.paperBorder,
-    overflow: 'hidden',
-  },
-  itemPhoto: {
-    width: '100%',
-    height: '100%',
-    position: 'absolute',
-  },
-  itemPhotoTint: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  itemCopy: {
-    flex: 1,
-    minWidth: 0,
-    padding: spacing.md,
-  },
-  itemTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-  itemTitleBlock: {
-    flex: 1,
-    minWidth: 0,
-  },
-  itemTitle: {
-    color: colors.ink,
-    fontFamily: fonts.display,
-    fontSize: 25,
-    lineHeight: 28,
-  },
-  itemSummary: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: spacing.sm,
-  },
-  itemMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  categoryChip: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 10,
+  cityFilters: { paddingHorizontal: 24, gap: 7, paddingBottom: 12 },
+  city: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderWidth: 1,
     borderColor: colors.paperBorder,
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
+    borderRadius: 3,
   },
-  itemLocation: {
-    flex: 1,
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  itemActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.paperBorder,
-    padding: spacing.sm,
-    paddingTop: spacing.sm,
-  },
-  itemEditorWrap: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
-  },
-  textButton: {
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  textButtonText: {
-    color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 10,
-  },
-  confirmButton: {
-    borderRadius: 7,
-    backgroundColor: colors.green,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  confirmButtonText: {
-    color: colors.creamText,
-    fontFamily: fonts.sansBold,
-    fontSize: 10,
-  },
-  deleteButton: {
-    borderRadius: 7,
-    backgroundColor: colors.red,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  deleteButtonText: {
-    color: colors.creamText,
-    fontFamily: fonts.sansBold,
-    fontSize: 10,
-  },
-  statusBadge: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  statusBadgeText: {
-    fontFamily: fonts.sansBold,
-    fontSize: 9,
-  },
-  editor: {
-    borderTopWidth: 1,
-    borderTopColor: colors.paperBorder,
-    paddingTop: spacing.sm,
-    gap: spacing.sm,
-  },
-  editorRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  editorInput: {
-    minHeight: 40,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
-    backgroundColor: colors.paperSoft,
-    color: colors.ink,
+  cityActive: { borderColor: colors.blue, backgroundColor: "#e5e9e0" },
+  cityText: {
     fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    paddingHorizontal: spacing.sm,
-  },
-  editorHalf: {
-    flex: 1,
-  },
-  editorSummary: {
-    minHeight: 68,
-    paddingTop: spacing.sm,
-    textAlignVertical: 'top',
-  },
-  categoryScroller: {
-    flexGrow: 0,
-  },
-  categoryOption: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    marginRight: spacing.sm,
-  },
-  categoryOptionActive: {
-    backgroundColor: colors.dashboard,
-    borderColor: colors.dashboard,
-  },
-  categoryOptionText: {
-    color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 10,
-  },
-  categoryOptionTextActive: {
-    color: colors.creamText,
-  },
-  editorSave: {
-    minHeight: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    backgroundColor: colors.dashboard,
-  },
-  editorSaveText: {
-    color: colors.creamText,
-    fontFamily: fonts.sansBold,
     fontSize: 11,
+    color: colors.mutedInk,
   },
-  emptyPanel: {
-    marginTop: spacing.sm,
+  cityTextActive: { color: colors.blue },
+  categories: { paddingHorizontal: 24, gap: 7, marginBottom: 16 },
+  category: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: colors.paperBorder,
+    borderRadius: 3,
   },
-  reviewBadge: {
-    minWidth: 68,
-    alignItems: 'center',
-  },
-  reviewBadgeValue: {
-    color: colors.ink,
-    fontFamily: fonts.mono,
+  categoryActive: { borderColor: colors.blue, backgroundColor: "#e4eade" },
+  categoryText: {
+    fontFamily: fonts.sansRegular,
     fontSize: 12,
+    color: colors.mutedInk,
   },
-  reviewBadgeLabel: {
+  categoryTextActive: { color: colors.blue, fontFamily: fonts.sansSemi },
+  filterCount: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 11,
+    color: colors.mutedInk,
+  },
+  cityDivider: {
+    marginHorizontal: 24,
+    marginTop: 15,
+    marginBottom: 13,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  cityHeading: {
+    fontFamily: fonts.display,
+    fontStyle: "italic",
+    fontSize: 25,
+    lineHeight: 29,
+    color: colors.ink,
+    includeFontPadding: false,
+  },
+  cityRule: { flex: 1, height: 1, backgroundColor: colors.paperBorder },
+  cityCount: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 12,
+    color: colors.mutedInk,
+  },
+  placePaper: {
+    marginHorizontal: 24,
+    marginBottom: 9,
+    borderWidth: 1,
+    borderColor: "#d2d4c3",
+    backgroundColor: "#fffdf5",
+    shadowColor: "#284e62",
+    shadowOpacity: 0.03,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 1,
+  },
+  placePaperOpen: { borderColor: "#9eb1a8" },
+  listHeading: {
+    marginHorizontal: 24,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.paperBorder,
+  },
+  sectionLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1,
+    color: colors.blue,
+  },
+  listCount: { fontFamily: fonts.mono, fontSize: 9, color: colors.mutedInk },
+  place: {
+    paddingVertical: 13,
+    paddingHorizontal: 12,
+    minHeight: 96,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  thumbnail: {
+    width: 56,
+    height: 65,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: "#d0d2bf",
+    backgroundColor: "#fffdf5",
+    transform: [{ rotate: "-2deg" }],
+    overflow: "hidden",
+  },
+  symbolThumbnail: {
+    padding: 0,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    transform: [{ rotate: "0deg" }],
+  },
+  placeCopy: { flex: 1, minWidth: 0 },
+  placeCategory: {
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+    marginBottom: 5,
+  },
+  placeType: {
+    fontFamily: fonts.sans,
+    fontSize: 11,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    color: colors.blue,
+  },
+  placeTitle: {
+    fontFamily: fonts.display,
+    fontSize: 23,
+    lineHeight: 26,
+    color: colors.ink,
+    letterSpacing: -0.35,
+    includeFontPadding: false,
+  },
+  placeCity: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 12,
+    color: colors.mutedInk,
+    marginTop: 6,
+  },
+  status: {
+    fontFamily: fonts.sansSemi,
+    fontSize: 10,
     color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 8,
+    marginTop: 6,
   },
+  pinNote: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 9,
+    color: colors.mutedInk,
+    marginTop: 6,
+  },
+  placeBody: {
+    marginHorizontal: 12,
+    paddingHorizontal: 1,
+    paddingBottom: 13,
+    borderTopWidth: 1,
+    borderTopColor: "#d2d4c3",
+    borderStyle: "dashed",
+  },
+  expandedPhoto: { height: 176, marginTop: 17, marginBottom: 14 },
+  placeSummary: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 14,
+    lineHeight: 23,
+    color: colors.mutedInk,
+    marginVertical: 13,
+  },
+  addressLine: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "flex-start",
+    marginTop: 9,
+  },
+  addressText: {
+    flex: 1,
+    fontFamily: fonts.sansRegular,
+    fontSize: 13,
+    lineHeight: 21,
+    color: colors.mutedInk,
+  },
+  placeActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 13,
+    marginTop: 10,
+  },
+  placeAction: { minHeight: 44, justifyContent: "center" },
+  actionText: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 12,
+    color: colors.ink,
+  },
+  captureBody: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 15,
+    lineHeight: 23,
+    color: colors.mutedInk,
+    marginBottom: 26,
+  },
+  inputLabel: {
+    fontFamily: fonts.sansSemi,
+    fontSize: 12,
+    color: colors.ink,
+    marginBottom: 8,
+    marginTop: 16,
+  },
+  captureInput: {
+    minHeight: 48,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderColor: colors.paperBorder,
+    borderWidth: 1,
+    borderRadius: 3,
+    backgroundColor: colors.paper,
+    fontFamily: fonts.sansRegular,
+    fontSize: 14,
+    color: colors.ink,
+  },
+  caption: { minHeight: 110, textAlignVertical: "top" },
 });

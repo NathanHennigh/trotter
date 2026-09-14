@@ -198,6 +198,40 @@ def test_dream_thumbnail_uses_stable_authenticated_endpoint(client, test_user, t
     assert thumbnail.content == b"jpeg-data"
 
 
+def test_review_location_change_invalidates_old_pin_but_keeps_provenance(client, test_user, test_db):
+    created = client.post("/dreams/share", json={"source_url": "https://instagram.com/reel/moved-pin", "shared_text": "Casa Dani Madrid"}).json()
+    item = test_db.query(DreamItem).filter(DreamItem.id == created["dream_item_id"]).one()
+    old_metadata = {"place_match": {"raw": {"location": {"latitude": 40.4, "longitude": -3.7}}}, "instagram_metadata": {"caption": "Original source"}}
+    item.raw_metadata_json = old_metadata
+    item.google_place_id = "old-place"
+    item.google_maps_url = "https://www.google.com/maps/?q=40.4,-3.7"
+    test_db.commit()
+    response = client.post(f"/dream-items/{item.id}/review", json={"decision": "confirm", "edits": {"city": "Barcelona", "google_maps_url": item.google_maps_url}})
+    assert response.status_code == 200
+    assert response.json()["latitude"] is None
+    assert response.json()["google_maps_url"] is None
+    test_db.refresh(item)
+    assert item.google_place_id is None
+    assert item.raw_metadata_json["instagram_metadata"] == old_metadata["instagram_metadata"]
+    assert item.raw_metadata_json["previous_place_matches"][0]["place_match"] == old_metadata["place_match"]
+    assert test_db.query(DreamItem).count() == 1
+    assert item.city == "Barcelona"
+
+
+def test_review_manual_pin_persists_and_notes_edit_keeps_it(client, test_user, test_db):
+    created = client.post("/dreams/share", json={"source_url": "https://instagram.com/reel/manual-pin", "shared_text": "Casa Dani Madrid"}).json()
+    endpoint = f"/dream-items/{created['dream_item_id']}/review"
+    response = client.post(endpoint, json={"edits": {"google_maps_url": "https://www.google.com/maps/search/?query=40.4%2C-3.7"}})
+    assert response.status_code == 200
+    assert response.json()["latitude"] == 40.4
+    assert response.json()["longitude"] == -3.7
+    response = client.post(endpoint, json={"edits": {"summary": "Try the tortilla"}})
+    assert response.json()["latitude"] == 40.4
+    listed = client.get("/dream-items").json()
+    assert listed[0]["latitude"] == 40.4
+    assert listed[0]["summary"] == "Try the tortilla"
+
+
 def test_review_confirm_applies_edits(client, test_user, test_db):
     created = client.post(
         "/dreams/share",

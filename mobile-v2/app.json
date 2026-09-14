@@ -5,11 +5,13 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "scheme": "trotterv2",
-    "userInterfaceStyle": "dark",
-    "icon": "./assets/app-icon.png",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/world-window/app-icon.png",
     "newArchEnabled": true,
     "plugins": [
-      "expo-font"
+      "expo-font",
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "ios": {
       "supportsTablet": true,
@@ -18,8 +20,8 @@
     "android": {
       "package": "com.trotter.mobilev2",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/app-icon.png",
-        "backgroundColor": "#090B0D"
+        "foregroundImage": "./assets/world-window/app-icon.png",
+        "backgroundColor": "#FAF8F2"
       }
     },
     "extra": {

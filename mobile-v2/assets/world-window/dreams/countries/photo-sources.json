@@ -1,0 +1,472 @@
+[
+  {
+    "code": "CH",
+    "country": "Switzerland",
+    "title": "Lauterbrunnen village and the Alps",
+    "photographer": "Daniel Cox",
+    "sourcePage": "https://unsplash.com/photos/assorted-houses-by-a-forest-and-mountains-AbIPvuEKRcY",
+    "imageUrl": "https://images.unsplash.com/photo-1571274793214-675177edf552?fm=jpg&q=92&w=2400",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:47.347Z",
+    "sourceEvidence": "Individual source identifies Lauterbrunnen, Switzerland; credits Daniel Cox; published October 2019, Sony ILCE-7M3, free use under the standard Unsplash License.",
+    "notes": "Already 3:2. Natural overcast valley view, church below the mountain backdrop, muted autumn trees. Keep full frame.",
+    "master": {
+      "file": "output/country-photographs/CH.jpg",
+      "width": 2400,
+      "height": 1600,
+      "bytes": 1114975,
+      "sha256": "c2a98a3ec0403accf29e39d73d043a676671316f6391f0cf8957a76a914c48d8"
+    },
+    "bundled": {
+      "file": "CH.webp",
+      "width": 1600,
+      "height": 1067,
+      "bytes": 476042,
+      "sha256": "c680d7f20a04249bd5498cc87cb1f8e482ff771d4ea2a6eaef72aade00358d36"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "ES",
+    "country": "Spain",
+    "title": "Park Güell overlooking Barcelona in daylight",
+    "photographer": "Dorian D1 (@doriandussartd)",
+    "sourcePage": "https://unsplash.com/photos/aerial-view-of-city-buildings-during-daytime-ZX-BTxs0Nl0",
+    "imageUrl": "https://images.unsplash.com/photo-1629793815862-723ed95c2363?fm=jpg&q=95&fit=max&w=4000",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:47.973Z",
+    "sourceEvidence": "Horizontal photograph with blue daylight sky, green foliage and mosaic foreground. The pavilions and cross remain intact in a centered 1.7:1 postcard crop. Source page identifies Parc Güell, Barcelona, Spain; published August 24, 2021, Huawei ELE-L29. Inspected locally; selected instead of a warm graded aerial.",
+    "notes": "Horizontal photograph with blue daylight sky, green foliage and mosaic foreground. The pavilions and cross remain intact in a centered 1.7:1 postcard crop. Source page identifies Parc Güell, Barcelona, Spain; published August 24, 2021, Huawei ELE-L29. Inspected locally; selected instead of a warm graded aerial.",
+    "master": {
+      "file": "output/country-photographs/ES.jpg",
+      "width": 4000,
+      "height": 3000,
+      "bytes": 3273049,
+      "sha256": "b3d362e924b3cc402960b176b6667ee519e26cc29ff5dc2e2c0034a01f33e398"
+    },
+    "bundled": {
+      "file": "ES.webp",
+      "width": 1600,
+      "height": 1200,
+      "bytes": 495218,
+      "sha256": "d5e4aea05a3ea8827837b168e0f560d16e06ef9e8ad65696ae91d3e2ce164d4f"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "FR",
+    "country": "France",
+    "title": "Eiffel Tower from Trocadéro on an overcast day, Paris",
+    "photographer": "Finn",
+    "sourcePage": "https://unsplash.com/photos/eiffel-tower-in-paris-during-daytime-Mam_2T4Z_xY",
+    "imageUrl": "https://images.unsplash.com/photo-1626003471291-348d589efa67?fm=jpg&q=95&fit=max&w=4000",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:48.321Z",
+    "sourceEvidence": "Horizontal photograph; restrained overcast light, real street and visitor detail. Source page identifies Paris, 2017; published July 11, 2021, Canon EOS M10. Inspected locally.",
+    "notes": "Horizontal photograph; restrained overcast light, real street and visitor detail. Source page identifies Paris, 2017; published July 11, 2021, Canon EOS M10. Inspected locally.",
+    "master": {
+      "file": "output/country-photographs/FR.jpg",
+      "width": 4000,
+      "height": 2667,
+      "bytes": 1034454,
+      "sha256": "da15cfcb7c0958026451f7b37a0c89285c76e4f6c5ef00641f51a299b3ff6f5f"
+    },
+    "bundled": {
+      "file": "FR.webp",
+      "width": 1600,
+      "height": 1067,
+      "bytes": 145976,
+      "sha256": "0b892a1911ccf92274da67617df0a2477a198d48e6d7e870756a66a4b2e504c5"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "GB",
+    "country": "United Kingdom",
+    "title": "Westminster from the Thames",
+    "photographer": "Ugur Akdemir",
+    "sourcePage": "https://unsplash.com/photos/landscape-photography-of-big-ben-under-white-sky-HbYnglDQmuo",
+    "imageUrl": "https://images.unsplash.com/photo-1512734099960-65a682cbfe2b?fm=jpg&q=92&w=2400",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:48.605Z",
+    "sourceEvidence": "Individual source identifies Houses of Parliament and Big Ben, London; credits Ugur Akdemir; published December 2017, Canon EOS 7D, free use under the standard Unsplash License.",
+    "notes": "Already 3:2. Restrained warm overcast photograph with boats, bridge, a red bus, and ample pale sky; keep full frame.",
+    "master": {
+      "file": "output/country-photographs/GB.jpg",
+      "width": 2400,
+      "height": 1600,
+      "bytes": 607934,
+      "sha256": "8169d17136137658e2b66702c0d547f9b15cb7739530df399428aec52e00edb5"
+    },
+    "bundled": {
+      "file": "GB.webp",
+      "width": 1600,
+      "height": 1067,
+      "bytes": 169644,
+      "sha256": "7fa924ff34d60b1b4891bd65359375f47988e581952e384a6d02f4ef2b87112e"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "GR",
+    "country": "Greece",
+    "title": "Agistri coastline in daylight",
+    "photographer": "Cesar Andriola",
+    "sourcePage": "https://unsplash.com/photos/coastal-village-with-white-houses-on-a-cliffside-overlooking-turquoise-water-k2N2xtvMQi8",
+    "imageUrl": "https://images.unsplash.com/photo-1757036909317-451d200044a4?fm=jpg&q=92&w=2400",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:48.908Z",
+    "sourceEvidence": "Individual source identifies Agistri, Greece; credits Cesar Andriola; lists Canon EOS Rebel T6 and free use under the standard Unsplash License.",
+    "notes": "Already 3:2. Keep full frame: coastline slopes from lower left to upper right, with natural sea and sky.",
+    "master": {
+      "file": "output/country-photographs/GR.jpg",
+      "width": 2400,
+      "height": 1600,
+      "bytes": 593456,
+      "sha256": "de0c7cfac8377cd360dcaedda08d3818e91ff070fab4239bb58b9dc1bb9e9891"
+    },
+    "bundled": {
+      "file": "GR.webp",
+      "width": 1600,
+      "height": 1067,
+      "bytes": 206342,
+      "sha256": "131e9ae6554c0fe9574e4746556dd86f3964ef12b97d86600926dfe499254b6d"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "ID",
+    "country": "Indonesia",
+    "title": "Rice terraces in northern Bali",
+    "photographer": "Hello World",
+    "sourcePage": "https://unsplash.com/photos/rice-terraces-and-lush-trees-fill-this-landscape-AdNQ7YlCjhY",
+    "imageUrl": "https://images.unsplash.com/photo-1754244431279-9cf4c7466405?fm=jpg&q=95",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:49.561Z",
+    "master": {
+      "file": "output/country-photographs/ID.jpg",
+      "width": 3208,
+      "height": 2139,
+      "bytes": 2677560,
+      "sha256": "8409a7d6f2cc56d4264c0b1f96c0236868285380bfd2a3041db642164f24629f"
+    },
+    "bundled": {
+      "file": "ID.webp",
+      "width": 1600,
+      "height": 1067,
+      "bytes": 702298,
+      "sha256": "4b19595ef3d984715955dd5292c1289d74bbebb1a97cf6be6c96cf703fcc1c6a"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "IT",
+    "country": "Italy",
+    "title": "Riomaggiore harbour, Cinque Terre, in overcast daylight",
+    "photographer": "Ronni Kurtz",
+    "sourcePage": "https://unsplash.com/photos/cinque-terre-in-italy-during-daytime-JYgUSBcwmhE",
+    "imageUrl": "https://images.unsplash.com/photo-1571084797756-44c01f79d666?fm=jpg&q=95&fit=max&w=4000",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:50.125Z",
+    "sourceEvidence": "Horizontal near-3:2 photograph; subdued sea and sky, weathered buildings, small boats and visitors. Source page identifies Cinque Terre, Italy; published October 14, 2019, Nikon D750. Inspected locally.",
+    "notes": "Horizontal near-3:2 photograph; subdued sea and sky, weathered buildings, small boats and visitors. Source page identifies Cinque Terre, Italy; published October 14, 2019, Nikon D750. Inspected locally.",
+    "master": {
+      "file": "output/country-photographs/IT.jpg",
+      "width": 4000,
+      "height": 2670,
+      "bytes": 3077265,
+      "sha256": "f64b5f2346c2ecbcc92ba081f6dcd7261de1b41f6cf8b3a4f5b5d7c82ebf0b40"
+    },
+    "bundled": {
+      "file": "IT.webp",
+      "width": 1600,
+      "height": 1068,
+      "bytes": 380548,
+      "sha256": "e6c368399bfa0080c36b5bd20a0c73c3dd96fa15d7e5cdbc92dea8cef4a28190"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "JP",
+    "country": "Japan",
+    "title": "Mount Fuji from Lake Kawaguchi",
+    "photographer": "Alberto Gallego",
+    "sourcePage": "https://unsplash.com/photos/mount-fuji-is-reflected-beautifully-in-the-lake-J_7o0_1S-PM",
+    "imageUrl": "https://images.unsplash.com/photo-1752395480128-8c15c9364a03?fm=jpg&q=95",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:50.497Z",
+    "master": {
+      "file": "output/country-photographs/JP.jpg",
+      "width": 4898,
+      "height": 3265,
+      "bytes": 2908941,
+      "sha256": "740d63abbdacd3176f4d1b17f626050180f847a3bcea1dd0c775fbbdeec73c4a"
+    },
+    "bundled": {
+      "file": "JP.webp",
+      "width": 1600,
+      "height": 1066,
+      "bytes": 115576,
+      "sha256": "a290e6b4df41635763e4640ec4fcb387dab21c62497eceb3104abef25a22fcd3"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "MA",
+    "country": "Morocco",
+    "title": "Jemaa el-Fnaa market, Marrakech",
+    "photographer": "CALIN STAN",
+    "sourcePage": "https://unsplash.com/photos/people-walking-on-street-during-daytime-7a_PHX91su8",
+    "imageUrl": "https://images.unsplash.com/photo-1587974928442-77dc3e0dba72?fm=jpg&q=90&w=2400&fit=max",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:50.923Z",
+    "sourceEvidence": "Individual page identifies Marrakech's Jama el Fna market; Fujifilm X-T1; published April 27, 2020; free under the standard Unsplash License.",
+    "notes": "A real market at sunset with people, stalls, satellite dishes and weathered buildings. The warmth comes from the source photograph, with no added app filter.",
+    "master": {
+      "file": "output/country-photographs/MA.jpg",
+      "width": 2400,
+      "height": 1507,
+      "bytes": 1044357,
+      "sha256": "7f3d9e36fda225734921ed3082d238226619f042a1844b34cee5378102bf7809"
+    },
+    "bundled": {
+      "file": "MA.webp",
+      "width": 1600,
+      "height": 1005,
+      "bytes": 460882,
+      "sha256": "d1b8a1d5d122e00b728616488104bd54f3b5708c05395e109da7c8deca7b3f95"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "MX",
+    "country": "Mexico",
+    "title": "Papel picado above a street in Jalatlaco, Oaxaca",
+    "photographer": "Anastasiia Malai",
+    "sourcePage": "https://unsplash.com/photos/a-street-lined-with-colorful-flags-and-buildings-8JNAY3kbfpI",
+    "imageUrl": "https://images.unsplash.com/photo-1686448921254-b326a7914d2f?fm=jpg&q=90&w=2400&fit=max",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:51.317Z",
+    "sourceEvidence": "Individual page identifies Jalatlaco, Oaxaca, Mexico; Sony ILCE-6000; published June 11, 2023; free under the standard Unsplash License.",
+    "notes": "Horizontal street photograph with real bunting, worn walls, overhead wires and a distant rider; no synthetic cleanup or added grading.",
+    "master": {
+      "file": "output/country-photographs/MX.jpg",
+      "width": 2400,
+      "height": 1350,
+      "bytes": 920409,
+      "sha256": "582a3bb82ea6e9c9ec8b83348d788353d1c4382d40b9edc0c737f3c7f186bb3a"
+    },
+    "bundled": {
+      "file": "MX.webp",
+      "width": 1600,
+      "height": 900,
+      "bytes": 385930,
+      "sha256": "9d45cb719fcb1dcf47320ab6585c9f3e44318dca889109ac8542311f9ebe0279"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "PT",
+    "country": "Portugal",
+    "title": "Lisbon rooftops, São Jorge Castle and the Tagus",
+    "photographer": "gemmmm 🖤 (@gemmafjam)",
+    "sourcePage": "https://unsplash.com/photos/aerial-view-of-city-buildings-during-daytime-BWmtnSBbBuk",
+    "imageUrl": "https://images.unsplash.com/photo-1585334954347-e50fe83cc6ce?fm=jpg&q=95&fit=max&w=4000",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:51.699Z",
+    "sourceEvidence": "Horizontal 3:2 photograph; everyday rooftops, warm daylight and clear sky, no added effects. Source page identifies Lisboa, Portugal; published March 27, 2020, Canon EOS 1300D. Inspected locally.",
+    "notes": "Horizontal 3:2 photograph; everyday rooftops, warm daylight and clear sky, no added effects. Source page identifies Lisboa, Portugal; published March 27, 2020, Canon EOS 1300D. Inspected locally.",
+    "master": {
+      "file": "output/country-photographs/PT.jpg",
+      "width": 3198,
+      "height": 2132,
+      "bytes": 1433188,
+      "sha256": "4c68b292ade13d3f9dac51aebf0c91154476ff2009ad6c36bdb22a021ec76ad8"
+    },
+    "bundled": {
+      "file": "PT.webp",
+      "width": 1600,
+      "height": 1067,
+      "bytes": 268468,
+      "sha256": "4e922f675808f43056b32a96a293cd25d0cfb72d4ffb4a3d9e838a6bad3ecd0f"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "SG",
+    "country": "Singapore",
+    "title": "Marina Bay Sands, ArtScience Museum and Singapore Flyer in daylight",
+    "photographer": "Kabul Sucipto",
+    "sourcePage": "https://unsplash.com/photos/marina-bay-sands-in-singapore-under-blue-and-white-sky-during-daytime-8YNRL4zbNGs",
+    "imageUrl": "https://images.unsplash.com/photo-1571487958008-f53106a39c5a?fm=jpg&q=95",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:52.192Z",
+    "master": {
+      "file": "output/country-photographs/SG.jpg",
+      "width": 4032,
+      "height": 3024,
+      "bytes": 2492938,
+      "sha256": "9299df3bb290fc1f8b27f3f4b627305b20cc0e416ed75519a3d49bd9f26a597c"
+    },
+    "bundled": {
+      "file": "SG.webp",
+      "width": 1600,
+      "height": 1200,
+      "bytes": 240840,
+      "sha256": "985904d667645eab68f5a4e36d6db9a8e0bc980c4076b5392228ed2b7b93417d"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "TH",
+    "country": "Thailand",
+    "title": "Longtail boat at Railay Beach, Krabi",
+    "photographer": "Steven Watson",
+    "sourcePage": "https://unsplash.com/photos/a-boat-in-the-water-with-railay-beach-in-the-background-NPthvE8JpqA",
+    "imageUrl": "https://images.unsplash.com/photo-1664543219977-ad362c2ec439?fm=jpg&q=95",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:52.744Z",
+    "master": {
+      "file": "output/country-photographs/TH.jpg",
+      "width": 4448,
+      "height": 2965,
+      "bytes": 3573562,
+      "sha256": "92a348ef7894c51b5dff6d7751df48e370faf9d6c7a1530e68dbe71fd0af2782"
+    },
+    "bundled": {
+      "file": "TH.webp",
+      "width": 1600,
+      "height": 1067,
+      "bytes": 290918,
+      "sha256": "3f98d74708f480ef96d8aae60a480d21c705469f18aa96d00176045359bc340d"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "TR",
+    "country": "Türkiye",
+    "title": "Daytime crossing on the Bosphorus",
+    "photographer": "Adnan Uludag",
+    "sourcePage": "https://unsplash.com/photos/white-boat-on-sea-near-bridge-under-blue-sky-during-daytime-y1BI7y1vaW8",
+    "imageUrl": "https://images.unsplash.com/photo-1625840550787-5f6a9044d7ce?fm=jpg&q=92&w=2400",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:53.096Z",
+    "sourceEvidence": "Individual source identifies Bosphorus Bridge, Besiktas, Turkey; credits Adnan Uludag; published July 2021, iPhone 12 Pro, free use under the standard Unsplash License.",
+    "notes": "16:9 source. Center 3:2 crop retains bridge tower and both boats; natural hazy daylight and subdued blue water.",
+    "master": {
+      "file": "output/country-photographs/TR.jpg",
+      "width": 2400,
+      "height": 1350,
+      "bytes": 862293,
+      "sha256": "e4c25bb06f23b91b9577f257d243f4e48ba2529f0cacdf8d8a97ce87244fbb43"
+    },
+    "bundled": {
+      "file": "TR.webp",
+      "width": 1600,
+      "height": 900,
+      "bytes": 344732,
+      "sha256": "8d5df530b6473b94f029c483c019d49e69f822bf913ba984311d07358264d1c3"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "US",
+    "country": "United States",
+    "title": "Morning coastal fog at Big Sur, California",
+    "photographer": "Mick Kirchman",
+    "sourcePage": "https://unsplash.com/photos/a-body-of-water-surrounded-by-a-lush-green-hillside-xlJhRJVqxoY",
+    "imageUrl": "https://images.unsplash.com/photo-1688603210667-337a5c99cdd7?fm=jpg&q=90&w=2400&fit=max",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:53.454Z",
+    "sourceEvidence": "Individual page identifies Big Sur, USA; Nikon D3300; published July 6, 2023; free under the standard Unsplash License.",
+    "notes": "Natural fog, blue water and coastal vegetation. Replaces a rejected heavily teal-graded coastal photograph.",
+    "master": {
+      "file": "output/country-photographs/US.jpg",
+      "width": 2400,
+      "height": 1600,
+      "bytes": 818709,
+      "sha256": "2f9db5c121006ca21582f5c0f3e555ffb0c24e8920a9f0fb633453ec271d8b7b"
+    },
+    "bundled": {
+      "file": "US.webp",
+      "width": 1600,
+      "height": 1067,
+      "bytes": 341474,
+      "sha256": "e1a729cf7936fe775963e742bf25dc1873f298f525424c3b7838e7b4bb0b7b43"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  },
+  {
+    "code": "VN",
+    "country": "Vietnam",
+    "title": "Historic house beside the Hoai River, Hoi An",
+    "photographer": "Khoi Tran",
+    "sourcePage": "https://unsplash.com/photos/an-old-building-with-a-clock-on-the-front-of-it-qnMZuni1tz8",
+    "imageUrl": "https://images.unsplash.com/photo-1714073619284-b71674885558?fm=jpg&q=95",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "attributionRequired": false,
+    "sourceType": "photograph",
+    "verifiedAt": "2026-09-09T04:43:53.986Z",
+    "master": {
+      "file": "output/country-photographs/VN.jpg",
+      "width": 5152,
+      "height": 3435,
+      "bytes": 4516905,
+      "sha256": "44ea6b11bcec98891850f576e7099d27f9a0a7e5b052e439fb155c33f154a4e3"
+    },
+    "bundled": {
+      "file": "VN.webp",
+      "width": 1600,
+      "height": 1066,
+      "bytes": 458692,
+      "sha256": "18f23ea9d75fc42d9c2375bb685c988fbc62fe07810f3a828c5cf8706e40c63a"
+    },
+    "processing": "Orientation and proportional downsize to 1600px wide, WebP quality 88. No color filter, generative edits, retouching or compositing."
+  }
+]

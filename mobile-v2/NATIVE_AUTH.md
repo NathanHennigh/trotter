@@ -1,0 +1,21 @@
+# Native account access
+
+The active application is `mobile-v2`. Its Google connection uses the existing backend `/auth/google/start` and `/auth/google/callback` flow. Google credentials and Gmail refresh tokens remain on the backend; only the app session token is stored on the device.
+
+The production API verified from the Oracle rollout records and a successful `/ready` check is `https://trotter-api.thehennighs.com`.
+
+Build configuration must supply `EXPO_PUBLIC_TROTTER_API_URL` as the intended HTTPS backend. Production does not accept an `apiUrl` URL override or a bundled `EXPO_PUBLIC_TROTTER_AUTH_TOKEN`. Development builds can use an explicitly configured HTTP server; an unconfigured development build defaults to localhost. The native scheme remains `trotterv2`.
+
+`expo-web-browser`, `expo-crypto`, and `expo-secure-store` require an updated native development/release build. Add the SecureStore config plugin for Android backup handling. For a direct Gradle build of the checked-in Android project, the application manifest also needs `android:fullBackupContent="@xml/secure_store_backup_rules"` and `android:dataExtractionRules="@xml/secure_store_data_extraction_rules"`. Both XML resources ship in the SecureStore Android library; retain the custom ShareToDreams manifest entries. An old installed native build cannot validate newly installed native modules.
+
+Native sign-in opens an authenticated browser session and requests an ephemeral session where the OS supports it. A random per-attempt value is part of the redirect URI, which the existing backend signs into OAuth state and preserves on return. The client requires the exact callback scheme, authority, path, attempt, and a single token. Closing the browser cancels sign-in. Unsolicited or cold-start native token links are not accepted; start a fresh sign-in if the OS terminated the app during consent.
+
+Native session tokens use SecureStore with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`. Storage records include the backend address to prevent sending an old server's token to a newly configured backend. The old AsyncStorage/localStorage token is removed instead of silently migrated. Web uses sessionStorage and accepts only the registered same-origin `/oauthredirect` after a recent sign-in started in that tab. Its callback token is removed from browser history. Web retains the existing backend's full-page redirect flow; native per-attempt correlation is stronger than that legacy web flow.
+
+`useTravelTrips()` exposes `authStatus` (`loading`, `signed-out`, `signed-in`), `signIn`, `signOut`, and verified `accountId`/`accountEmail`, alongside existing trip and sync methods. `/auth/me` verifies identity before the signed-in UI opens. Both profile and trip 401 responses clear the session. There is no personal snapshot or demo-account fallback. Profile country totals use the same passport adapter as the country screen, including connections; endpoint country metadata remains available even when a map coordinate is missing. Profile name comes from the verified account; empty archives have zero statistics and no invented home airport or travel dates.
+
+The app should display `AuthScreen` unless `authStatus === 'signed-in'`, and remount all account-specific providers/screens when `accountId` changes. A shared auth revision invalidates outstanding trip/detail/sync responses on sign-out or account changes. Other services can use `subscribeAuthToken` and `getAuthRevision` to enforce the same boundary. `storeAuthToken` and `clearAuthToken` return promises; await their storage work when using them directly.
+
+Signing out clears local account details, trips, timestamps, and saved session tokens. It does not delete the server archive, revoke Google access, or cancel an already running import. Imports continue on the backend and new sign-in can retrieve their results.
+
+Run `node scripts/testNativeAuth.js` for isolated callback, storage, expiry, network, and cross-account response tests. These tests use mocked native modules and a hook harness; they do not replace device validation of Google consent, browser cancellation, secure-store persistence across restart, and release-build deep-link routing. Run `npx tsc --noEmit` and `node scripts/testStampSystem.js` for integration and preserved stamp/itinerary behavior.

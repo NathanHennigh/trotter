@@ -44,11 +44,14 @@ export type TripSummary = {
   title: string;
   country: string;
   countryCode?: string;
+  /** Internal travel-region identity, separate from ISO metadata. */
+  travelCountryKey?: string;
   city?: string;
   airportCode?: string;
   startDate: string;
   endDate: string;
   firstCountryEntryDate?: string;
+  firstCountryEntryAirport?: string;
   routeLabel: string;
   miles: number;
   flightCount: number;
@@ -76,6 +79,10 @@ export type TripSegmentSummary = {
   mode: 'flight';
   depAirport: string;
   arrAirport: string;
+  depCountry?: string;
+  depCountryCode?: string;
+  arrCountry?: string;
+  arrCountryCode?: string;
   depTime: string;
   arrTime: string;
   airline?: string;
@@ -86,12 +93,16 @@ export type TripSegmentSummary = {
   depPoint?: {
     code: string;
     city: string;
+    country?: string;
+    countryCode?: string;
     lat: number;
     lon: number;
   };
   arrPoint?: {
     code: string;
     city: string;
+    country?: string;
+    countryCode?: string;
     lat: number;
     lon: number;
   };

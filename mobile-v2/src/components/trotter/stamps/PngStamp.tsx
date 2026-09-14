@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, ImageSourcePropType, StyleSheet, Text, View } from 'react-native';
+import { Image, ImageSourcePropType, StyleSheet, View } from 'react-native';
 import Svg, { Defs, Path, Text as SvgText, TextPath } from 'react-native-svg';
 import {
   CountryIconAssetKey,
@@ -9,6 +9,8 @@ import {
 } from '../../../assets/generated/stampAssetManifest';
 import { colors, fonts } from '../../../theme/trotterTheme';
 import stampTemplateBundles from './stampTemplates.json';
+import { fitFontSize } from './stampLayout';
+import { resolveStampGeometry } from './stampGeometry';
 
 export type StampShapeKey =
   | 'archedCountryCanonical'
@@ -27,6 +29,7 @@ export type PngStampProps = {
   icon?: CountryIconKey;
   color: string;
   country: string;
+  /** Retained for trip-data compatibility; city text is never printed on an arrival stamp. */
   city?: string;
   airportCode?: string;
   date?: string;
@@ -103,6 +106,8 @@ type TextBox = Box & {
 };
 
 export type StampTemplate = {
+  coordinateSpace?: 'frame' | 'canvas';
+  circleTitleRadius?: number;
   frame: Box;
   titleMode: 'straight' | 'arc' | 'circleArc';
   arcDepth?: number;
@@ -179,56 +184,6 @@ function formatStampDate(date?: string) {
   return `${day} ${month} ${parsed.getFullYear()}`;
 }
 
-function getPlaceLine(city?: string) {
-  return city;
-}
-
-function boxesOverlap(a: Box, b: Box) {
-  return !(
-    a.left + a.width <= b.left ||
-    b.left + b.width <= a.left ||
-    a.top + a.height <= b.top ||
-    b.top + b.height <= a.top
-  );
-}
-
-function resolveAirportBox(template: StampTemplate): TextBox {
-  if (!boxesOverlap(template.date, template.airport)) return template.airport;
-
-  const gap = 0.012;
-  const top = Math.min(0.985 - template.airport.height, template.date.top + template.date.height + gap);
-  return { ...template.airport, top };
-}
-
-function fitToLimit(value: string | undefined, maxChars: number) {
-  if (!value) return undefined;
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= maxChars) return normalized;
-  if (normalized.includes(' ')) return normalized;
-  return normalized.slice(0, maxChars);
-}
-
-function lengthBoost(len: number) {
-  if (len <= 4) return 1.18;
-  if (len <= 6) return 1.08;
-  if (len <= 9) return 1.0;
-  if (len <= 12) return 0.92;
-  if (len <= 15) return 0.84;
-  return 0.76;
-}
-
-function fitFontSize(text: string, baseSize: number, boxWidth: number, boxHeight: number, options?: TextBox, rootWidth: number = 204.75) {
-  const charFactor = options?.charFactor ?? 0.62;
-  const minScale = options?.minScale ?? 0.5;
-  const tracking = (options?.tracking ?? 0) * (rootWidth / 204.75);
-  const adaptive = options?.adaptiveLength === false ? 1 : lengthBoost(text.length);
-  const adjusted = baseSize * adaptive;
-  const estimatedWidth = Math.max(1, text.length * adjusted * charFactor + Math.max(0, text.length - 1) * tracking);
-  const widthScale = Math.min(1, boxWidth / estimatedWidth);
-  const heightScale = Math.min(1, (boxHeight * 0.88) / adjusted);
-  return adjusted * Math.max(minScale, Math.min(widthScale, heightScale));
-}
-
 function StampText({
   text,
   box,
@@ -252,198 +207,70 @@ function StampText({
   const fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), boxWidth, boxHeight, box, rootWidth);
 
   return (
-    <Text
-      allowFontScaling={false}
-      numberOfLines={1}
-      style={[
-        styles.text,
-        {
-          color,
-          fontFamily: mono ? fonts.mono : fonts.sansBold,
-          fontSize,
-          lineHeight: boxHeight,
-          letterSpacing: (box.tracking ?? 0) * (rootWidth / 204.75),
-          left: rootWidth * box.left,
-          top: rootHeight * box.top,
-          width: boxWidth,
-          height: boxHeight,
-        },
-      ]}
-    >
-      {text}
-    </Text>
+    <Svg pointerEvents="none" width={rootWidth} height={rootHeight} viewBox={`0 0 ${rootWidth} ${rootHeight}`} style={styles.svgText}>
+      <SvgText fill={color} fontFamily={mono ? fonts.mono : fonts.sansBold} fontSize={fontSize}
+        fontWeight={mono ? '400' : '700'} textAnchor="middle" alignmentBaseline="central"
+        x={rootWidth * (box.left + box.width / 2)} y={rootHeight * (box.top + box.height / 2)}
+        letterSpacing={(box.tracking ?? 0) * rootWidth / 204.75}>
+        {text}
+      </SvgText>
+    </Svg>
   );
 }
 
 function ArcStampText({
-  text,
-  box,
-  rootWidth,
-  rootHeight,
-  baseSize,
-  color,
-  arcDepth = 0.7,
-  arcTextLength,
+  text, box, rootWidth, rootHeight, baseSize, color, arcDepth = 0.7,
 }: {
-  text?: string;
-  box: TextBox;
-  rootWidth: number;
-  rootHeight: number;
-  baseSize: number;
-  color: string;
-  arcDepth?: number;
-  arcTextLength?: number;
+  text?: string; box: TextBox; rootWidth: number; rootHeight: number;
+  baseSize: number; color: string; arcDepth?: number; arcTextLength?: number;
 }) {
-  const pathId = React.useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const pathId = `stamp-${React.useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   if (!text) return null;
-  const boxWidth = rootWidth * box.width;
-  const boxHeight = rootHeight * box.height;
-  const fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), boxWidth, boxHeight * 0.85, box, rootWidth);
-  const isCircleArc = arcDepth >= 1.8;
-  const rawYStart = boxHeight * (isCircleArc ? 0.96 : Math.min(0.88, 0.6 + arcDepth * 0.15));
-  const rawYMid = boxHeight * (isCircleArc ? -0.18 : Math.max(0.06, 0.52 - arcDepth * 0.34));
-
-  // Prevent clipping by expanding the SVG bounding box if the arc exceeds boxHeight
-  const topOverflow = Math.max(0, -(rawYMid - fontSize * 1.5));
-  const bottomOverflow = Math.max(0, (rawYStart + fontSize * 1.5) - boxHeight);
-  const svgHeight = boxHeight + topOverflow + bottomOverflow;
-
-  const yStart = rawYStart + topOverflow;
-  const yMid = rawYMid + topOverflow;
-
-  const xInset = isCircleArc ? -0.06 : arcDepth >= 1.2 ? 0.04 : 0.08;
-  const startX = boxWidth * xInset;
-  const endX = boxWidth * (1 - xInset);
-  const cp1X = boxWidth * 0.25;
-  const cp2X = boxWidth * 0.75;
-  const cpY = yMid - (yStart - yMid) * 0.4;
-  const path = `M ${startX} ${yStart} C ${cp1X} ${cpY}, ${cp2X} ${cpY}, ${endX} ${yStart}`;
-  const textLength = boxWidth * (arcTextLength ?? 0.7);
-
+  const w = rootWidth * box.width;
+  const h = rootHeight * box.height;
+  const fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), w * 0.84, h * 0.85, box, rootWidth);
+  const left = rootWidth * box.left;
+  const top = rootHeight * box.top;
+  const depth = Math.max(0.2, Math.min(1.5, arcDepth));
+  const startY = top + h * Math.min(0.88, 0.6 + depth * 0.15);
+  const middleY = top + h * Math.max(0.06, 0.52 - depth * 0.34);
+  const controlY = middleY - (startY - middleY) * 0.4;
+  const d = `M ${left + w * .08} ${startY} C ${left + w * .25} ${controlY}, ${left + w * .75} ${controlY}, ${left + w * .92} ${startY}`;
   return (
-    <Svg
-      pointerEvents="none"
-      width={boxWidth}
-      height={svgHeight}
-      style={[
-        styles.svgText,
-        {
-          left: rootWidth * box.left,
-          top: rootHeight * box.top - topOverflow,
-          overflow: 'visible',
-        },
-      ]}
-    >
-      <Defs>
-        <Path id={pathId} d={path} />
-      </Defs>
-      <SvgText
-        fill={color}
-        fontFamily={fonts.sansBold}
-        fontSize={fontSize}
-        fontWeight="700"
-        letterSpacing={(box.tracking ?? 0) * (rootWidth / 204.75)}
-        lengthAdjust="spacingAndGlyphs"
-        textAnchor="middle"
-        textLength={textLength}
-        dy={fontSize * 0.32}
-      >
-        <TextPath href={`#${pathId}`} startOffset="50%">
-          {text}
-        </TextPath>
+    <Svg pointerEvents="none" width={rootWidth} height={rootHeight} viewBox={`0 0 ${rootWidth} ${rootHeight}`} style={styles.svgText}>
+      <Defs><Path id={pathId} d={d} /></Defs>
+      <SvgText fill={color} fontFamily={fonts.sansBold} fontSize={fontSize} fontWeight="700" textAnchor="middle" letterSpacing={(box.tracking ?? 0) * rootWidth / 204.75}>
+        <TextPath href={`#${pathId}`} startOffset="50%">{text}</TextPath>
       </SvgText>
     </Svg>
   );
 }
 
 function CircleArcStampText({
-  text,
-  box,
-  frame,
-  rootWidth,
-  rootHeight,
-  baseSize,
-  color,
-  arcCenterYOffset,
+  text, box, frame, rootWidth, rootHeight, baseSize, color, arcCenterYOffset, radiusRatio = .28,
 }: {
-  text?: string;
-  box: TextBox;
-  frame: Box;
-  rootWidth: number;
-  rootHeight: number;
-  baseSize: number;
-  color: string;
-  arcCenterYOffset?: number;
+  text?: string; box: TextBox; frame: Box; rootWidth: number; rootHeight: number;
+  baseSize: number; color: string; arcCenterYOffset?: number; radiusRatio?: number;
 }) {
+  const pathId = `stamp-circle-${React.useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   if (!text) return null;
-  const frameLeft = rootWidth * frame.left;
-  const frameTop = rootHeight * frame.top;
   const frameWidth = rootWidth * frame.width;
   const frameHeight = rootHeight * frame.height;
-  const ringSize = Math.min(frameWidth, frameHeight);
-  const centerX = frameLeft + frameWidth / 2;
-  const centerY = frameTop + frameHeight / 2 + frameHeight * (arcCenterYOffset ?? -0.02);
-  const radius = ringSize * 0.32;
-  const maxArcWidth = radius * 2.35;
-  const chars = text.split('');
-  const minHalfAngle = chars.length >= 10 ? 53 : chars.length >= 8 ? 44 : chars.length >= 7 ? 36 : 0;
-  const maxHalfAngle = chars.length >= 14 ? 78 : chars.length >= 10 ? 70 : chars.length >= 8 ? 60 : 48;
-  let fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), maxArcWidth, rootHeight * box.height * 0.7, box, rootWidth);
-  if (chars.length > 1) {
-    const arcLengthAtMaxAngle = ((maxHalfAngle * 2) * Math.PI) / 180 * radius;
-    const requiredArcLength = (chars.length - 1) * fontSize * 0.78;
-    if (requiredArcLength > arcLengthAtMaxAngle) {
-      const minFontFloor = baseSize * (box.minScale ?? 0.36) * 0.85;
-      fontSize = Math.max(minFontFloor, (arcLengthAtMaxAngle / (chars.length - 1)) / 0.78);
-    }
-  }
-  const charBoxWidth = Math.max(fontSize * 1.5, 8);
-  const desiredStepRad = (fontSize * 0.76) / radius;
-  const computedHalfAngle = ((desiredStepRad * Math.max(0, chars.length - 1)) / 2) * (180 / Math.PI);
-  const halfAngleDeg = Math.min(maxHalfAngle, Math.max(minHalfAngle, computedHalfAngle));
-  const step = chars.length > 1 ? (halfAngleDeg * 2) / (chars.length - 1) : 0;
-
+  const centerX = rootWidth * frame.left + frameWidth / 2;
+  const centerY = rootHeight * frame.top + frameHeight * (0.5 + (arcCenterYOffset ?? -0.02));
+  const radius = Math.min(frameWidth, frameHeight) * radiusRatio;
+  const halfAngle = 70 * Math.PI / 180;
+  const fontSize = fitFontSize(text, baseSize * (box.fontScale ?? 1), radius * halfAngle * 1.8, rootHeight * box.height * .7, box, rootWidth);
+  const x = Math.sin(halfAngle) * radius;
+  const y = centerY - Math.cos(halfAngle) * radius;
+  const d = `M ${centerX - x} ${y} A ${radius} ${radius} 0 0 1 ${centerX + x} ${y}`;
   return (
-    <View
-      pointerEvents="none"
-      style={[
-        styles.circleArcText,
-        {
-          left: 0,
-          top: 0,
-          width: rootWidth,
-          height: rootHeight,
-        },
-      ]}
-    >
-      {chars.map((char, index) => {
-        const angleDeg = chars.length > 1 ? -halfAngleDeg + step * index : 0;
-        const angle = (angleDeg * Math.PI) / 180;
-        const x = centerX + Math.sin(angle) * radius - charBoxWidth / 2;
-        const y = centerY - Math.cos(angle) * radius - fontSize * 1.06;
-
-        return (
-          <Text
-            key={`${char}-${index}`}
-            allowFontScaling={false}
-            style={[
-              styles.circleArcChar,
-              {
-                color,
-                fontSize,
-                lineHeight: fontSize * 1.08,
-                width: charBoxWidth,
-                left: x,
-                top: y,
-                transform: [{ rotate: `${angleDeg * 0.92}deg` }, { translateY: -fontSize * 0.26 }],
-              },
-            ]}
-          >
-            {char}
-          </Text>
-        );
-      })}
-    </View>
+    <Svg pointerEvents="none" width={rootWidth} height={rootHeight} viewBox={`0 0 ${rootWidth} ${rootHeight}`} style={styles.svgText}>
+      <Defs><Path id={pathId} d={d} /></Defs>
+      <SvgText fill={color} fontFamily={fonts.sansBold} fontSize={fontSize} fontWeight="700" textAnchor="middle" letterSpacing={(box.tracking ?? 0) * rootWidth / 204.75}>
+        <TextPath href={`#${pathId}`} startOffset="50%">{text}</TextPath>
+      </SvgText>
+    </Svg>
   );
 }
 
@@ -452,7 +279,6 @@ export function PngStamp({
   icon,
   color,
   country,
-  city,
   airportCode,
   date,
   size = 'md',
@@ -463,14 +289,13 @@ export function PngStamp({
   templateOverride,
 }: PngStampProps) {
   const config = sizeConfig[size];
-  const upperCountry = country.toUpperCase();
-  const template = templateOverride || resolveTemplate(shape, upperCountry.length);
+  const upperCountry = country.replace(/\s+/g, ' ').trim().toUpperCase();
   const width = config.width * scale;
   const height = config.height * scale;
-  const countryLabel = fitToLimit(upperCountry, template.maxCountryChars) ?? upperCountry.slice(0, template.maxCountryChars);
-  const placeLine = fitToLimit(getPlaceLine(city)?.toUpperCase(), template.maxPlaceChars);
+  const template = resolveStampGeometry(shape, templateOverride || resolveTemplate(shape, upperCountry.length), width, height);
+  const countryLabel = upperCountry;
   const stampDate = formatStampDate(date);
-  const airportBox = resolveAirportBox(template);
+  const airportBox = template.airport;
   const iconSource = resolveIcon(icon);
   const shapeSource = shapeAssets[shapeAssetKeyMap[shape]];
   const textColor = faded ? colors.mutedInk : color;
@@ -521,6 +346,7 @@ export function PngStamp({
           baseSize={config.country * scale}
           color={textColor}
           arcCenterYOffset={template.arcCenterYOffset}
+          radiusRatio={template.circleTitleRadius}
         />
       ) : titleShouldArc ? (
         <ArcStampText
@@ -563,14 +389,6 @@ export function PngStamp({
       ) : null}
 
       <StampText
-        text={placeLine}
-        box={template.place}
-        rootWidth={width}
-        rootHeight={height}
-        baseSize={config.meta * scale}
-        color={textColor}
-      />
-      <StampText
         text={stampDate}
         box={template.date}
         rootWidth={width}
@@ -594,7 +412,7 @@ export function PngStamp({
 
 const styles = StyleSheet.create({
   root: {
-    overflow: 'hidden',
+    overflow: 'visible',
   },
   shapeImage: {
     position: 'absolute',
@@ -611,15 +429,8 @@ const styles = StyleSheet.create({
   },
   svgText: {
     position: 'absolute',
-  },
-  circleArcText: {
-    position: 'absolute',
+    left: 0,
+    top: 0,
     overflow: 'visible',
-  },
-  circleArcChar: {
-    position: 'absolute',
-    fontFamily: fonts.sansBold,
-    textAlign: 'center',
-    includeFontPadding: false,
   },
 });

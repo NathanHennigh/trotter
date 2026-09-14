@@ -1,5 +1,5 @@
 import React from 'react';
-import { clearAuthToken, getApiBaseUrl, getStoredToken, hydrateStoredToken, storeAuthToken } from './travelTrips';
+import { clearAuthToken, getApiBaseUrl, getStoredToken, hydrateStoredToken, getAuthRevision, subscribeAuthToken } from './travelTrips';
 
 export type DreamItemCategory =
   | 'restaurant'
@@ -59,6 +59,9 @@ type ApiDreamItem = {
   needs_review: boolean;
   google_maps_url?: string | null;
   thumbnail_url?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  coordinate_precision?: 'place' | 'area' | null;
   status: DreamItemStatus;
   created_at: string;
   updated_at?: string | null;
@@ -81,6 +84,9 @@ export type DreamItem = {
   needsReview: boolean;
   googleMapsUrl?: string;
   thumbnailUrl?: string;
+  latitude?: number;
+  longitude?: number;
+  coordinatePrecision?: 'place' | 'area';
   status: DreamItemStatus;
   createdAt: string;
   updatedAt: string;
@@ -91,11 +97,12 @@ export type IncomingDreamShare = {
   sharedText?: string;
 };
 
-const seedItems: DreamItem[] = [];
-let devTokenRequest: Promise<string | undefined> | undefined;
+const emptyItems: DreamItem[] = [];
 
 export function useDreams() {
-  return React.useContext(DreamsContext) ?? useDreamsState();
+  const context = React.useContext(DreamsContext);
+  if (!context) throw new Error('DreamsProvider is required');
+  return context;
 }
 
 export function DreamsProvider({ children }: { children: React.ReactNode }) {
@@ -125,16 +132,29 @@ type DreamsContextValue = ReturnType<typeof useDreamsState>;
 const DreamsContext = React.createContext<DreamsContextValue | null>(null);
 
 function useDreamsState() {
-  const [items, setItems] = React.useState<DreamItem[]>(seedItems);
+  const [items, setItems] = React.useState<DreamItem[]>(emptyItems);
   const [liveDreams, setLiveDreams] = React.useState<Dream[] | undefined>();
-  const [source, setSource] = React.useState<'mock' | 'api'>('mock');
+  const [source, setSource] = React.useState<'local' | 'api'>('local');
   const [status, setStatus] = React.useState<'idle' | 'loading' | 'refreshing' | 'error'>('idle');
   const [error, setError] = React.useState<string | undefined>();
   const itemsRef = React.useRef(items);
   const inFlightUrlsRef = React.useRef(new Set<string>());
+  const mounted = React.useRef(true);
+  const refreshSequence = React.useRef(0);
+  const pendingSequence = React.useRef(0);
+  React.useEffect(() => {
+    mounted.current = true;
+    const unsubscribe = subscribeAuthToken(() => {
+      refreshSequence.current += 1;
+      inFlightUrlsRef.current.clear();
+      itemsRef.current = [];
+      setItems([]); setLiveDreams(undefined); setError(undefined); setStatus('idle');
+    });
+    return () => { mounted.current = false; refreshSequence.current += 1; unsubscribe(); };
+  }, []);
 
-  const mockDreams = React.useMemo(() => buildDreams(items), [items]);
-  const dreams = React.useMemo(() => mergeDreams(liveDreams, mockDreams), [liveDreams, mockDreams]);
+  const itemDreams = React.useMemo(() => buildDreams(items), [items]);
+  const dreams = React.useMemo(() => mergeDreams(liveDreams, itemDreams), [liveDreams, itemDreams]);
   const needsReviewItems = React.useMemo(() => items.filter((item) => item.needsReview), [items]);
   const processingItems = React.useMemo(() => items.filter((item) => item.status === 'processing' || item.status === 'created'), [items]);
 
@@ -143,19 +163,21 @@ function useDreamsState() {
   }, [items]);
 
   const refresh = React.useCallback(async (mode: 'loading' | 'refreshing' = 'refreshing') => {
+    const sequence = ++refreshSequence.current, revision = getAuthRevision();
     setStatus(mode);
     try {
-      const apiDreams = await dreamsApiFetch<ApiDream[]>('/dreams');
-      const apiItemsNested = await Promise.all(apiDreams.map((dream) => dreamsApiFetch<ApiDreamItem[]>(`/dreams/${dream.id}/items`)));
+      const [apiDreams, apiItems] = await Promise.all([dreamsApiFetch<ApiDream[]>('/dreams'), dreamsApiFetch<ApiDreamItem[]>('/dream-items')]);
+      if (!mounted.current || sequence !== refreshSequence.current || revision !== getAuthRevision()) return;
       const mappedDreams = apiDreams.map(mapApiDream);
-      const mappedItems = apiItemsNested.flat().map(mapApiDreamItem);
+      const mappedItems = apiItems.map(mapApiDreamItem);
       setLiveDreams(mappedDreams);
-      setItems(mappedItems);
+      setItems(current => [...current.filter(item => item.id.startsWith('dream-item-') && !mappedItems.some(remote => remote.sourceUrl === item.sourceUrl)), ...mappedItems]);
       setSource('api');
       setError(undefined);
       setStatus('idle');
     } catch (caught) {
-      setSource((current) => current === 'api' ? 'api' : 'mock');
+      if (!mounted.current || sequence !== refreshSequence.current || revision !== getAuthRevision()) return;
+      setSource((current) => current === 'api' ? 'api' : 'local');
       setError(caught instanceof Error ? caught.message : String(caught));
       setStatus('error');
     }
@@ -165,6 +187,12 @@ function useDreamsState() {
     refresh('loading');
   }, [refresh]);
 
+  React.useEffect(() => {
+    if (!processingItems.length) return;
+    const timer = setInterval(() => { void refresh(); }, 5000);
+    return () => clearInterval(timer);
+  }, [processingItems.length, refresh]);
+
   const shareInstagramLink = React.useCallback((sourceUrl: string, caption?: string) => {
     const normalizedUrl = normalizeSourceUrl(sourceUrl);
     if (!isInstagramUrl(normalizedUrl)) {
@@ -173,10 +201,10 @@ function useDreamsState() {
       return undefined;
     }
     const existing = itemsRef.current.find((item) => item.sourceUrl === normalizedUrl);
-    if (existing) return existing;
+    if (existing && existing.status !== 'failed') return existing;
     if (inFlightUrlsRef.current.has(normalizedUrl)) {
       const inFlight = itemsRef.current.find((item) => item.sourceUrl === normalizedUrl);
-      if (inFlight) return inFlight;
+      return inFlight;
     }
     inFlightUrlsRef.current.add(normalizedUrl);
 
@@ -186,7 +214,7 @@ function useDreamsState() {
       tags: [],
       needsReview: false,
       status: 'processing',
-      id: `dream-item-${Date.now()}`,
+      id: `dream-item-${Date.now()}-${++pendingSequence.current}`,
       dreamId: 'dream-processing',
       sourcePlatform: 'instagram',
       sourceUrl: normalizedUrl,
@@ -196,15 +224,17 @@ function useDreamsState() {
     };
     setError(undefined);
     setStatus('refreshing');
-    setItems((current) => [next, ...current]);
+    const revision = getAuthRevision();
+    setItems((current) => [next, ...current.filter(item => item.id !== existing?.id)]);
     shareInstagramLinkRemote(normalizedUrl, caption)
-      .then(() => refresh('refreshing'))
+      .then(() => { if (mounted.current && revision === getAuthRevision()) return refresh('refreshing'); })
       .catch((caught) => {
+        if (!mounted.current || revision !== getAuthRevision()) return;
         setError(caught instanceof Error ? caught.message : String(caught));
         setStatus('error');
         setItems((current) => current.map((item) => item.id === next.id ? {
           ...item,
-          summary: 'Save failed. Check backend/auth, then try again.',
+          summary: 'This place could not be saved. Your original link is kept so you can retry.',
           status: 'failed',
           updatedAt: new Date().toISOString(),
         } : item));
@@ -215,29 +245,41 @@ function useDreamsState() {
     return next;
   }, [refresh]);
 
-  const updateItem = React.useCallback((id: string, patch: Partial<DreamItem>) => {
-    setItems((current) => current.map((item) => {
-      if (item.id !== id) return item;
-      const merged = {
-        ...item,
-        ...patch,
-        dreamId: patch.country || patch.city ? dreamIdFor(patch.country ?? item.country, patch.city ?? item.city) : item.dreamId,
-        updatedAt: new Date().toISOString(),
-      };
-      return merged;
-    }));
+  const updateItem = React.useCallback(async (id: string, patch: Partial<DreamItem>) => {
+    if (!/^\d+$/.test(id)) throw new Error('Wait for this place to finish saving before editing.');
+    const revision = getAuthRevision();
+    const fields: Partial<Record<keyof DreamItem, string>> = { placeName: 'place_name', city: 'city', country: 'country', regionOrNeighborhood: 'region_or_neighborhood', summary: 'summary', category: 'category', tags: 'tags_json', googleMapsUrl: 'google_maps_url' };
+    const edits = Object.fromEntries(Object.entries(patch).filter(([key]) => fields[key as keyof DreamItem]).map(([key, value]) => [fields[key as keyof DreamItem], value ?? null]));
+    const response = await dreamsAuthenticatedFetch(`/dream-items/${id}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: patch.needsReview ? 'needs_review' : 'confirm', edits }) });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(readError(data, 'Your changes could not be saved.'));
+    if (!mounted.current || revision !== getAuthRevision()) return;
+    refreshSequence.current += 1;
+    const updated = mapApiDreamItem(data as ApiDreamItem);
+    setItems(current => current.map(item => item.id === id ? updated : item));
+    setLiveDreams(undefined);
+    setStatus('idle'); setError(undefined);
   }, []);
 
   const confirmItem = React.useCallback((id: string) => {
-    updateItem(id, {
+    return updateItem(id, {
       needsReview: false,
       status: 'confirmed',
       confidence: 0.9,
     });
   }, [updateItem]);
 
-  const deleteItem = React.useCallback((id: string) => {
+  const deleteItem = React.useCallback(async (id: string) => {
+    const revision = getAuthRevision();
+    if (/^\d+$/.test(id)) {
+      const response = await dreamsAuthenticatedFetch(`/dream-items/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(readError(await readJson(response), 'This place could not be deleted.'));
+    }
+    if (!mounted.current || revision !== getAuthRevision()) return;
+    refreshSequence.current += 1;
     setItems((current) => current.filter((item) => item.id !== id));
+    setLiveDreams(undefined);
+    setStatus('idle'); setError(undefined);
   }, []);
 
   return {
@@ -276,15 +318,15 @@ async function shareInstagramLinkRemote(sourceUrl: string, caption?: string) {
 }
 
 async function dreamsAuthenticatedFetch(path: string, init?: RequestInit) {
-  let token = await getDreamsAuthToken();
-  if (!token) throw new Error('No auth token. Sign in or enable DEV_MODE=true on the backend.');
-
-  let response = await fetch(`${getApiBaseUrl()}${path}`, withAuth(init, token));
-  if (response.status !== 401) return response;
-
-  token = await getDreamsAuthToken(true);
-  if (!token) return response;
-  response = await fetch(`${getApiBaseUrl()}${path}`, withAuth(init, token));
+  const token = getStoredToken() ?? await hydrateStoredToken();
+  if (!token) throw new Error('Sign in to access your saved places.');
+  const revision = getAuthRevision();
+  const response = await fetch(`${getApiBaseUrl()}${path}`, withAuth(init, token));
+  if (revision !== getAuthRevision() || token !== getStoredToken()) throw new Error('Your account changed.');
+  if (response.status === 401) {
+    await clearAuthToken();
+    throw new Error('Your session expired. Sign in again.');
+  }
   return response;
 }
 
@@ -297,37 +339,6 @@ function withAuth(init: RequestInit | undefined, token: string): RequestInit {
       'ngrok-skip-browser-warning': 'true',
     },
   };
-}
-
-async function getDreamsAuthToken(forceRefresh = false) {
-  if (forceRefresh) {
-    clearAuthToken();
-  } else {
-    const existing = getStoredToken() ?? await hydrateStoredToken();
-    if (existing) return existing;
-  }
-
-  if (!devTokenRequest) {
-    devTokenRequest = requestDreamsDevToken().finally(() => {
-      devTokenRequest = undefined;
-    });
-  }
-  return devTokenRequest;
-}
-
-async function requestDreamsDevToken() {
-  try {
-    const response = await fetch(`${getApiBaseUrl()}/auth/dev-token`, {
-      headers: { 'ngrok-skip-browser-warning': 'true' },
-    });
-    const data = await readJson(response);
-    if (!response.ok || !data || typeof data !== 'object' || !('access_token' in data)) return undefined;
-    const token = String((data as { access_token: unknown }).access_token);
-    storeAuthToken(token);
-    return token;
-  } catch {
-    return undefined;
-  }
 }
 
 async function readJson(response: Response) {
@@ -377,6 +388,9 @@ function mapApiDreamItem(item: ApiDreamItem): DreamItem {
     needsReview: item.needs_review,
     googleMapsUrl: item.google_maps_url ?? undefined,
     thumbnailUrl: item.thumbnail_url ?? undefined,
+    latitude: item.latitude ?? undefined,
+    longitude: item.longitude ?? undefined,
+    coordinatePrecision: item.coordinate_precision ?? undefined,
     status: item.status,
     createdAt: item.created_at,
     updatedAt: item.updated_at ?? item.created_at,
@@ -431,28 +445,6 @@ function buildDreams(items: DreamItem[]): Dream[] {
     .sort((a, b) => Number(b.processingCount > 0) - Number(a.processingCount > 0) || b.updatedAt.localeCompare(a.updatedAt));
 }
 
-function parseDraftDreamItem(sourceUrl: string, caption?: string): Omit<DreamItem, 'id' | 'dreamId' | 'sourcePlatform' | 'sourceUrl' | 'createdAt' | 'updatedAt'> {
-  const text = `${caption ?? ''} ${sourceUrl}`.toLowerCase();
-  const city = findCity(text);
-  const country = city?.country ?? findCountry(text);
-  const placeName = findLikelyPlaceName(caption);
-  const category = inferCategory(text);
-  const hasEnoughLocation = Boolean(city || country);
-  const needsReview = !placeName || !hasEnoughLocation;
-
-  return {
-    category,
-    placeName,
-    city: city?.city,
-    country: city?.country ?? country,
-    summary: caption?.trim() ? summarizeCaption(caption) : 'Instagram inspiration saved for review.',
-    tags: extractTags(caption),
-    confidence: needsReview ? 0.56 : 0.82,
-    needsReview,
-    status: needsReview ? 'needs_review' : 'parsed',
-  };
-}
-
 function normalizeSourceUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return 'https://www.instagram.com/';
@@ -489,56 +481,4 @@ function dreamTitleFor(country?: string, city?: string) {
 
 function slugify(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unsorted';
-}
-
-const cities = [
-  { city: 'Madrid', country: 'Spain' },
-  { city: 'Lisbon', country: 'Portugal' },
-  { city: 'Tokyo', country: 'Japan' },
-  { city: 'Kyoto', country: 'Japan' },
-  { city: 'Mexico City', country: 'Mexico' },
-  { city: 'Paris', country: 'France' },
-  { city: 'Rome', country: 'Italy' },
-  { city: 'Cape Town', country: 'South Africa' },
-];
-
-function findCity(text: string) {
-  return cities.find((entry) => text.includes(entry.city.toLowerCase()));
-}
-
-function findCountry(text: string) {
-  const countries = ['Spain', 'Portugal', 'Japan', 'Mexico', 'France', 'Italy', 'South Africa', 'Europe'];
-  return countries.find((country) => text.includes(country.toLowerCase()));
-}
-
-function inferCategory(text: string): DreamItemCategory {
-  if (text.includes('restaurant') || text.includes('dinner') || text.includes('food') || text.includes('tortilla')) return 'restaurant';
-  if (text.includes('cafe') || text.includes('coffee')) return 'cafe';
-  if (text.includes('bar') || text.includes('rooftop') || text.includes('cocktail')) return 'bar';
-  if (text.includes('hotel') || text.includes('resort')) return 'hotel';
-  if (text.includes('museum')) return 'museum';
-  if (text.includes('beach')) return 'beach';
-  if (text.includes('hike') || text.includes('tour')) return 'activity';
-  if (text.includes('park') || text.includes('mountain')) return 'nature';
-  return 'unknown';
-}
-
-function findLikelyPlaceName(caption?: string) {
-  if (!caption) return undefined;
-  const lines = caption.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const candidate = lines.find((line) => /^[A-Z][A-Za-z0-9 '&.-]{2,42}$/.test(line));
-  if (candidate) return candidate;
-  const known = ['Casa Dani', 'Table Mountain', 'Sagrada Familia'];
-  return known.find((place) => caption.toLowerCase().includes(place.toLowerCase()));
-}
-
-function summarizeCaption(caption: string) {
-  const clean = caption.replace(/\s+/g, ' ').trim();
-  if (clean.length <= 110) return clean;
-  return `${clean.slice(0, 107).trim()}...`;
-}
-
-function extractTags(caption?: string) {
-  if (!caption) return [];
-  return Array.from(caption.matchAll(/#([A-Za-z0-9_]+)/g)).map((match) => match[1].toLowerCase()).slice(0, 5);
 }

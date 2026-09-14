@@ -5,9 +5,10 @@ Dreams endpoints for Instagram share capture and review.
 from __future__ import annotations
 
 import re
+import math
 from datetime import datetime
 from typing import Any, Literal, Optional
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qs, unquote, urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
@@ -137,6 +138,9 @@ class DreamItemOut(BaseModel):
     google_place_id: Optional[str] = None
     google_maps_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    coordinate_precision: Optional[Literal["place", "area"]] = None
     status: str
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -518,10 +522,58 @@ def delete_empty_dream(db: Session, dream_id: Optional[int], user_id: int) -> No
         db.delete(dream)
 
 
+def dream_item_coordinates(item: DreamItem) -> tuple[Optional[float], Optional[float], Optional[str]]:
+    """Read already-saved coordinates. Never issue geocoding requests or infer city centres."""
+    def checked(lat, lon, precision="place"):
+        if isinstance(lat, bool) or isinstance(lon, bool):
+            return None, None, None
+        try:
+            latitude, longitude = float(lat), float(lon)
+        except (TypeError, ValueError):
+            return None, None, None
+        if not math.isfinite(latitude) or not math.isfinite(longitude) or abs(latitude) > 85.05112878 or abs(longitude) > 180:
+            return None, None, None
+        return latitude, longitude, precision
+
+    if item.google_maps_url:
+        parsed = urlparse(item.google_maps_url)
+        if parsed.scheme in {"http", "https"}:
+            exact = re.search(r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)", unquote(item.google_maps_url))
+            query = parse_qs(parsed.query)
+            pin = (query.get("query") or query.get("q") or [""])[0]
+            exact = exact or re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*", pin)
+            if exact:
+                result = checked(exact[1], exact[2])
+                if result[0] is not None:
+                    return result
+    metadata = item.raw_metadata_json or {}
+    match = metadata.get("place_match") if isinstance(metadata, dict) else None
+    raw = match.get("raw") if isinstance(match, dict) else None
+    if not isinstance(raw, dict):
+        return None, None, None
+    # Google Places location (when present in an existing response).
+    location = raw.get("location")
+    if isinstance(location, dict):
+        return checked(location.get("latitude"), location.get("longitude"))
+    properties = raw.get("properties") or {}
+    geometry = raw.get("geometry") or {}
+    if not isinstance(properties, dict) or not isinstance(geometry, dict):
+        return None, None, None
+    result_type = properties.get("result_type")
+    if result_type not in {"amenity", "building", "street", "suburb", "district", "neighbourhood"}:
+        return None, None, None
+    coordinates = geometry.get("coordinates")
+    precision = "area" if result_type in {"street", "suburb", "district", "neighbourhood"} else "place"
+    if geometry.get("type") == "Point" and isinstance(coordinates, list) and len(coordinates) >= 2:
+        return checked(coordinates[1], coordinates[0], precision)
+    return checked(properties.get("lat"), properties.get("lon"), precision)
+
+
 def dream_item_out(item: DreamItem) -> DreamItemOut:
     raw = item.raw_metadata_json or {}
     metadata = raw.get("instagram_metadata") if isinstance(raw, dict) else None
     thumbnail_url = f"/dream-items/{item.id}/thumbnail" if isinstance(metadata, dict) and metadata.get("thumbnail_url") else None
+    latitude, longitude, coordinate_precision = dream_item_coordinates(item)
     return DreamItemOut(
         id=item.id,
         dream_id=item.dream_id,
@@ -541,6 +593,9 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         google_place_id=item.google_place_id,
         google_maps_url=item.google_maps_url,
         thumbnail_url=thumbnail_url,
+        latitude=latitude,
+        longitude=longitude,
+        coordinate_precision=coordinate_precision,
         status=item.status,
         created_at=item.created_at,
         updated_at=item.updated_at,
@@ -1070,6 +1125,25 @@ def review_item(
 
     if payload.edits:
         edits = payload.edits.model_dump(exclude_unset=True)
+        identity_changed = any(
+            field in edits and str(edits[field] or "").strip().casefold() != str(getattr(item, field) or "").strip().casefold()
+            for field in ("place_name", "city", "country", "region_or_neighborhood")
+        )
+        maps_changed = "google_maps_url" in edits and edits["google_maps_url"] != item.google_maps_url
+        if identity_changed or maps_changed:
+            raw = dict(item.raw_metadata_json or {})
+            previous = raw.pop("place_match", None)
+            if previous or item.google_maps_url or item.google_place_id:
+                history = raw.get("previous_place_matches")
+                raw["previous_place_matches"] = [*(history if isinstance(history, list) else []), {
+                    "place_match": previous, "google_maps_url": item.google_maps_url,
+                    "google_place_id": item.google_place_id, "replaced_at": datetime.utcnow().isoformat(),
+                }]
+            item.raw_metadata_json = raw
+            if "google_place_id" not in edits:
+                item.google_place_id = None
+            if identity_changed and not maps_changed:
+                edits["google_maps_url"] = None
         dream_id = edits.pop("dream_id", None)
         if dream_id is not None:
             dream = db.query(Dream).filter(Dream.id == dream_id, Dream.user_id == current_user.id).first()

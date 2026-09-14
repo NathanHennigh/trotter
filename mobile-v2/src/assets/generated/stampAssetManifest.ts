@@ -82,6 +82,7 @@ export const countryIconAssets = {
   russia_saint_basils_cathedral: require('../../../assets/processed/country-icons/78_russia_saint-basils-cathedral.png'),
   mongolia_yurt: require('../../../assets/processed/country-icons/79_mongolia_yurt.png'),
   kazakhstan_bayterek_tower: require('../../../assets/processed/country-icons/80_kazakhstan_bayterek-tower.png'),
+  somaliland_laas_geel: require('../../../assets/processed/country-icons/81_somaliland_laas-geel.png'),
 } as const;
 
 export const stampShapeAssets = {

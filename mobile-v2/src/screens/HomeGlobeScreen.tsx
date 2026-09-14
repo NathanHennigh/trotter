@@ -1,342 +1,603 @@
-import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GlobeScene } from '../components/GlobeScene';
+import React, { useMemo, useState } from "react";
 import {
-  BottomNav,
-  DarkPanel,
-  IconButton,
-  IconGlyph,
-  NewFlightsBanner,
-  PassportViewButton,
-  SplitFlapNumber,
-  SplitFlapStatsPanel,
-  SyncStatusPill,
-  TrotterHeaderTag,
-} from '../components/trotter/TrotterKit';
-import { BottomNavTab } from '../data/trotterMock';
-import { FlightRoute, RoutePoint } from '../data/demoTravel';
-import { useTravelTrips } from '../services/travelTrips';
-import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BottomNav } from "../components/trotter/TrotterKit";
+import { WorldWindowGlobe } from "../components/world-window/WorldWindowGlobe";
+import {
+  WWButton,
+  WWEmblem,
+  WWIcon,
+} from "../components/world-window/WorldWindowUI";
+import {
+  flightCountryKey,
+  type GeoCountry,
+} from "../components/world-window/globe-geography";
+import { buildPassportArrivals } from "../components/world-window/passport/passport-arrivals";
+import type { BottomNavTab, TripSummary } from "../data/trotterMock";
+import type { FlightRoute } from "../data/demoTravel";
+import { useTravelTrips } from "../services/travelTrips";
+import { colors, fonts, layout } from "../theme/trotterTheme";
 
-export function HomeGlobeScreen({ active, onChange }: { active: BottomNavTab; onChange: (tab: BottomNavTab) => void }) {
+type Props = {
+  active: BottomNavTab;
+  onChange: (tab: BottomNavTab) => void;
+  onOpenTrip?: (trip: TripSummary, flightId?: string) => void;
+  onOpenCountry?: (code: string) => void;
+  onOpenCollection?: (kind: "countries" | "airports") => void;
+  filterYear?: string;
+  onFilterYear?: (year: string) => void;
+};
+export function HomeGlobeScreen({
+  active,
+  onChange,
+  onOpenTrip,
+  onOpenCountry,
+  onOpenCollection,
+  filterYear,
+  onFilterYear,
+}: Props) {
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
-  const screenPadding = width < 390 ? 16 : layout.screenPadding;
-  const contentWidth = width - screenPadding * 2;
-  const headerGap = width < 390 ? 8 : 10;
-  const headerTagWidth = Math.floor(contentWidth * (width < 390 ? 0.53 : 0.54));
-  const statsWidth = contentWidth - headerTagWidth - headerGap;
-  const globeHeight = Math.max(540, Math.min(650, height * 0.66));
-  const { trips, profile, source, status, lastSyncedAt, syncFromGmail } = useTravelTrips();
-  const isInitialLiveLoading = status === 'loading' && source !== 'api';
-  const displayedTrips = isInitialLiveLoading ? [] : trips;
-  const displayedProfile = isInitialLiveLoading
-    ? { ...profile, flights: 0, countries: 0, airports: 0, airlines: 0, miles: 0, hoursInAir: 0 }
-    : profile;
-  const liveRoutes = React.useMemo(() => displayedTrips.flatMap((trip) =>
-    (trip.segments ?? []).flatMap((segment) => {
-      if (!segment.depPoint || !segment.arrPoint) return [];
-      return [{
-        id: segment.id,
-        from: segment.depPoint,
-        to: segment.arrPoint,
-        tripTitle: trip.title,
-        depTime: segment.depTime,
-        arrTime: segment.arrTime,
-        airline: segment.airline,
-        flightNumber: segment.flightNumber,
-        distanceKm: segment.distanceMiles ? segment.distanceMiles / 0.621371 : undefined,
-      } satisfies FlightRoute];
-    })
-  ), [displayedTrips]);
-  const livePoints = React.useMemo(() => {
-    const points = new Map<string, RoutePoint>();
-    liveRoutes.forEach((route) => {
-      points.set(route.from.code, route.from);
-      points.set(route.to.code, route.to);
-    });
-    return Array.from(points.values());
-  }, [liveRoutes]);
-  const travelYears = React.useMemo(() => {
-    const years = displayedTrips
-      .map((trip) => Number(trip.startDate.slice(0, 4)))
-      .filter((year) => Number.isFinite(year) && year > 1900)
-      .sort((a, b) => b - a);
-    return {
-      latest: years[0] ?? new Date().getFullYear(),
-      count: new Set(years).size,
-    };
-  }, [displayedTrips]);
-  const [selectedRoute, setSelectedRoute] = React.useState<FlightRoute | null>(null);
-  const syncLabel = source === 'api'
-    ? `Synced ${formatSyncTime(lastSyncedAt)}`
-    : status === 'loading' || status === 'syncing'
-      ? 'Connecting...'
-      : 'Snapshot mode';
+  const { trips, status, error, syncFromGmail } = useTravelTrips();
+  const [localYear, setLocalYear] = useState("All years");
+  const year = filterYear ?? localYear;
+  const setYear = (next: string) => {
+    setLocalYear(next);
+    onFilterYear?.(next);
+  };
+  const [yearOpen, setYearOpen] = useState(false);
+  const [mapStyle, setMapStyle] = useState<"classic" | "nasa">("classic");
+  const [selected, setSelected] = useState<FlightRoute | null>(null);
+  const [country, setCountry] = useState<GeoCountry | null>(null);
+  const clear = () => {
+    setSelected(null);
+    setCountry(null);
+  };
+  const years = useMemo(
+    () =>
+      [
+        ...new Set(
+          trips
+            .flatMap((t) =>
+              (t.segments ?? []).map((s) => s.depTime.slice(0, 4)),
+            )
+            .filter((y) => /^\d{4}$/.test(y)),
+        ),
+      ]
+        .sort()
+        .reverse(),
+    [trips],
+  );
+  const routes = useMemo(
+    () =>
+      trips.flatMap((trip) =>
+        (trip.segments ?? []).flatMap((segment) => {
+          if (
+            !segment.depPoint ||
+            !segment.arrPoint ||
+            (year !== "All years" && !segment.depTime.startsWith(year))
+          )
+            return [];
+          return [
+            {
+              id: segment.id,
+              from: segment.depPoint,
+              to: segment.arrPoint,
+              tripId: trip.backendId,
+              tripTitle: trip.title,
+              depTime: segment.depTime,
+              arrTime: segment.arrTime,
+              airline: segment.airline,
+              flightNumber: segment.flightNumber,
+              distanceKm: segment.distanceMiles
+                ? segment.distanceMiles / 0.621371
+                : undefined,
+            } satisfies FlightRoute,
+          ];
+        }),
+      ),
+    [trips, year],
+  );
+  const ports = useMemo(
+    () => [
+      ...new Map(
+        routes.flatMap((r) => [
+          [r.from.code, r.from] as const,
+          [r.to.code, r.to] as const,
+        ]),
+      ).values(),
+    ],
+    [routes],
+  );
+  const visited = useMemo(() => {
+    const shown =
+      year === "All years"
+        ? trips
+        : trips
+            .filter((t) => t.segments?.some((s) => s.depTime.startsWith(year)))
+            .map((t) => ({
+              ...t,
+              segments: t.segments?.filter((s) => s.depTime.startsWith(year)),
+            }));
+    return [
+      ...new Set(
+        buildPassportArrivals(shown)
+          .map((a) =>
+            flightCountryKey(a.country, a.travelCountryKey, a.airportCode),
+          )
+          .filter((code): code is string => Boolean(code)),
+      ),
+    ];
+  }, [trips, year]);
+  const flightCount = useMemo(
+    () =>
+      trips
+        .flatMap((t) => t.segments ?? [])
+        .filter((s) => year === "All years" || s.depTime.startsWith(year))
+        .length,
+    [trips, year],
+  );
+  const selectedTrip = selected
+    ? trips.find((t) => t.segments?.some((s) => s.id === selected.id))
+    : null;
+  const openTrip = () => {
+    if (selectedTrip && onOpenTrip) onOpenTrip(selectedTrip, selected?.id);
+    else onChange("trips");
+    clear();
+  };
+  const syncing = status === "syncing";
+  const busy = syncing || status === "loading";
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24 }}
+    <View style={styles.screen}>
+      <WorldWindowGlobe
+        routes={routes}
+        active={active === "globe"}
+        mapStyle={mapStyle}
+        cycle={false}
+        visited={visited}
+        selectedRouteId={selected?.id}
+        selectedCountryCode={country?.code}
+        onRoute={setSelected}
+        onCountry={setCountry}
+        onClear={clear}
+      />
+      <View
+        pointerEvents="box-none"
+        style={[styles.top, { top: insets.top + 18 }]}
       >
-        <View style={[styles.topRow, { paddingHorizontal: screenPadding, gap: headerGap }]}>
-          <TrotterHeaderTag width={headerTagWidth} year={travelYears.latest} />
-          <View style={[styles.statsWrap, { width: statsWidth }]}>
-            <SplitFlapStatsPanel width={statsWidth} compact flights={displayedProfile.flights} countries={displayedProfile.countries} airports={displayedProfile.airports} />
-            <SyncStatusPill lastSyncedLabel={syncLabel} sourceLabel={source === 'api' ? 'Live DB' : 'Local'} />
+        <View style={styles.controls}>
+          <View pointerEvents="none" style={styles.brand}>
+            <WWEmblem size={33} />
           </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Filter flights by year"
+            onPress={() => setYearOpen(true)}
+            style={({ pressed }) => [styles.year, pressed && styles.pressed]}
+          >
+            <Text style={styles.yearText} numberOfLines={1}>{year}</Text>
+            <WWIcon name="down" size={15} />
+          </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                mapStyle === "classic"
+                  ? "Switch to NASA imagery"
+                  : "Switch to classic globe"
+              }
+              accessibilityState={{ selected: mapStyle === "nasa" }}
+              onPress={() =>
+                setMapStyle((v) => (v === "classic" ? "nasa" : "classic"))
+              }
+              style={({ pressed }) => [
+                styles.iconButton,
+                styles.textureButton,
+                mapStyle === "nasa" && styles.chosen,
+                pressed && styles.pressed,
+              ]}
+            >
+              <WWIcon name="globe" size={21} />
+            </Pressable>
         </View>
-
-        <View style={[styles.filterRow, { paddingHorizontal: screenPadding }]}>
-          <DarkPanel padding={spacing.sm} radius={8} style={styles.yearChip}>
-            <Text allowFontScaling={false} style={styles.yearText}>{travelYears.latest}</Text>
-            <Text allowFontScaling={false} style={styles.chevron}>v</Text>
-          </DarkPanel>
-          <View style={styles.controlStack}>
-            <IconButton variant="dark" shape="circle" icon={<IconGlyph name="crosshair" size={23} />} />
-            <IconButton variant="dark" shape="circle" icon={<IconGlyph name="sliders" size={23} />} />
+        {!trips.length && !busy ? (
+          <View style={styles.import}>
+            <Text style={styles.importTitle}>Add your flight history</Text>
+            <Text style={styles.body}>
+              Find flight confirmations in your connected Gmail account.
+            </Text>
+            <WWButton label="Import flights" onPress={syncFromGmail} />
+            {error ? <Text style={styles.error}>{error}</Text> : null}
           </View>
-        </View>
-
-        <View style={[styles.globeWrap, { height: globeHeight }]}>
-          <GlobeScene
-            key={`live-globe-${source}-${liveRoutes.length}`}
-            routes={liveRoutes}
-            mapPoints={livePoints}
-            onRoutePress={setSelectedRoute}
-          />
-          <DarkPanel padding={spacing.sm} radius={12} style={[styles.milesCard, { left: screenPadding }]}>
-            <View style={styles.milesTop}>
-              <IconGlyph name="plane" color={colors.creamText} size={20} />
-              <Text allowFontScaling={false} style={styles.milesLabel}>YOU'VE FLOWN</Text>
-            </View>
-            <SplitFlapNumber value={displayedProfile.miles} />
-            <Text allowFontScaling={false} style={styles.milesUnit}>MILES</Text>
-          </DarkPanel>
-          <View style={[styles.passportButtonWrap, { right: screenPadding }]}>
-            <PassportViewButton />
+        ) : null}
+        {busy ? (
+          <View style={styles.loading}>
+            <ActivityIndicator color={colors.blue} size="small" />
+            <Text style={styles.body}>
+              {syncing ? "Importing your flights…" : "Loading your flights…"}
+            </Text>
           </View>
-          {selectedRoute ? (
-            <TripArcModal
-              route={selectedRoute}
-              onClose={() => setSelectedRoute(null)}
-              onViewTrip={() => {
-                setSelectedRoute(null);
-                onChange('trips');
-              }}
-            />
-          ) : null}
-        </View>
-        <View style={[styles.bannerWrap, { width: contentWidth, marginHorizontal: screenPadding }]}>
-          <NewFlightsBanner
-            count={displayedProfile.flights}
-            eyebrow={isInitialLiveLoading ? 'LOADING LIVE FLIGHTS' : source === 'api' ? 'LIVE FLIGHTS' : `${travelYears.count} YEARS LOGGED`}
-            title={isInitialLiveLoading ? 'Loading live trips' : status === 'syncing' ? 'Syncing Gmail trips' : 'Sync Gmail trips'}
-            sourceLabel={source === 'api' ? 'live database' : 'Google'}
-            actionLabel={status === 'syncing' ? 'SYNCING' : 'SYNC'}
-            onReview={syncFromGmail}
-          />
-        </View>
-      </ScrollView>
-      <BottomNav active={active} onChange={onChange} />
-    </View>
-  );
-}
-
-function TripArcModal({
-  route,
-  onClose,
-  onViewTrip,
-}: {
-  route: FlightRoute;
-  onClose: () => void;
-  onViewTrip: () => void;
-}) {
-  const miles = typeof route.distanceKm === 'number' ? Math.round(route.distanceKm * 0.621371).toLocaleString() : undefined;
-  const title = route.tripTitle || `${route.from.city} to ${route.to.city}`;
-  const flightLabel = [route.airline, route.flightNumber].filter(Boolean).join(' ');
-
-  return (
-    <View style={styles.arcModal}>
-      <View style={styles.arcModalHeader}>
-        <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.arcModalKicker}>FLIGHT PATH</Text>
-        <Pressable onPress={onClose} style={styles.arcModalClose}>
-          <Text allowFontScaling={false} style={styles.arcModalCloseText}>x</Text>
-        </Pressable>
+        ) : null}
       </View>
-      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} adjustsFontSizeToFit style={styles.arcModalTitle}>{title}</Text>
-      <Text allowFontScaling={false} numberOfLines={1} style={styles.arcModalRoute}>{route.from.code}{' -> '}{route.to.code}</Text>
-      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.arcModalMeta}>
-        {[formatRouteDate(route.depTime), flightLabel || undefined, miles ? `${miles} mi` : undefined].filter(Boolean).join(' / ')}
-      </Text>
-      <Pressable onPress={onViewTrip} style={styles.arcModalButton}>
-        <Text allowFontScaling={false} style={styles.arcModalButtonText}>VIEW TRIP</Text>
-      </Pressable>
+      <View
+        pointerEvents="box-none"
+        style={[
+          styles.bottom,
+          { bottom: insets.bottom + layout.bottomNavHeight + 12 },
+        ]}
+      >
+        {selected ? (
+          <View style={styles.ticket}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`View trip for ${selected.from.code} to ${selected.to.code}`}
+              onPress={openTrip}
+              style={({ pressed }) => [
+                styles.ticketBody,
+                pressed && styles.pressed,
+              ]}
+            >
+              <View style={styles.ticketHeading}>
+                <Text style={styles.ticketAirline} numberOfLines={1}>
+                  {selected.airline || "Flight"}
+                </Text>
+                {selected.flightNumber ? (
+                  <Text style={styles.flightNumber}>
+                    {selected.flightNumber}
+                  </Text>
+                ) : null}
+              </View>
+              <View style={styles.route}>
+                <View style={styles.endpoint}>
+                  <Text style={styles.airport}>{selected.from.code}</Text>
+                  <Text style={styles.city} numberOfLines={1}>
+                    {selected.from.city}
+                  </Text>
+                </View>
+                <WWIcon name="plane" size={25} color={colors.blue} />
+                <View style={[styles.endpoint, { alignItems: "flex-end" }]}>
+                  <Text style={styles.airport}>{selected.to.code}</Text>
+                  <Text style={styles.city} numberOfLines={1}>
+                    {selected.to.city}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.tear}>
+                <Text style={styles.ticketDate}>
+                  {selected.depTime
+                    ? new Date(selected.depTime).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })
+                    : ""}
+                </Text>
+                <View style={styles.ticketLink}>
+                  <Text style={styles.link}>View trip</Text>
+                  <WWIcon name="arrow" size={16} />
+                </View>
+              </View>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss flight"
+              onPress={clear}
+              style={styles.dismiss}
+            >
+              <WWIcon name="close" size={16} />
+            </Pressable>
+          </View>
+        ) : country ? (
+          <View style={styles.countryCard}>
+            <Text style={styles.countryTitle}>{country.name}</Text>
+            <Text style={styles.body}>
+              {visited.includes(country.code)
+                ? "In your travel history"
+                : "No flights recorded"}
+            </Text>
+            {visited.includes(country.code) ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  onOpenCountry?.(country.code);
+                  clear();
+                }}
+                style={styles.countryLink}
+              >
+                <Text style={styles.link}>View passport entry</Text>
+                <WWIcon name="arrow" size={17} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss country"
+              onPress={clear}
+              style={styles.dismiss}
+            >
+              <WWIcon name="close" size={16} />
+            </Pressable>
+          </View>
+        ) : null}
+        <View style={styles.stats}>
+          {[
+            { value: flightCount, label: "Flights", open: () => onChange("trips") },
+            { value: visited.length, label: "Countries", open: () => onOpenCollection ? onOpenCollection("countries") : onChange("passport") },
+            { value: ports.length, label: "Airports", open: () => onOpenCollection ? onOpenCollection("airports") : onChange("passport") },
+          ].map(({ value, label, open }) => (
+            <Pressable
+              key={String(label)}
+              accessibilityRole="button"
+              accessibilityLabel={`${value} ${label.toLowerCase()}`}
+              onPress={() => { clear(); open(); }}
+              style={({ pressed }) => [styles.stat, pressed && styles.pressed]}
+            >
+              <Text style={styles.statNumber}>{value}</Text>
+              <Text style={styles.statLabel}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <BottomNav
+        active={active}
+        onChange={(tab) => {
+          clear();
+          onChange(tab);
+        }}
+      />
+      <Modal
+        visible={yearOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setYearOpen(false)}
+      >
+        <View style={styles.modal}>
+          <Pressable
+            accessibilityLabel="Dismiss years"
+            style={StyleSheet.absoluteFill}
+            onPress={() => setYearOpen(false)}
+          />
+          <View
+            style={[
+              styles.sheet,
+              { paddingBottom: Math.max(insets.bottom, 20) },
+            ]}
+          >
+            <Text style={styles.sheetTitle}>Flight history</Text>
+            <ScrollView>
+              {["All years", ...years].map((y) => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: y === year }}
+                  key={y}
+                  onPress={() => {
+                    setYear(y);
+                    setYearOpen(false);
+                    clear();
+                  }}
+                  style={styles.yearOption}
+                >
+                  <Text style={styles.yearOptionText}>{y}</Text>
+                  {year === y ? <WWIcon name="check" size={20} /> : null}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
-
-function formatRouteDate(value?: string | null) {
-  if (!value) return undefined;
-  const parsed = new Date(value.replace(' ', 'T'));
-  if (Number.isNaN(parsed.getTime())) return value.split(' ')[0];
-  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function formatSyncTime(value?: string) {
-  if (!value) return 'just now';
-  const parsed = new Date(value).getTime();
-  if (Number.isNaN(parsed)) return 'just now';
-  const minutes = Math.max(0, Math.round((Date.now() - parsed) / 60000));
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  return `${hours}h ago`;
-}
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.appBackground,
-  },
-  topRow: {
-    zIndex: 5,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  statsWrap: {
-    flexShrink: 1,
-    minWidth: 0,
-  },
-  filterRow: {
-    zIndex: 5,
-    marginTop: 18,
-    paddingHorizontal: spacing.lg,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  yearChip: {
-    minWidth: 84,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  yearText: {
-    color: colors.creamText,
-    fontFamily: fonts.sansBold,
-    fontSize: 20,
-  },
-  chevron: {
-    color: colors.subtleText,
-    fontFamily: fonts.sansBold,
-    fontSize: 14,
-  },
-  controlStack: {
+  screen: { flex: 1, backgroundColor: colors.paperSoft },
+  top: { position: "absolute", left: 24, right: 24 },
+  brand: { width: 48, height: 44, justifyContent: "center" },
+  controls: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    minHeight: 44,
     gap: 12,
   },
-  globeWrap: {
-    marginTop: -140,
-    justifyContent: 'center',
-    overflow: 'hidden',
+  year: {
+    minHeight: 44,
+    flexShrink: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
-  milesCard: {
-    position: 'absolute',
-    bottom: 82,
-    width: 174,
+  yearText: { flexShrink: 1, fontFamily: fonts.sans, fontSize: 15, color: colors.ink },
+  iconButton: {
+    height: 44,
+    minWidth: 44,
+    paddingHorizontal: 7,
+    flexDirection: "row",
+    gap: 7,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: colors.paperSoft,
   },
-  milesTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 6,
+  textureButton: { width: 48, borderWidth: 1, borderColor: colors.paperBorder },
+  chosen: { backgroundColor: colors.paperDeep },
+  pressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
+  bottom: { position: "absolute", left: 24, right: 24, gap: 20 },
+  stats: {
+    flexDirection: "row",
+    backgroundColor: colors.paperSoft,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.blue,
+    borderRadius: 8,
+    minHeight: 78,
   },
-  milesLabel: {
-    color: colors.creamText,
-    fontFamily: fonts.sansBold,
-    fontSize: 11,
+  stat: {
+    flex: 1,
+    alignItems: "center",
+    minHeight: 52,
+    justifyContent: "center",
+    gap: 2,
   },
-  milesUnit: {
-    color: colors.subtleText,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-    textAlign: 'right',
-    marginTop: 5,
+  statNumber: {
+    fontFamily: fonts.mono,
+    fontSize: 32,
+    lineHeight: 32,
+    letterSpacing: -1.5,
+    includeFontPadding: false,
+    color: colors.ink,
   },
-  passportButtonWrap: {
-    position: 'absolute',
-    bottom: 72,
+  statLabel: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 13,
+    lineHeight: 17,
+    includeFontPadding: false,
+    color: colors.mutedInk,
   },
-  bannerWrap: {
-    marginTop: -28,
-  },
-  arcModal: {
-    position: 'absolute',
-    left: 24,
-    right: 24,
-    bottom: 84,
-    borderRadius: 12,
+  ticket: {
     borderWidth: 1,
     borderColor: colors.paperBorder,
+    borderRadius: 4,
     backgroundColor: colors.paper,
-    padding: spacing.md,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
+    elevation: 3,
   },
-  arcModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
+  ticketBody: { padding: 15, paddingBottom: 0 },
+  ticketHeading: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 10,
+    paddingRight: 31,
   },
-  arcModalKicker: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 10,
-    letterSpacing: 1.2,
-  },
-  arcModalClose: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.dashboard,
-  },
-  arcModalCloseText: {
-    color: colors.creamText,
-    fontFamily: fonts.sansBold,
-    fontSize: 14,
-    lineHeight: 16,
-  },
-  arcModalTitle: {
-    color: colors.ink,
-    fontFamily: fonts.display,
-    fontSize: 25,
-    marginTop: 2,
-  },
-  arcModalRoute: {
-    color: colors.tealDeep,
-    fontFamily: fonts.sansBold,
-    fontSize: 18,
-    letterSpacing: 1,
-    marginTop: 3,
-  },
-  arcModalMeta: {
+  flightNumber: { fontFamily: fonts.mono, fontSize: 12, color: colors.blue },
+  ticketAirline: {
     color: colors.mutedInk,
     fontFamily: fonts.sansRegular,
     fontSize: 12,
-    marginTop: 4,
+    flex: 1,
   },
-  arcModalButton: {
-    alignSelf: 'flex-start',
-    marginTop: spacing.sm,
-    borderRadius: 8,
-    backgroundColor: colors.dashboard,
-    paddingHorizontal: 13,
-    paddingVertical: 9,
+  route: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 12,
+    marginBottom: 15,
+    gap: 12,
   },
-  arcModalButtonText: {
-    color: colors.creamText,
-    fontFamily: fonts.sansBold,
-    fontSize: 11,
+  endpoint: { flex: 1 },
+  airport: {
+    fontFamily: fonts.mono,
+    color: colors.blue,
+    fontSize: 35,
+    lineHeight: 35,
+    letterSpacing: -1.3,
+    includeFontPadding: false,
   },
+  city: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 12,
+    color: colors.mutedInk,
+    marginTop: 2,
+  },
+  tear: {
+    borderTopWidth: 1,
+    borderStyle: "dashed",
+    borderColor: colors.paperBorder,
+    paddingVertical: 14,
+    marginHorizontal: -15,
+    paddingHorizontal: 15,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  ticketDate: {
+    fontFamily: fonts.sansRegular,
+    fontSize: 12,
+    color: colors.mutedInk,
+  },
+  ticketLink: { flexDirection: "row", alignItems: "center", gap: 6 },
+  link: { fontFamily: fonts.sansSemi, color: colors.blue, fontSize: 13 },
+  dismiss: {
+    position: "absolute",
+    right: 2,
+    top: 2,
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countryCard: {
+    backgroundColor: colors.paper,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: colors.paperBorder,
+    borderRadius: 4,
+    gap: 7,
+  },
+  countryTitle: {
+    fontFamily: fonts.display,
+    fontSize: 29,
+    color: colors.ink,
+    paddingRight: 25,
+  },
+  countryLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingTop: 12,
+    minHeight: 44,
+  },
+  import: {
+    padding: 20,
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.paperBorder,
+    borderRadius: 4,
+    marginTop: 20,
+    gap: 15,
+  },
+  importTitle: { fontFamily: fonts.display, color: colors.ink, fontSize: 26 },
+  body: {
+    fontFamily: fonts.sansRegular,
+    color: colors.mutedInk,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  error: { color: colors.red, fontFamily: fonts.sansRegular, fontSize: 13 },
+  loading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 15,
+  },
+  modal: { flex: 1, justifyContent: "flex-end", backgroundColor: "#182C3B66" },
+  sheet: {
+    maxHeight: "70%",
+    backgroundColor: colors.paperSoft,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+  },
+  sheetTitle: {
+    fontFamily: fonts.display,
+    fontSize: 30,
+    color: colors.ink,
+    marginBottom: 16,
+  },
+  yearOption: {
+    minHeight: 52,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderColor: colors.paperBorderSoft,
+  },
+  yearOptionText: { fontFamily: fonts.mono, color: colors.ink, fontSize: 16 },
 });

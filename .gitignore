@@ -60,6 +60,7 @@ node_modules/
 .expo-export-check/
 dist/
 /mobile-v2/dist-*/
+/mobile-v2/*-world-window.log
 build/
 *.tsbuildinfo
 

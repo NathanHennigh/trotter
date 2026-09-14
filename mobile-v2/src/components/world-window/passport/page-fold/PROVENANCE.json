@@ -1,0 +1,30 @@
+{
+  "package": "page-flip",
+  "version": "2.0.7",
+  "upstream": "https://github.com/Nodlik/StPageFlip",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2020 Nodlik",
+  "files": [
+    {
+      "path": "src/Helper.ts",
+      "sha256": "3bff04d1162c3701190009c1caf48904b4d2395926b8827a633ae6d242db7a25"
+    },
+    {
+      "path": "src/Flip/FlipCalculation.ts",
+      "sha256": "0f910941124f6d79a0ebc439219beeb2f9af0cc054bf41be15ee82f8799fdbb1"
+    }
+  ],
+  "transpiler": {
+    "name": "typescript",
+    "version": "5.9.3",
+    "target": "ES2020",
+    "module": "ES2020"
+  },
+  "changes": [
+    "Removed all imports; no DOM, rendering, collection, or engine dependency.",
+    "Inlined FlipCorner TOP=top/BOTTOM=bottom and FlipDirection FORWARD=0/BACK=1.",
+    "Made Helper module-private; FlipCalculation is the only runtime export.",
+    "Removed comments during transpilation; retained attribution in module header and LICENSE.",
+    "No changes to the calculation algorithm."
+  ]
+}

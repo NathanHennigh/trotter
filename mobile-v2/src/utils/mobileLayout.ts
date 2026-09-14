@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-const WEB_PREVIEW_WIDTH = 393;
+const WEB_PREVIEW_WIDTH = 430;
 const MAX_DEVICE_WIDTH = 430;
 
 export function getMobileVisualWidth(windowWidth: number) {

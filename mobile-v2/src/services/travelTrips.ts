@@ -1,12 +1,16 @@
 import React from 'react';
-import { Linking } from 'react-native';
+import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { CountryIconKey, StampShapeKey } from '../components/trotter/stamps/PngStamp';
-import { realTravelerProfile, realTravelTrips } from '../data/realTravelSnapshot';
+import type { CountryIconKey } from '../components/trotter/stamps/PngStamp';
+import { stampIdentity } from '../components/trotter/stamps/stampIdentity';
 import type { TravelerProfile, TripSummary } from '../data/trotterMock';
 import type { TrotterAccent } from '../theme/trotterTheme';
+import { firstCountryEntry } from '../utils/countryArrivals';
+import { buildPassportArrivals } from '../components/world-window/passport/passport-arrivals';
+import { travelCountry, SOMALILAND_ICON_KEY } from '../utils/travelCountry';
 import { groupTripItineraries } from '../utils/tripItineraries';
-import { requestGoogleAuthToken } from './googleAuth';
+import { cancelGoogleAuthSession, consumeWebOAuthCallback, GoogleSignInCanceled, requestGoogleAuthToken } from './googleAuth';
 
 type ApiSegment = {
   id: number;
@@ -43,17 +47,9 @@ type AirportInfo = {
 };
 
 const ACCENTS: TrotterAccent[] = ['red', 'teal', 'mustard', 'blue', 'green'];
-const STAMP_COLORS = ['#B6543F', '#2F5E9E', '#52745A', '#9A5A32', '#C79A43'];
-const SHAPES: StampShapeKey[] = [
-  'roundedImmigrationWithBand',
-  'circularCityDoubleLine',
-  'archedCountryCanonical',
-  'shieldBadgeRounded',
-  'roundedImmigrationCanonical',
-];
-
 const COUNTRY_ICONS: Record<string, CountryIconKey> = {
   'United States': 'united_states_golden_gate_bridge',
+  Somaliland: SOMALILAND_ICON_KEY,
   'Dominican Republic': 'dominican_republic_puerta_del_conde',
   Singapore: 'singapore_marina_bay_sands',
   Mexico: 'mexico_chichen_itza',
@@ -126,23 +122,29 @@ const COUNTRY_ABBREVIATIONS: Record<string, string> = {
   'United Arab Emirates': 'UAE',
 };
 
-const DEFAULT_API_BASE_URL = 'http://localhost:8000';
-const CONFIGURED_API_BASE_URL = process.env.EXPO_PUBLIC_TROTTER_API_URL;
-const CONFIGURED_AUTH_TOKEN = process.env.EXPO_PUBLIC_TROTTER_AUTH_TOKEN;
+const AUTH_TOKEN_STORAGE_KEY = 'trotter.auth.v2';
+const LEGACY_TOKEN_STORAGE_KEY = 'trotterAuthToken';
 let memoryAuthToken: string | undefined;
-const AUTH_TOKEN_STORAGE_KEY = 'trotterAuthToken';
+let authRevision = 0;
+let storageQueue: Promise<unknown> = Promise.resolve();
+const authListeners = new Set<() => void>();
 
-export type TravelTripsSource = 'snapshot' | 'api';
+export type TravelTripsSource = 'api';
 export type TravelTripsStatus = 'idle' | 'loading' | 'refreshing' | 'syncing' | 'error';
-
+export type TravelAuthStatus = 'loading' | 'signed-out' | 'signed-in';
+type AccountIdentity = { user_id: number; email: string; name?: string | null };
 type TravelTripsContextValue = {
   trips: TripSummary[];
   profile: TravelerProfile;
   source: TravelTripsSource;
   status: TravelTripsStatus;
+  authStatus: TravelAuthStatus;
   error?: string;
+  accountId?: number;
   accountEmail?: string;
   lastSyncedAt?: string;
+  signIn: () => Promise<void>;
+  signOut: () => Promise<void>;
   refresh: () => Promise<void>;
   loadTripDetail: (backendId: number) => Promise<TripSummary | undefined>;
   syncFromGmail: () => Promise<void>;
@@ -150,310 +152,340 @@ type TravelTripsContextValue = {
 
 type ImportJobStatus = {
   state?: string;
-  scanned_count?: number;
   parsed_count?: number;
   segment_count?: number;
   error_message?: string | null;
   detail?: unknown;
 };
 
-const snapshotTrips = realTravelTrips.map(trip => ({
-  ...trip,
-  title: displayTitle(trip.title, trip.country, trip.countryCode, trip.city)
-}));
-
 const TravelTripsContext = React.createContext<TravelTripsContextValue | null>(null);
-
 export function TravelTripsProvider({ children }: { children: React.ReactNode }) {
-  const value = useTravelTripsState();
-  return React.createElement(TravelTripsContext.Provider, { value }, children);
+  return React.createElement(TravelTripsContext.Provider, { value: useTravelTripsState() }, children);
 }
-
 export function useTravelTrips() {
-  return React.useContext(TravelTripsContext) ?? useTravelTripsState();
+  const context = React.useContext(TravelTripsContext);
+  if (!context) throw new Error('useTravelTrips requires TravelTripsProvider');
+  return context;
 }
 
 function useTravelTripsState(): TravelTripsContextValue {
-  const [trips, setTrips] = React.useState<TripSummary[]>(snapshotTrips);
-  const [profile, setProfile] = React.useState<TravelerProfile>(realTravelerProfile);
-  const [source, setSource] = React.useState<TravelTripsSource>('snapshot');
-  const [status, setStatus] = React.useState<TravelTripsStatus>('idle');
-  const [error, setError] = React.useState<string | undefined>();
-  const [accountEmail, setAccountEmail] = React.useState<string | undefined>();
-  const [lastSyncedAt, setLastSyncedAt] = React.useState<string | undefined>();
+  const [trips, setTrips] = React.useState<TripSummary[]>([]);
+  const [account, setAccount] = React.useState<AccountIdentity>();
+  const [authStatus, setAuthStatus] = React.useState<TravelAuthStatus>('loading');
+  const [status, setStatus] = React.useState<TravelTripsStatus>('loading');
+  const [error, setError] = React.useState<string>();
+  const [lastSyncedAt, setLastSyncedAt] = React.useState<string>();
+  const tripsRef = React.useRef(trips);
+  tripsRef.current = trips;
+  const accountRef = React.useRef<AccountIdentity | undefined>(undefined);
+  const mounted = React.useRef(true);
+  const requestSequence = React.useRef(0);
+  const authAttempt = React.useRef(0);
+  const syncRunning = React.useRef(false);
+  const current = (revision: number) => mounted.current && revision === getAuthRevision();
+  const resetAccount = React.useCallback(() => {
+    accountRef.current = undefined;
+    setAccount(undefined);
+    setTrips([]);
+    setLastSyncedAt(undefined);
+  }, []);
 
   const loadTrips = React.useCallback(async (mode: 'loading' | 'refreshing' | 'silent' = 'refreshing') => {
-    if (mode !== 'silent') setStatus(mode);
-    const token = getStoredToken() ?? await hydrateStoredToken();
+    const token = getStoredToken();
+    const revision = getAuthRevision();
+    const sequence = ++requestSequence.current;
+    const relevant = () => current(revision) && sequence === requestSequence.current;
     if (!token) {
-      if (mode !== 'silent') setStatus('idle');
-      setSource('snapshot');
-      setAccountEmail(undefined);
+      resetAccount();
+      setAuthStatus('signed-out');
+      setStatus('idle');
       return;
     }
-
+    if (mode !== 'silent') setStatus(mode);
     try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const [meResponse, response] = await Promise.all([
-        fetch(`${getApiBaseUrl()}/auth/me`, { headers }),
-        fetch(`${getApiBaseUrl()}/trips`, { headers }),
+      const [meResponse, tripsResponse] = await Promise.all([
+        authFetch('/auth/me', undefined, token), authFetch('/trips', undefined, token),
       ]);
-      if (response.status === 401) {
-        clearAuthToken();
-        setSource('snapshot');
-        setAccountEmail(undefined);
-        throw new Error('Session expired. Sign in with Google again.');
+      if (!relevant()) return;
+      if (meResponse.status === 401 || tripsResponse.status === 401) {
+        await clearAuthToken();
+        if (mounted.current && !getStoredToken()) setError('Your session expired. Sign in with Google again.');
+        return;
       }
-      if (!meResponse.ok) throw new Error(`Profile API returned ${meResponse.status}`);
-      if (!response.ok) throw new Error(`Trips API returned ${response.status}`);
-      const me = await meResponse.json() as { email?: string };
-      const apiTrips = await response.json() as ApiTrip[];
-      if (!Array.isArray(apiTrips)) throw new Error('Trips API returned an unexpected payload.');
-      const mappedTrips = mapApiTrips(apiTrips);
-      setTrips(mappedTrips);
-      setProfile(buildProfile(mappedTrips));
-      setSource('api');
-      setAccountEmail(me.email);
+      const me = await readJson(meResponse) as AccountIdentity;
+      if (!relevant()) return;
+      if (!meResponse.ok || !Number.isInteger(me.user_id) || !me.email) {
+        throw new Error('Your account could not be verified. Please try again.');
+      }
+      // /auth/me is authoritative; no bundled traveler is ever a fallback.
+      if (accountRef.current && accountRef.current.user_id !== me.user_id) setTrips([]);
+      accountRef.current = me;
+      setAccount(me);
+      setAuthStatus('signed-in');
+      const payload = await readJson(tripsResponse);
+      if (!relevant()) return;
+      if (!tripsResponse.ok) throw new Error(`Your trips could not be loaded (${tripsResponse.status}). Pull to retry.`);
+      if (!Array.isArray(payload)) throw new Error('Trips returned an unexpected response. Please retry.');
+      setTrips(mapApiTrips(payload as ApiTrip[]));
       setLastSyncedAt(new Date().toISOString());
       setError(undefined);
       if (mode !== 'silent') setStatus('idle');
     } catch (caught) {
-      setSource((current) => current === 'api' ? 'api' : 'snapshot');
-      setError(caught instanceof Error ? caught.message : String(caught));
-      if (mode !== 'silent') setStatus('error');
+      if (!relevant()) return;
+      setError(friendlyError(caught));
+      setStatus('error');
+      if (!accountRef.current) setAuthStatus('signed-out');
+    }
+  }, [resetAccount]);
+
+  React.useEffect(() => {
+    mounted.current = true;
+    const unsubscribe = subscribeAuthToken(() => {
+      if (!mounted.current) return;
+      requestSequence.current += 1;
+      resetAccount();
+      setError(undefined);
+      setAuthStatus(getStoredToken() ? 'loading' : 'signed-out');
+      setStatus(getStoredToken() ? 'loading' : 'idle');
+      if (getStoredToken()) void loadTrips('loading');
+    });
+    void (async () => {
+      const before = getAuthRevision();
+      try {
+        const callback = consumeWebOAuthCallback();
+        if (callback) await storeAuthToken(callback);
+        else await hydrateStoredToken();
+        if (mounted.current && before === getAuthRevision()) await loadTrips('loading');
+      } catch (caught) {
+        if (!mounted.current) return;
+        resetAccount();
+        setAuthStatus('signed-out');
+        setStatus('error');
+        setError(friendlyError(caught));
+      }
+    })();
+    return () => { mounted.current = false; unsubscribe(); };
+  }, [loadTrips, resetAccount]);
+
+  const signIn = React.useCallback(async () => {
+    const attempt = ++authAttempt.current;
+    setError(undefined);
+    setAuthStatus('loading');
+    setStatus('loading');
+    try {
+      const token = await requestGoogleAuthToken(getApiBaseUrl());
+      if (!mounted.current || attempt !== authAttempt.current) return;
+      await storeAuthToken(token);
+      // The token-change listener verifies the account before opening its UI.
+    } catch (caught) {
+      if (!mounted.current || attempt !== authAttempt.current) return;
+      setAuthStatus(accountRef.current ? 'signed-in' : 'signed-out');
+      setStatus(caught instanceof GoogleSignInCanceled ? 'idle' : 'error');
+      setError(caught instanceof GoogleSignInCanceled ? undefined : friendlyError(caught));
     }
   }, []);
 
-  React.useEffect(() => {
-    loadTrips('loading');
-  }, [loadTrips]);
+  const signOut = React.useCallback(async () => {
+    authAttempt.current += 1;
+    cancelGoogleAuthSession();
+    resetAccount();
+    setAuthStatus('signed-out');
+    setStatus('idle');
+    setError(undefined);
+    try { await clearAuthToken(); }
+    catch { if (mounted.current) setError('Could not clear saved sign-in. Please try signing out again.'); }
+  }, [resetAccount]);
 
   const loadTripDetail = React.useCallback(async (backendId: number) => {
-    const token = getStoredToken() ?? await hydrateStoredToken();
-    if (!token) return undefined;
+    const token = getStoredToken();
+    const revision = getAuthRevision();
+    if (!token || !accountRef.current) return undefined;
     const response = await authFetch(`/trips/${backendId}`, undefined, token);
+    if (!current(revision)) return undefined;
     if (response.status === 401) {
-      clearAuthToken();
-      setSource('snapshot');
-      throw new Error('Session expired. Sign in with Google again.');
+      await clearAuthToken();
+      if (mounted.current && !getStoredToken()) setError('Your session expired. Sign in with Google again.');
+      return undefined;
     }
-    const data = await readJson(response) as ApiTrip & { detail?: unknown };
-    if (!response.ok) throw new Error(readError(data, `Trip detail failed: ${response.status}`));
-    if (!Array.isArray(data.segments)) throw new Error('Trip detail returned an unexpected payload.');
-
-    let mapped: TripSummary | undefined;
-    setTrips((current) => {
-      const existingIndex = Math.max(0, current.findIndex((trip) => trip.backendId === backendId));
-      mapped = mapApiTrip(data, existingIndex);
-      const next = current.map((trip) => trip.backendId === backendId ? mapped as TripSummary : trip);
-      return next.some((trip) => trip.backendId === backendId) ? next : [...next, mapped as TripSummary];
-    });
-    setSource('api');
-    setLastSyncedAt(new Date().toISOString());
+    const data = await readJson(response) as ApiTrip;
+    if (!current(revision)) return undefined;
+    if (!response.ok || !Array.isArray(data.segments) || data.id !== backendId) {
+      throw new Error('This trip could not be loaded. Please retry.');
+    }
+    if (!data.segments.length) return undefined;
+    const existingIndex = Math.max(0, tripsRef.current.findIndex(trip => trip.backendId === backendId));
+    const mapped = mapApiTrip(data, existingIndex);
+    setTrips(existing => existing.some(trip => trip.backendId === backendId)
+      ? existing.map(trip => trip.backendId === backendId ? mapped : trip) : [...existing, mapped]);
     setError(undefined);
+    setLastSyncedAt(new Date().toISOString());
     return mapped;
   }, []);
 
-  React.useEffect(() => {
-    const handleUrl = ({ url }: { url: string }) => {
-      const token = readTokenFromUrl(url);
-      if (!token) return;
-      storeAuthToken(token);
-      removeTokenFromBrowserUrl(url);
-      loadTrips('refreshing');
-    };
-
-    const subscription = Linking.addEventListener('url', handleUrl);
-    Linking.getInitialURL()
-      .then((url) => {
-        if (url) handleUrl({ url });
-      })
-      .catch(() => undefined);
-    return () => subscription.remove();
-  }, [loadTrips]);
-
-  return {
-    trips,
-    profile,
-    source,
-    status,
-    error,
-    accountEmail,
-    lastSyncedAt,
-    refresh: () => loadTrips('refreshing'),
-    loadTripDetail,
-    syncFromGmail: async () => {
-      setStatus('syncing');
-      try {
-        let token = getStoredToken() ?? await hydrateStoredToken();
-        if (!token) {
-          token = await requestGoogleAuthToken(getApiBaseUrl());
-          storeAuthToken(token);
-        }
-        const importResponse = await authFetch('/ingest/gmail/import', { method: 'POST' }, token);
-        if (importResponse.status === 401) {
-          clearAuthToken();
-          throw new Error('Session expired. Sign in with Google again.');
-        }
-        const importData = await readJson(importResponse) as { job_id?: string; detail?: unknown };
-        if (!importResponse.ok || !importData.job_id) {
-          throw new Error(readError(importData, `Import failed: ${importResponse.status}`));
-        }
-        await waitForImport(importData.job_id, token, async () => {
-          await loadTrips('silent');
-          setStatus('syncing');
-        });
-        await loadTrips('refreshing');
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : String(caught));
+  const syncFromGmail = React.useCallback(async () => {
+    const token = getStoredToken();
+    const revision = getAuthRevision();
+    if (syncRunning.current || !token || !accountRef.current) return;
+    syncRunning.current = true;
+    setStatus('syncing');
+    setError(undefined);
+    try {
+      const response = await authFetch('/ingest/gmail/import', { method: 'POST' }, token);
+      if (!current(revision)) return;
+      if (response.status === 401) throw new SessionExpired();
+      const data = await readJson(response) as { job_id?: string; detail?: unknown };
+      if (!current(revision)) return;
+      if (!response.ok || !data.job_id) throw new Error(readError(data, 'Gmail sync could not start. Please retry.'));
+      await waitForImport(data.job_id, token, () => current(revision), async () => {
+        await loadTrips('silent');
+        if (current(revision)) setStatus('syncing');
+      });
+      if (current(revision)) await loadTrips('refreshing');
+    } catch (caught) {
+      if (!current(revision)) return;
+      if (caught instanceof SessionExpired) {
+        await clearAuthToken();
+        if (mounted.current && !getStoredToken()) setError('Your session expired. Sign in with Google again.');
+      } else {
+        setError(friendlyError(caught));
         setStatus('error');
       }
-    },
-  };
+    } finally { syncRunning.current = false; }
+  }, [loadTrips]);
+
+  return { trips, profile: buildProfile(trips, account), source: 'api', status, authStatus,
+    error, accountId: account?.user_id, accountEmail: account?.email, lastSyncedAt,
+    signIn, signOut, refresh: () => loadTrips('refreshing'), loadTripDetail, syncFromGmail };
 }
 
 export function getApiBaseUrl() {
-  const params = getUrlParams();
-  const configured = params.get('apiUrl') || CONFIGURED_API_BASE_URL;
-  if (configured) return configured.replace(/\/$/, '');
-  return DEFAULT_API_BASE_URL;
-}
-
-function removeTokenFromBrowserUrl(url: string) {
-  const browser = globalThis as typeof globalThis & {
-    history?: { replaceState: (data: unknown, unused: string, url?: string | URL | null) => void };
-    location?: { origin?: string };
-  };
-  if (!browser.history || !browser.location?.origin) return;
-  try {
-    const parsed = new URL(url);
-    const fragmentParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
-    const hasToken = parsed.searchParams.has('token') || fragmentParams.has('token');
-    if (parsed.origin !== browser.location.origin || !hasToken) return;
-    parsed.searchParams.delete('token');
-    fragmentParams.delete('token');
-    parsed.hash = fragmentParams.toString() ? `#${fragmentParams}` : '';
-    browser.history.replaceState({}, '', `${parsed.pathname}${parsed.search}${parsed.hash}`);
-  } catch {
-    // Native deep links do not need browser history cleanup.
+  const configured = process.env.EXPO_PUBLIC_TROTTER_API_URL?.trim();
+  const development = typeof __DEV__ !== 'undefined' && __DEV__;
+  if (!configured && !development) throw new Error('This app is missing its server address. Install the latest Trotter build.');
+  const value = (configured || 'http://localhost:8000').replace(/\/+$/, '');
+  const url = new URL(value);
+  if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(development && url.protocol === 'http:'))) {
+    throw new Error('Trotter requires a secure server address.');
   }
+  // URL parameters and embedded build-time bearer tokens cannot switch accounts.
+  return value;
 }
 
-export function getStoredToken() {
-  const params = getUrlParams();
-  const token = params.get('token') || CONFIGURED_AUTH_TOKEN;
-  const storage = getLocalStorage();
-  if (token) {
-    storeAuthToken(token);
-    return token;
-  }
-  return storage?.getItem(AUTH_TOKEN_STORAGE_KEY) ?? memoryAuthToken;
+export function getStoredToken() { return memoryAuthToken; }
+export function getAuthRevision() { return authRevision; }
+export function subscribeAuthToken(listener: () => void) {
+  authListeners.add(listener);
+  return () => { authListeners.delete(listener); };
 }
-
-export function storeAuthToken(token: string) {
+function changeMemoryToken(token?: string) {
   memoryAuthToken = token;
-  getLocalStorage()?.setItem(AUTH_TOKEN_STORAGE_KEY, token);
-  AsyncStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token).catch(() => undefined);
+  authRevision += 1;
+  for (const listener of authListeners) listener();
 }
-
+function queueStorage(operation: () => Promise<void>) {
+  const pending = storageQueue.then(operation, operation);
+  storageQueue = pending.catch(() => undefined);
+  return pending;
+}
+function browserStorage(kind: 'sessionStorage' | 'localStorage') {
+  try { return (globalThis as unknown as Record<string, Storage | undefined>)[kind]; }
+  catch { return undefined; }
+}
+async function purgeLegacyToken() {
+  browserStorage('localStorage')?.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+  await AsyncStorage.removeItem(LEGACY_TOKEN_STORAGE_KEY);
+}
+export async function storeAuthToken(token: string) {
+  if (!token || /\s/.test(token)) throw new Error('Invalid sign-in token.');
+  const serialized = JSON.stringify({ token, apiBaseUrl: getApiBaseUrl() });
+  changeMemoryToken(token);
+  try {
+    await queueStorage(async () => {
+      if (Platform.OS === 'web') {
+        const storage = browserStorage('sessionStorage');
+        if (!storage) throw new Error('Session storage is unavailable.');
+        storage.setItem(AUTH_TOKEN_STORAGE_KEY, serialized);
+      } else {
+        await SecureStore.setItemAsync(AUTH_TOKEN_STORAGE_KEY, serialized, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
+      }
+      await purgeLegacyToken();
+    });
+  } catch {
+    if (memoryAuthToken === token) changeMemoryToken(undefined);
+    throw new Error('Your sign-in could not be saved securely. Please try again.');
+  }
+}
 export function clearAuthToken() {
-  memoryAuthToken = undefined;
-  getLocalStorage()?.removeItem(AUTH_TOKEN_STORAGE_KEY);
-  AsyncStorage.removeItem(AUTH_TOKEN_STORAGE_KEY).catch(() => undefined);
+  // Invalidate outstanding API responses before asynchronous storage work.
+  changeMemoryToken(undefined);
+  return queueStorage(async () => {
+    if (Platform.OS === 'web') browserStorage('sessionStorage')?.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    else await SecureStore.deleteItemAsync(AUTH_TOKEN_STORAGE_KEY);
+    await purgeLegacyToken();
+  });
 }
-
 export async function hydrateStoredToken() {
   if (memoryAuthToken) return memoryAuthToken;
-  const webToken = getLocalStorage()?.getItem(AUTH_TOKEN_STORAGE_KEY);
-  if (webToken) return webToken;
+  const revision = getAuthRevision();
+  await storageQueue;
+  const raw = Platform.OS === 'web' ? browserStorage('sessionStorage')?.getItem(AUTH_TOKEN_STORAGE_KEY)
+    : await SecureStore.getItemAsync(AUTH_TOKEN_STORAGE_KEY);
+  await purgeLegacyToken();
+  if (revision !== getAuthRevision()) return memoryAuthToken;
+  if (!raw) return undefined;
   try {
-    const token = await AsyncStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-    if (token) memoryAuthToken = token;
-    return token ?? undefined;
-  } catch {
-    return undefined;
-  }
+    const value = JSON.parse(raw) as { token?: string; apiBaseUrl?: string };
+    if (typeof value.token !== 'string' || !value.token || value.apiBaseUrl !== getApiBaseUrl()) {
+      await clearAuthToken();
+      return undefined;
+    }
+    changeMemoryToken(value.token);
+    return value.token;
+  } catch { await clearAuthToken(); return undefined; }
 }
 
-function getUrlParams() {
-  const location = (globalThis as { location?: { search?: string; hash?: string } }).location;
-  const params = new URLSearchParams(location?.search ?? '');
-  const fragmentParams = new URLSearchParams(location?.hash?.replace(/^#/, '') ?? '');
-  fragmentParams.forEach((value, key) => {
-    if (!params.has(key)) params.set(key, value);
-  });
-  return params;
-}
-
-function getLocalStorage() {
-  return (globalThis as { localStorage?: Storage }).localStorage;
-}
-
-function readTokenFromUrl(url: string) {
-  try {
-    const parsed = new URL(url);
-    return parsed.searchParams.get('token')
-      ?? new URLSearchParams(parsed.hash.replace(/^#/, '')).get('token')
-      ?? undefined;
-  } catch {
-    const match = /[?&#]token=([^&#]+)/.exec(url);
-    return match ? decodeURIComponent(match[1]) : undefined;
-  }
-}
-
+class SessionExpired extends Error {}
 async function authFetch(path: string, init: RequestInit | undefined, token: string) {
-  return fetch(`${getApiBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.headers ?? {}),
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    return await fetch(`${getApiBaseUrl()}${path}`, { ...init, signal: controller.signal,
+      headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${token}` } });
+  } finally { clearTimeout(timeout); }
 }
-
-async function waitForImport(jobId: string, token: string, onProgress?: (status: ImportJobStatus) => Promise<void>) {
-  let lastObservedParsed = -1;
-  let lastObservedSegments = -1;
-  for (let attempt = 0; attempt < 180; attempt += 1) {
+async function waitForImport(jobId: string, token: string, isCurrent: () => boolean, onProgress: () => Promise<void>) {
+  let parsed = -1;
+  let segments = -1;
+  for (let attempt = 0; attempt < 180 && isCurrent(); attempt += 1) {
     const response = await authFetch(`/ingest/jobs/${jobId}`, undefined, token);
-    if (response.status === 401) {
-      clearAuthToken();
-      throw new Error('Session expired. Sign in with Google again.');
-    }
+    if (!isCurrent()) return;
+    if (response.status === 401) throw new SessionExpired();
     const data = await readJson(response) as ImportJobStatus;
-    if (!response.ok) throw new Error(readError(data, `Job status failed: ${response.status}`));
-    const parsedCount = data.parsed_count ?? 0;
-    const segmentCount = data.segment_count ?? 0;
-    const discoveredMoreTrips = parsedCount > lastObservedParsed || segmentCount > lastObservedSegments;
-    lastObservedParsed = Math.max(lastObservedParsed, parsedCount);
-    lastObservedSegments = Math.max(lastObservedSegments, segmentCount);
-    if (discoveredMoreTrips && (parsedCount > 0 || segmentCount > 0)) {
-      await onProgress?.(data);
+    if (!isCurrent()) return;
+    if (!response.ok) throw new Error(readError(data, 'Sync progress could not be loaded. Your import continues on the server.'));
+    if ((data.parsed_count ?? 0) > parsed || (data.segment_count ?? 0) > segments) {
+      parsed = data.parsed_count ?? 0;
+      segments = data.segment_count ?? 0;
+      if (parsed > 0 || segments > 0) await onProgress();
     }
-    if (data.state === 'done' || data.state === 'completed' || data.state === 'success') return;
-    if (data.state === 'failed' || data.state === 'error') throw new Error(data.error_message || 'Gmail import failed.');
-    await delay(2000);
+    if (['done', 'completed', 'success'].includes(data.state ?? '')) return;
+    if (['failed', 'error'].includes(data.state ?? '')) throw new Error(data.error_message || 'Gmail sync failed. Please retry.');
+    await new Promise(resolve => setTimeout(resolve, 2000));
   }
-  throw new Error('Gmail import did not finish before the sync timeout.');
+  if (isCurrent()) throw new Error('Your import is still running on the server. Refresh your trips in a moment.');
 }
-
 async function readJson(response: Response) {
   const text = await response.text();
   if (!text) return {};
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return { detail: text };
-  }
+  try { return JSON.parse(text) as unknown; } catch { return {}; }
 }
-
 function readError(data: unknown, fallback: string) {
-  if (data && typeof data === 'object' && 'detail' in data) return String((data as { detail: unknown }).detail);
+  if (data && typeof data === 'object' && 'detail' in data && typeof data.detail === 'string') return data.detail;
   return fallback;
 }
-
-function delay(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+function friendlyError(caught: unknown) {
+  if (caught instanceof Error && caught.name !== 'TypeError' && caught.name !== 'AbortError') return caught.message;
+  return 'Trotter could not reach the server. Check your connection and try again.';
 }
 
 function mapApiTrips(apiTrips: ApiTrip[]): TripSummary[] {
@@ -467,15 +499,20 @@ function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
   const mappedSegments = segments.map(mapApiSegment);
   const itineraryCount = groupTripItineraries(mappedSegments).length;
   const destination = pickDestination(trip.title, segments, trip.destination_airport);
-  const country = destination.info.country_name ?? destination.info.countryName ?? countryHint(trip.title) ?? trip.title ?? 'United States';
-  const countryCode = destination.info.country_code ?? destination.info.countryCode ?? (country === 'United States' ? 'US' : undefined);
+  const rawCountry = destination.info.country_name ?? destination.info.countryName ?? countryHint(trip.title) ?? trip.title ?? 'United States';
+  const { country, countryCode, travelCountryKey } = travelCountry(rawCountry, destination.info.country_code ?? destination.info.countryCode ?? (rawCountry === 'United States' ? 'US' : undefined), destination.airport);
+  const entry = firstCountryEntry(segments.map((segment) => {
+    const info = airportInfo(segment, 'arrival');
+    return { airportCode: segment.arr_airport, date: segment.arr_time, country: info.country_name ?? info.countryName, countryCode: info.country_code ?? info.countryCode };
+  }), country, countryCode);
+  const entryAirport = entry?.airportCode ?? destination.airport;
+  const entryDate = toDateOnly(entry?.date ?? destination.date);
   const city = cleanCity(destination.info.city) || trip.title || undefined;
   const startDate = toDateOnly(trip.start_ts ?? segments[0].dep_time);
   const endDate = toDateOnly(trip.end_ts ?? segments[segments.length - 1].arr_time);
   const airlines = new Set(segments.map((segment) => segment.airline).filter(Boolean));
   const isDomestic = countryCode === 'US';
-  const shape = isDomestic ? 'shieldBadgeRounded' : SHAPES[index % SHAPES.length];
-  const color = isDomestic ? '#52745A' : STAMP_COLORS[index % STAMP_COLORS.length];
+  const { shape, color } = stampIdentity(country, countryCode);
 
   return {
     id: `api-trip-${trip.id}`,
@@ -483,11 +520,13 @@ function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
     title: displayTitle(trip.title, country, countryCode, city),
     country,
     countryCode,
+    travelCountryKey,
     city,
     airportCode: destination.airport,
     startDate,
     endDate,
-    firstCountryEntryDate: toDateOnly(destination.date),
+    firstCountryEntryDate: entryDate,
+    firstCountryEntryAirport: entryAirport,
     routeLabel: trip.route_label?.trim() || routeLabelFor(segments, destination.airport),
     miles: Math.round(segments.reduce((sum, segment) => sum + (segment.distance_km ?? 0), 0) * 0.621371),
     flightCount: segments.length,
@@ -499,12 +538,12 @@ function mapApiTrip(trip: ApiTrip, index: number): TripSummary {
     accent: ACCENTS[index % ACCENTS.length],
     stamp: {
       shape,
-      icon: COUNTRY_ICONS[country] ?? 'united_states_golden_gate_bridge',
+      icon: COUNTRY_ICONS[country] ?? '',
       color,
       country,
       city,
-      airportCode: destination.airport,
-      date: toDateOnly(destination.date),
+      airportCode: entryAirport,
+      date: entryDate,
       footer: isDomestic ? 'DOMESTIC' : 'FIRST VISIT',
     },
   };
@@ -520,6 +559,10 @@ function mapApiSegment(segment: ApiSegment) {
     mode: 'flight' as const,
     depAirport: segment.dep_airport,
     arrAirport: segment.arr_airport,
+    depCountry: departure.country_name ?? departure.countryName,
+    depCountryCode: departure.country_code ?? departure.countryCode,
+    arrCountry: arrival.country_name ?? arrival.countryName,
+    arrCountryCode: arrival.country_code ?? arrival.countryCode,
     depTime: segment.dep_time,
     arrTime: segment.arr_time,
     airline: segment.airline ?? undefined,
@@ -537,6 +580,8 @@ function routePoint(code: string, info: AirportInfo) {
   return {
     code,
     city: cleanCity(info.city) || code,
+    country: info.country_name ?? info.countryName,
+    countryCode: info.country_code ?? info.countryCode,
     lat: info.latitude,
     lon: info.longitude,
   };
@@ -710,10 +755,10 @@ function readObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
 
-function buildProfile(trips: TripSummary[]): TravelerProfile {
+function buildProfile(trips: TripSummary[], account?: AccountIdentity): TravelerProfile {
   const flights = trips.reduce((sum, trip) => sum + trip.flightCount, 0);
   const miles = trips.reduce((sum, trip) => sum + trip.miles, 0);
-  const countries = new Set(trips.map((trip) => trip.country).filter(Boolean)).size;
+  const countries = buildPassportArrivals(trips).length;
   const airports = new Set(
     trips
       .flatMap((trip) => trip.airports ?? trip.routeLabel.split('->').map((part) => part.trim()))
@@ -724,7 +769,14 @@ function buildProfile(trips: TripSummary[]): TravelerProfile {
   const airlines = airlineCodes.size || trips.reduce((max, trip) => Math.max(max, trip.airlineCount), 0);
 
   return {
-    ...realTravelerProfile,
+    name: account?.name?.trim() || account?.email?.split('@')[0] || 'Traveler',
+    homeAirport: '',
+    homeAirportName: '',
+    firstFlightDate: trips.map(trip => trip.startDate).filter(Boolean).sort()[0] ?? '',
+    hoursInAir: Math.round(trips.flatMap(trip => trip.segments ?? []).reduce((total, segment) => {
+      const elapsed = Date.parse(segment.arrTime) - Date.parse(segment.depTime);
+      return total + (Number.isFinite(elapsed) && elapsed > 0 ? elapsed / 3600000 : 0);
+    }, 0)),
     flights,
     countries,
     airports,

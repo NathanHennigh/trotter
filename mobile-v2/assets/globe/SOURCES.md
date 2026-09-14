@@ -7,6 +7,15 @@
 - Use: equirectangular Earth-at-night diffuse texture for the Three.js globe.
 - Notes: NASA imagery is generally usable for app prototypes and products when NASA attribution and endorsement rules are respected.
 
+### High-resolution night detail
+
+- Master: `black-marble-2016-13500.jpg` (13500x6750, NASA's 3 km color product).
+- Source page: https://science.nasa.gov/earth/earth-observatory/earth-at-night/maps/
+- Direct source: https://assets.science.nasa.gov/content/dam/science/esd/eo/images/imagerecords/144000/144898/BlackMarble_2016_3km.jpg
+- Credit: NASA Earth Observatory, Black Marble 2016 / Suomi NPP VIIRS.
+- Generated runtime assets: `assets/world-window/nasa-night-{2048,4096}.jpg` and 72 `assets/world-window/night-detail/night-r{row}-c{col}.jpg` tiles.
+- Build: `node scripts/buildWorldWindowGlobe.cjs --night-only`. No upscaling, denoising, artificial sharpening, or color filters. Each 1125px source tile has a one-pixel neighbor gutter and uses JPEG quality 95 with 4:4:4 chroma. The globe retains at most four visible day/night/country tile sets and falls back to the base if a night tile cannot load.
+
 ## NASA Blue Marble Day Texture
 
 - File: `blue-marble-day-4096.jpg`

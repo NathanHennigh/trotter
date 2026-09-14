@@ -3,6 +3,8 @@ import localFlightFixtureJson from './localFlightFixture.json';
 export interface RoutePoint {
   code: string;
   city: string;
+  country?: string;
+  countryCode?: string;
   lat: number;
   lon: number;
 }

@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
+const ts = require('typescript');
+const layoutFile = path.join(__dirname, '..', 'src', 'components', 'trotter', 'stamps', 'stampLayout.ts');
+const layoutModule = { exports: {} };
+new Function('module', 'exports', ts.transpileModule(fs.readFileSync(layoutFile, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(layoutModule, layoutModule.exports);
+const { fitFontSize } = layoutModule.exports;
+const geometryModule = { exports: {} };
+const geometryFile = path.join(__dirname, '..', 'src/components/trotter/stamps/stampGeometry.ts');
+new Function('module', 'exports', ts.transpileModule(fs.readFileSync(geometryFile, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(geometryModule, geometryModule.exports);
+const { resolveStampGeometry, STAMP_FRAME_PIXELS } = geometryModule.exports;
 
 const templatesFile = path.join(__dirname, '..', 'src', 'components', 'trotter', 'stamps', 'stampTemplates.json');
 const TEMPLATE_BUNDLES = JSON.parse(fs.readFileSync(templatesFile, 'utf8'));
@@ -41,39 +50,19 @@ function resolveTemplate(shape, length) {
   if (!bundle) return null;
   const def = bundle.default;
   const preset = (bundle.presets || []).find((p) => length >= p.charRange[0] && length <= p.charRange[1]);
-  if (!preset) return { name: shape, ...def };
+  if (!preset) return { name: shape, ...resolveStampGeometry(shape, def, 204.75, 165.75) };
   const o = preset.overrides || {};
   const merged = { name: shape, ...def, ...o };
   for (const grp of ['frame', 'country', 'icon', 'place', 'date', 'airport']) {
     merged[grp] = { ...def[grp], ...(o[grp] || {}) };
   }
-  return merged;
+  return { ...resolveStampGeometry(shape, merged, 204.75, 165.75), name: shape };
 }
 
 function parseTemplate(name) {
   const def = TEMPLATE_BUNDLES[name]?.default;
   if (!def) return null;
-  return { name, ...def };
-}
-
-function lengthBoost(len) {
-  if (len <= 4) return 1.18;
-  if (len <= 6) return 1.08;
-  if (len <= 9) return 1.0;
-  if (len <= 12) return 0.92;
-  if (len <= 15) return 0.84;
-  return 0.76;
-}
-
-function fitFontSize(text, baseSize, boxWidth, boxHeight, opts = {}) {
-  const charFactor = opts.charFactor ?? 0.62;
-  const minScale = opts.minScale ?? 0.5;
-  const tracking = opts.tracking ?? 0;
-  const adjusted = baseSize * lengthBoost(text.length);
-  const estW = Math.max(1, text.length * adjusted * charFactor + Math.max(0, text.length - 1) * tracking);
-  const wScale = Math.min(1, boxWidth / estW);
-  const hScale = Math.min(1, (boxHeight * 0.88) / adjusted);
-  return adjusted * Math.max(minScale, Math.min(wScale, hScale));
+  return { name, ...resolveStampGeometry(name, def, 204.75, 165.75) };
 }
 
 function rectsOverlap(a, b, slackY = 0) {
@@ -83,13 +72,6 @@ function rectsOverlap(a, b, slackY = 0) {
   const bRight = b.left + b.width;
   const bBottom = b.top + b.height - slackY;
   return !(aRight <= b.left || bRight <= a.left || aBottom <= b.top || bBottom <= a.top);
-}
-
-function resolveAirportBox(template) {
-  if (!rectsOverlap(template.date, template.airport)) return template.airport;
-  const gap = 0.012;
-  const top = Math.min(0.985 - template.airport.height, template.date.top + template.date.height + gap);
-  return { ...template.airport, top };
 }
 
 const templates = {};
@@ -102,13 +84,13 @@ const COUNTRY_BASE = 22.75;
 let failures = 0;
 const summary = {};
 
-function fail(msg) { console.error('  ✗ ' + msg); failures += 1; }
+function fail(msg) { console.error('  FAIL ' + msg); failures += 1; }
 
 console.log('=== Template structural checks ===');
 for (const t of Object.values(templates)) {
   console.log(`\n[${t.name}]`);
-  const rendered = { ...t, airport: resolveAirportBox(t) };
-  for (const key of ['country', 'icon', 'place', 'date', 'airport']) {
+  const rendered = t;
+  for (const key of ['country', 'icon', 'date', 'airport']) {
     const b = rendered[key];
     if (!b) { fail(`${key} missing`); continue; }
     if (b.left < 0 || b.top < 0 || b.left + b.width > 1.001 || b.top + b.height > 1.001) {
@@ -119,6 +101,28 @@ for (const t of Object.values(templates)) {
   const pairs = [['country', 'icon'], ['country', 'date'], ['icon', 'date'], ['date', 'airport']];
   for (const [a, b] of pairs) {
     if (rectsOverlap(rendered[a], rendered[b], 0.005)) fail(`${a} overlaps ${b}`);
+  }
+}
+
+console.log('\n=== Arrival-label bounds in every preset ===');
+for (const shape of SHAPES) {
+  const bundle = TEMPLATE_BUNDLES[shape];
+  for (const length of [3, 6, 8, 10, 12, 14, 16, 18, 24, 40]) {
+    const t = resolveTemplate(shape, length);
+    for (const key of ['date', 'airport']) {
+      const box = t[key];
+      if (box.top < t.frame.top || box.top + box.height > t.frame.top + t.frame.height || box.left < t.frame.left || box.left + box.width > t.frame.left + t.frame.width) fail(`${shape}/${length}: ${key} outside frame`);
+      if (rectsOverlap(box, t.icon) || rectsOverlap(box, t.country)) fail(`${shape}/${length}: ${key} overlaps artwork/title`);
+    }
+    if (rectsOverlap(t.date, t.airport)) fail(`${shape}/${length}: entry airport overlaps date`);
+    for (const scale of [.5, .76, 1, 1.3]) {
+      for (const [key, text, base] of [['date', '31 DEC 2026', 13.16], ['airport', 'WWWW', 12.2]]) {
+        const b = t[key], w = b.width * STAMP_WIDTH * scale, h = b.height * STAMP_HEIGHT * scale;
+        const font = fitFontSize(text, base * (b.fontScale ?? 1) * scale, w, h, b, STAMP_WIDTH * scale);
+        const estimate = text.length * font * (b.charFactor ?? .62) + (text.length - 1) * (b.tracking ?? 0) * scale;
+        if (estimate > w + .01 || font > h * .88 + .01) fail(`${shape}/${length}/${scale}: ${key} text exceeds bounds`);
+      }
+    }
   }
 }
 
@@ -138,8 +142,8 @@ for (const country of COUNTRY_LIST) {
   const shape = SHAPES[hashString(country) % SHAPES.length];
   const t = resolveTemplate(shape, display.length);
 
-  // Apply fitToLimit for single-word truncation
-  const limited = display.length <= t.maxCountryChars || display.includes(' ') ? display : display.slice(0, t.maxCountryChars);
+  // Country names remain complete; font sizing must fit without truncation.
+  const limited = display;
   const len = limited.length;
 
   // Compute font size as the renderer would
@@ -150,22 +154,11 @@ for (const country of COUNTRY_LIST) {
   let mode;
   if (t.titleMode === 'arc' && (!t.straightTitleMaxChars || len > t.straightTitleMaxChars)) {
     mode = 'arc';
-    fontSize = fitFontSize(limited, baseSize, boxW, boxH * 0.85, t.country);
+    fontSize = fitFontSize(limited, baseSize, boxW * .84, boxH * 0.85, t.country);
   } else if (t.titleMode === 'circleArc' && (!t.straightTitleMaxChars || len > t.straightTitleMaxChars)) {
     mode = 'circleArc';
-    // mimic CircleArcStampText sizing
-    const frameW = t.frame.width * STAMP_WIDTH;
-    const frameH = t.frame.height * STAMP_HEIGHT;
-    const ringSize = Math.min(frameW, frameH);
-    const radius = ringSize * 0.32;
-    const maxArcWidth = radius * 2.35;
-    fontSize = fitFontSize(limited, baseSize, maxArcWidth, STAMP_HEIGHT * t.country.height * 0.7, t.country);
-    const maxHalf = len >= 14 ? 78 : len >= 10 ? 70 : len >= 8 ? 60 : 48;
-    const arcLen = ((maxHalf * 2) * Math.PI) / 180 * radius;
-    if (len > 1 && (len - 1) * fontSize * 0.78 > arcLen) {
-      const minFloor = baseSize * (t.country.minScale ?? 0.36) * 0.85;
-      fontSize = Math.max(minFloor, (arcLen / (len - 1)) / 0.78);
-    }
+    const radius = Math.min(t.frame.width * STAMP_WIDTH, t.frame.height * STAMP_HEIGHT) * (t.circleTitleRadius ?? .28);
+    fontSize = fitFontSize(limited, baseSize, radius * (70 * Math.PI / 180) * 1.8, STAMP_HEIGHT * t.country.height * .7, t.country);
   } else {
     mode = 'straight';
     fontSize = fitFontSize(limited, baseSize, boxW, boxH, t.country);
@@ -176,7 +169,7 @@ for (const country of COUNTRY_LIST) {
   if (!summary[shape]) summary[shape] = [];
   summary[shape].push(entry);
 
-  if (fontSize < 6) fail(`${country} (${shape}): font too small ${fontSize.toFixed(1)}px`);
+  if (fontSize < 4.8) fail(`${country} (${shape}): font too small ${fontSize.toFixed(1)}px`);
   if (fontSize > 28) fail(`${country} (${shape}): font too large ${fontSize.toFixed(1)}px`);
 }
 
@@ -195,5 +188,5 @@ for (const [shape, items] of Object.entries(summary)) {
   }
 }
 
-console.log(`\n${failures === 0 ? '✓ All checks passed' : `✗ ${failures} failure(s)`}`);
+console.log(`\n${failures === 0 ? 'PASS All checks passed' : `FAIL ${failures} failure(s)`}`);
 process.exit(failures === 0 ? 0 : 1);

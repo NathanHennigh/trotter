@@ -1,962 +1,215 @@
-import React from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import React from "react";
 import {
-  BottomNav,
-  DarkPanel,
-  IconButton,
-  IconGlyph,
-  PaperSurface,
-  ScreenHeader,
-  SplitFlapNumber,
-} from '../components/trotter/TrotterKit';
-import { PngStamp, StampShapeKey } from '../components/trotter/stamps/PngStamp';
-import { CountryIconAssetKey } from '../assets/generated/stampAssetManifest';
-import { BottomNavTab, TripSegmentSummary, TripSummary } from '../data/trotterMock';
-import { useTravelTrips } from '../services/travelTrips';
-import { colors, fonts, layout, spacing } from '../theme/trotterTheme';
-import { getMobileVisualWidth } from '../utils/mobileLayout';
-
-const STAMP_TEST_BASE_WIDTH = 204.75;
-
-const COUNTRY_ROSTER: Array<{ country: string; icon: CountryIconAssetKey }> = [
-  { country: 'United States', icon: 'united_states_golden_gate_bridge' },
-  { country: 'Canada', icon: 'canada_rocky_mountains' },
-  { country: 'Mexico', icon: 'mexico_chichen_itza' },
-  { country: 'Brazil', icon: 'brazil_christ_the_redeemer' },
-  { country: 'Argentina', icon: 'argentina_obelisco_de_buenos_aires' },
-  { country: 'Chile', icon: 'chile_torres_del_paine' },
-  { country: 'Peru', icon: 'peru_machu_picchu' },
-  { country: 'Colombia', icon: 'colombia_cartagena_clock_tower' },
-  { country: 'Costa Rica', icon: 'costa_rica_arenal_volcano' },
-  { country: 'Panama', icon: 'panama_panama_canal' },
-  { country: 'Cuba', icon: 'cuba_havana_capitol' },
-  { country: 'Jamaica', icon: 'jamaica_dunns_river_falls' },
-  { country: 'Dominican Republic', icon: 'dominican_republic_puerta_del_conde' },
-  { country: 'Iceland', icon: 'iceland_northern_lights' },
-  { country: 'Ireland', icon: 'ireland_cliffs_of_moher' },
-  { country: 'United Kingdom', icon: 'united_kingdom_big_ben' },
-  { country: 'France', icon: 'france_eiffel_tower' },
-  { country: 'Spain', icon: 'spain_sagrada_familia' },
-  { country: 'Portugal', icon: 'portugal_belem_tower' },
-  { country: 'Italy', icon: 'italy_colosseum' },
-  { country: 'Greece', icon: 'greece_parthenon' },
-  { country: 'Germany', icon: 'germany_brandenburg_gate' },
-  { country: 'Netherlands', icon: 'netherlands_amsterdam_canal_houses' },
-  { country: 'Belgium', icon: 'belgium_atomium' },
-  { country: 'Switzerland', icon: 'switzerland_matterhorn' },
-  { country: 'Austria', icon: 'austria_st_stephens_cathedral' },
-  { country: 'Czech Republic', icon: 'czech_republic_charles_bridge_prague_castle' },
-  { country: 'Hungary', icon: 'hungary_hungarian_parliament' },
-  { country: 'Poland', icon: 'poland_palace_of_culture' },
-  { country: 'Norway', icon: 'norway_fjord_cliffs' },
-  { country: 'Sweden', icon: 'sweden_stockholm_city_hall' },
-  { country: 'Denmark', icon: 'denmark_nyhavn_harbor' },
-  { country: 'Finland', icon: 'finland_helsinki_cathedral' },
-  { country: 'Turkey', icon: 'turkey_hagia_sophia' },
-  { country: 'Morocco', icon: 'morocco_hassan_ii_mosque' },
-  { country: 'Egypt', icon: 'egypt_pyramids_of_giza' },
-  { country: 'South Africa', icon: 'south_africa_table_mountain' },
-  { country: 'Kenya', icon: 'kenya_mount_kenya' },
-  { country: 'Tanzania', icon: 'tanzania_mount_kilimanjaro' },
-  { country: 'Ethiopia', icon: 'ethiopia_lalibela_church' },
-  { country: 'United Arab Emirates', icon: 'united_arab_emirates_burj_khalifa' },
-  { country: 'Saudi Arabia', icon: 'saudi_arabia_alula' },
-  { country: 'Jordan', icon: 'jordan_petra' },
-  { country: 'Israel', icon: 'israel_dome_of_the_rock' },
-  { country: 'India', icon: 'india_taj_mahal' },
-  { country: 'Nepal', icon: 'nepal_mount_everest' },
-  { country: 'Sri Lanka', icon: 'sri_lanka_sigiriya_rock' },
-  { country: 'Thailand', icon: 'thailand_wat_arun' },
-  { country: 'Vietnam', icon: 'vietnam_ha_long_bay' },
-  { country: 'Cambodia', icon: 'cambodia_angkor_wat' },
-  { country: 'Singapore', icon: 'singapore_marina_bay_sands' },
-  { country: 'Malaysia', icon: 'malaysia_petronas_towers' },
-  { country: 'Indonesia', icon: 'indonesia_borobudur' },
-  { country: 'Philippines', icon: 'philippines_mayon_volcano' },
-  { country: 'China', icon: 'china_great_wall' },
-  { country: 'Japan', icon: 'japan_mount_fuji' },
-  { country: 'South Korea', icon: 'south_korea_n_seoul_tower' },
-  { country: 'Taiwan', icon: 'taiwan_taipei_101' },
-  { country: 'Hong Kong', icon: 'hong_kong_victoria_peak_skyline' },
-  { country: 'Australia', icon: 'australia_sydney_opera_house' },
-  { country: 'New Zealand', icon: 'new_zealand_milford_sound' },
-  { country: 'Fiji', icon: 'fiji_tropical_island' },
-  { country: 'French Polynesia', icon: 'french_polynesia_bora_bora_overwater_huts' },
-  { country: 'Maldives', icon: 'maldives_overwater_bungalow' },
-  { country: 'Qatar', icon: 'qatar_museum_of_islamic_art' },
-  { country: 'Oman', icon: 'oman_sultan_qaboos_grand_mosque' },
-  { country: 'Iran', icon: 'iran_azadi_tower' },
-  { country: 'Iraq', icon: 'iraq_ziggurat_of_ur' },
-  { country: 'Lebanon', icon: 'lebanon_baalbek_ruins' },
-  { country: 'Armenia', icon: 'armenia_mount_ararat' },
-  { country: 'Georgia', icon: 'georgia_gergeti_trinity_church' },
-  { country: 'Romania', icon: 'romania_bran_castle' },
-  { country: 'Croatia', icon: 'croatia_dubrovnik_city_walls' },
-  { country: 'Slovenia', icon: 'slovenia_lake_bled_church' },
-  { country: 'Serbia', icon: 'serbia_saint_sava' },
-  { country: 'Bulgaria', icon: 'bulgaria_alexander_nevsky_cathedral' },
-  { country: 'Ukraine', icon: 'ukraine_saint_sophia_cathedral' },
-  { country: 'Russia', icon: 'russia_saint_basils_cathedral' },
-  { country: 'Mongolia', icon: 'mongolia_yurt' },
-  { country: 'Kazakhstan', icon: 'kazakhstan_bayterek_tower' },
-];
-
-const STAMP_SHAPE_KEYS: StampShapeKey[] = [
-  'archedCountryCanonical',
-  'archedCountryBanner',
-  'archedCountryVariant',
-  'circularCityClean',
-  'circularCityDoubleLine',
-  'roundedImmigrationCanonical',
-  'roundedImmigrationWithBand',
-  'shieldBadgeRounded',
-];
-
-const STAMP_INK_COLORS = ['#B6543F', '#2F5E9E', '#52745A', '#9A5A32', '#C79A43'];
-
-const COUNTRY_ABBREVIATIONS: Record<string, string> = {
-  'United States': 'USA',
-  'United Arab Emirates': 'U.A.E.',
-  'United Kingdom': 'U.K.',
-};
-
-const COUNTRY_CONTINENTS: Record<string, string> = {
-  Argentina: 'South America',
-  Armenia: 'Asia',
-  Australia: 'Oceania',
-  Austria: 'Europe',
-  Belgium: 'Europe',
-  Brazil: 'South America',
-  Bulgaria: 'Europe',
-  Cambodia: 'Asia',
-  Canada: 'North America',
-  Chile: 'South America',
-  China: 'Asia',
-  Colombia: 'South America',
-  'Costa Rica': 'North America',
-  Croatia: 'Europe',
-  Cuba: 'North America',
-  'Czech Republic': 'Europe',
-  Denmark: 'Europe',
-  'Dominican Republic': 'North America',
-  Egypt: 'Africa',
-  Ethiopia: 'Africa',
-  Fiji: 'Oceania',
-  Finland: 'Europe',
-  France: 'Europe',
-  'French Polynesia': 'Oceania',
-  Georgia: 'Asia',
-  Germany: 'Europe',
-  Greece: 'Europe',
-  'Hong Kong': 'Asia',
-  Hungary: 'Europe',
-  Iceland: 'Europe',
-  India: 'Asia',
-  Indonesia: 'Asia',
-  Iran: 'Asia',
-  Iraq: 'Asia',
-  Ireland: 'Europe',
-  Israel: 'Asia',
-  Italy: 'Europe',
-  Jamaica: 'North America',
-  Japan: 'Asia',
-  Jordan: 'Asia',
-  Kazakhstan: 'Asia',
-  Kenya: 'Africa',
-  Lebanon: 'Asia',
-  Malaysia: 'Asia',
-  Maldives: 'Asia',
-  Mexico: 'North America',
-  Mongolia: 'Asia',
-  Morocco: 'Africa',
-  Nepal: 'Asia',
-  Netherlands: 'Europe',
-  'New Zealand': 'Oceania',
-  Nicaragua: 'North America',
-  Norway: 'Europe',
-  Oman: 'Asia',
-  Panama: 'North America',
-  Peru: 'South America',
-  Philippines: 'Asia',
-  Poland: 'Europe',
-  Portugal: 'Europe',
-  Qatar: 'Asia',
-  Romania: 'Europe',
-  Russia: 'Europe',
-  'Saudi Arabia': 'Asia',
-  Serbia: 'Europe',
-  Singapore: 'Asia',
-  Slovenia: 'Europe',
-  'South Africa': 'Africa',
-  'South Korea': 'Asia',
-  Spain: 'Europe',
-  'Sri Lanka': 'Asia',
-  Sweden: 'Europe',
-  Switzerland: 'Europe',
-  Taiwan: 'Asia',
-  Tanzania: 'Africa',
-  Thailand: 'Asia',
-  Turkey: 'Asia',
-  Ukraine: 'Europe',
-  'United Arab Emirates': 'Asia',
-  'United Kingdom': 'Europe',
-  'United States': 'North America',
-  Vietnam: 'Asia',
-};
-
-function hashString(value: string) {
-  let h = 0;
-  for (let i = 0; i < value.length; i++) {
-    h = ((h << 5) - h + value.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-}
-
-function buildStampDate(country: string) {
-  const h = hashString(`date:${country}`);
-  const day = ((h % 27) + 1).toString().padStart(2, '0');
-  const month = (((h >> 4) % 12) + 1).toString().padStart(2, '0');
-  const year = 2018 + ((h >> 9) % 8);
-  return `${year}-${month}-${day}`;
-}
-
-function buildVisitedCountryStampPreviews() {
-  return COUNTRY_ROSTER.map((entry, index) => buildCountryStampPreview(entry, index));
-}
-
-function buildCountryStampPreview(entry: { country: string; icon: CountryIconAssetKey }, index: number, date?: string) {
-    const h = hashString(entry.country);
-    const display = COUNTRY_ABBREVIATIONS[entry.country] ?? entry.country;
-    return {
-      shape: STAMP_SHAPE_KEYS[h % STAMP_SHAPE_KEYS.length],
-      icon: entry.icon,
-      color: STAMP_INK_COLORS[(h >> 3) % STAMP_INK_COLORS.length],
-      country: display,
-      city: undefined as string | undefined,
-      airportCode: undefined as string | undefined,
-      date: date ?? buildStampDate(entry.country),
-      footer: undefined as string | undefined,
-      rotate: index % 2 === 0 ? -3 : 3,
-    };
-}
-
-const rosterCountryStampPreviews = buildVisitedCountryStampPreviews();
+  Modal,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BottomNav } from "../components/trotter/TrotterKit";
+import { WWHeader } from "../components/world-window/WorldWindowUI";
+import { PassportBook } from "../components/world-window/passport/PassportBook";
+import { ActivityChart } from "../components/world-window/passport/ActivityChart";
+import {
+  CollectionButtons,
+  CollectionList,
+  CountryArrivalDetail,
+  type CollectionKind,
+} from "../components/world-window/passport/PassportCollections";
+import { buildPassportArchive } from "../components/world-window/passport/passport-model";
+import type { CountryArrival } from "../utils/countryArrivals";
+import type { BottomNavTab, TripSummary } from "../data/trotterMock";
+import { useTravelTrips } from "../services/travelTrips";
+import { colors, fonts, layout } from "../theme/trotterTheme";
+import { getMobileVisualWidth } from "../utils/mobileLayout";
 
 export function PassportStatsScreen({
   active,
   onChange,
   onOpenCountries,
+  onOpenTrip,
+  onYear,
+  initialCollection,
+  collectionBackLabel,
+  onCloseCollection,
 }: {
   active: BottomNavTab;
   onChange: (tab: BottomNavTab) => void;
   onOpenCountries?: () => void;
+  onOpenTrip?: (trip: TripSummary) => void;
+  onYear?: (year: string) => void;
+  initialCollection?: CollectionKind;
+  collectionBackLabel?: string;
+  onCloseCollection?: () => void;
 }) {
-  const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const visualWidth = getMobileVisualWidth(width);
-  const screenPadding = visualWidth < 390 ? 16 : layout.screenPadding;
-  const contentWidth = visualWidth - screenPadding * 2;
-  const cardWidth = (contentWidth - layout.cardGap) / 2;
+  const insets = useSafeAreaInsets(),
+    { width } = useWindowDimensions(),
+    visualWidth = getMobileVisualWidth(width);
   const { trips, profile, status, refresh } = useTravelTrips();
-  const passportStats = React.useMemo(() => buildPassportStats(trips), [trips]);
-  const countryStampPreviews = React.useMemo(() => buildTripCountryStampPreviews(trips), [trips]);
-
+  const archive = React.useMemo(
+    () => buildPassportArchive(trips, profile),
+    [trips, profile],
+  );
+  const [interacting, setInteracting] = React.useState(false),
+    [collection, setCollection] = React.useState<CollectionKind | null>(initialCollection ?? null),
+    [country, setCountry] = React.useState<CountryArrival | null>(null);
+  const detailBack = React.useRef<(() => boolean) | null>(null);
+  const registerDetailBack = React.useCallback((handler: (() => boolean) | null) => {
+    detailBack.current = handler;
+  }, []);
+  React.useEffect(() => {
+    setCollection(initialCollection ?? null);
+    setCountry(null);
+  }, [initialCollection]);
+  const openCollection = (kind: CollectionKind) => {
+    if (kind === "countries" && onOpenCountries) onOpenCountries();
+    else setCollection(kind);
+  };
+  const close = () => {
+    if (country) setCountry(null);
+    else {
+      setCollection(null);
+      onCloseCollection?.();
+    }
+  };
+  const openTrip = onOpenTrip
+    ? (trip: TripSummary) => {
+        setCountry(null);
+        setCollection(null);
+        onOpenTrip(trip);
+      }
+    : undefined;
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={status === 'loading' || status === 'refreshing' || status === 'syncing'} onRefresh={refresh} tintColor={colors.red} />}
-        contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 24, width: visualWidth }}
-      >
-        <ScreenHeader
-          title="PASSPORT"
-          subtitle="TRAVELER IDENTITY"
-          leftAction={<IconButton variant="paper" shape="circle" icon={<IconGlyph name="passport" color={colors.ink} size={22} />} />}
-          rightActions={[<IconButton key="globe" variant="paper" shape="circle" icon={<IconGlyph name="globe" color={colors.ink} size={22} />} />]}
-        />
-        <PaperSurface radius={18} padding={spacing.lg} style={[styles.identity, { marginHorizontal: screenPadding, width: contentWidth }]}>
-          <View style={styles.identityTop}>
-            <PassportBookletGraphic />
-            <View style={styles.identityCopy}>
-              <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.kicker}>TRAVELER</Text>
-              <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.name}>{profile.name}</Text>
-              <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.homeAirport}>{profile.homeAirport} / {profile.homeAirportName}</Text>
-              <Text allowFontScaling={false} numberOfLines={1} style={styles.firstFlight}>FIRST FLIGHT / {formatPassportDate(profile.firstFlightDate)}</Text>
-            </View>
-          </View>
-          <View style={styles.credentialRow}>
-            <CredentialDetail label="HOME BASE" value={profile.homeAirport} />
-            <CredentialDetail label="TRAVELING SINCE" value={profile.firstFlightDate.slice(0, 4)} />
-            <CredentialDetail label="ACTIVE YEARS" value={String(passportStats.activeYears)} />
-          </View>
-          <View style={styles.statStrip}>
-            <StripStat label="FLIGHTS" value={profile.flights} />
-            <StripStat label="COUNTRIES" value={profile.countries} />
-            <StripStat label="AIRPORTS" value={profile.airports} />
-          </View>
-        </PaperSurface>
-
-        <View style={[styles.grid, { paddingHorizontal: screenPadding, gap: layout.cardGap }]}>
-          <StatCard width={cardWidth} label="TOTAL MILES" value={profile.miles.toLocaleString()} sublabel="lifetime distance" icon="plane" />
-          <StatCard width={cardWidth} label="TRIPS LOGGED" value={`${trips.length}`} sublabel={`${passportStats.upcomingTrips} upcoming`} icon="suitcase" />
-          <StatCard width={cardWidth} label="COUNTRIES VISITED" value={`${profile.countries} / 195`} sublabel="visited from flight history" icon="globe" />
-          <StatCard width={cardWidth} label="AIRLINES FLOWN" value={`${profile.airlines}`} sublabel="carriers flown" icon="tag" />
-          <StatCard width={cardWidth} label="FURTHEST FLIGHT" value={passportStats.longestFlight.value} sublabel={passportStats.longestFlight.label} icon="plane" />
-          <StatCard width={cardWidth} label="LONGEST TRIP" value={passportStats.longestTrip.value} sublabel={passportStats.longestTrip.label} icon="passport" />
-        </View>
-
-        <PaperSurface radius={14} padding={spacing.md} style={[styles.recordsPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
-          <View style={styles.recordsHeader}>
-            <Text allowFontScaling={false} style={styles.recordsTitle}>TRAVEL RECORDS</Text>
-            <Text allowFontScaling={false} style={styles.recordsCount}>{passportStats.activeYears} active years</Text>
-          </View>
-          <RecordRow icon="crosshair" label="Most visited airport" value={passportStats.topAirport.value} detail={passportStats.topAirport.label} />
-          <RecordRow icon="plane" label="Most common route" value={passportStats.topRoute.value} detail={passportStats.topRoute.label} />
-          <RecordRow icon="globe" label="Top destination country" value={passportStats.topCountry.value} detail={passportStats.topCountry.label} />
-          <RecordRow icon="tag" label="Busiest travel year" value={passportStats.busiestYear.value} detail={passportStats.busiestYear.label} />
-        </PaperSurface>
-
-        <PaperSurface radius={14} padding={spacing.md} style={[styles.yearPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
-          <View style={styles.recordsHeader}>
-            <Text allowFontScaling={false} style={styles.recordsTitle}>FLIGHTS BY YEAR</Text>
-            <Text allowFontScaling={false} style={styles.recordsCount}>{passportStats.yearRows.length} years</Text>
-          </View>
-          {passportStats.yearRows.map((year) => (
-            <YearRow key={year.year} year={year.year} flights={year.flights} miles={year.miles} maxFlights={passportStats.maxYearFlights} />
-          ))}
-        </PaperSurface>
-
-        <Text style={[styles.sectionTitle, { marginHorizontal: screenPadding }]}>COLLECTIONS</Text>
-        <View style={[styles.collectionRow, { paddingHorizontal: screenPadding, gap: layout.cardGap }]}>
-          <CollectionCard
-            width={cardWidth}
-            title="COUNTRIES"
-            value={`${profile.countries} / 195`}
-            icon="globe"
-            note="Arrival stamps"
-            onPress={onOpenCountries}
+        scrollEnabled={!interacting}
+        refreshControl={
+          <RefreshControl
+            enabled={!interacting}
+            refreshing={status === "refreshing" || status === "syncing"}
+            onRefresh={refresh}
+            tintColor={colors.blue}
           />
-          <CollectionCard width={cardWidth} title="CONTINENTS" value={`${passportStats.continents} / 7`} icon="crosshair" note="Regions reached" />
-          <CollectionCard width={cardWidth} title="AIRPORTS" value={`${profile.airports}`} icon="plane" note="Airports logged" />
-          <CollectionCard width={cardWidth} title="AIRLINES" value={`${profile.airlines}`} icon="tag" note="Carriers flown" />
-        </View>
-
-        <PaperSurface radius={14} padding={spacing.md} style={[styles.countryPreviewPanel, { marginHorizontal: screenPadding, width: contentWidth }]}>
-          <View style={styles.countryPreviewHeader}>
-            <View>
-              <Text allowFontScaling={false} style={styles.countryPreviewTitle}>LATEST ARRIVAL STAMPS</Text>
-              <Text allowFontScaling={false} style={styles.countryPreviewCount}>{countryStampPreviews.length} countries recorded</Text>
-            </View>
-            {onOpenCountries ? (
-              <Pressable onPress={onOpenCountries} style={styles.viewStampsButton}>
-                <Text allowFontScaling={false} style={styles.viewStampsText}>VIEW ALL</Text>
-              </Pressable>
-            ) : null}
-          </View>
-          <View style={styles.countryPreviewGrid}>
-            {countryStampPreviews.slice(0, 4).map((stamp) => {
-              const cellWidth = (contentWidth - spacing.md * 2 - spacing.sm) / 2;
-              const stampScale = Math.max(0.5, Math.min(1, (cellWidth - 12) / STAMP_TEST_BASE_WIDTH));
-              return (
-                <View key={stamp.country} style={[styles.countryPreviewStamp, { width: cellWidth, minHeight: 165.75 * stampScale + 24 }]}>
-                  <PngStamp {...stamp} size="md" variant="collection" rotate={stamp.rotate} scale={stampScale} />
-                </View>
+        }
+        contentContainerStyle={{
+          width: visualWidth,
+          paddingBottom: insets.bottom + layout.bottomNavHeight + 24,
+        }}
+      >
+        <WWHeader title="Passport" />
+        <View style={styles.book}>
+          <PassportBook
+            archive={archive}
+            width={visualWidth - 2}
+            onInteractionChange={setInteracting}
+            onCountry={(code) => {
+              const arrival = archive.arrivals.find(
+                (item) => (item.travelCountryKey ?? item.country) === code,
               );
-            })}
+              if (arrival) setCountry(arrival);
+            }}
+          />
+        </View>
+        <View style={styles.content}>
+          <Text style={styles.sectionTitle}>Collections</Text>
+          <CollectionButtons archive={archive} onOpen={openCollection} />
+          <View style={styles.activity}>
+            <Text accessibilityRole="header" style={styles.sectionTitle}>
+              Travel activity
+            </Text>
+            <ActivityChart years={archive.years} width={visualWidth - 48} onYear={onYear} latestDate={trips.flatMap(t => (t.segments ?? []).map(s => s.depTime)).sort().at(-1)} />
           </View>
-        </PaperSurface>
+          {archive.records.length > 0 && (
+            <View style={styles.records}>
+              <Text accessibilityRole="header" style={styles.sectionTitle}>
+                Travel records
+              </Text>
+              {archive.records.map((record) => (
+                <Pressable
+                  key={record.label}
+                  disabled={!record.trip || !openTrip}
+                  accessibilityRole={
+                    record.trip && openTrip ? "button" : undefined
+                  }
+                  onPress={() => record.trip && openTrip?.(record.trip)}
+                  style={({ pressed }) => [
+                    styles.record,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Text style={styles.recordLabel}>{record.label}</Text>
+                  <View style={styles.recordCopy}>
+                    <Text style={styles.recordValue}>{record.value}</Text>
+                    <Text style={styles.recordDetail}>{record.detail}</Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
       </ScrollView>
       <BottomNav active={active} onChange={onChange} />
-    </View>
-  );
-}
-
-function CollectionCard({
-  title,
-  value,
-  icon,
-  note,
-  width,
-  onPress,
-}: {
-  title: string;
-  value: string;
-  icon: string;
-  note: string;
-  width: number;
-  onPress?: () => void;
-}) {
-  const content = (
-      <PaperSurface radius={12} padding={spacing.md} style={styles.collectionCard}>
-        <View style={styles.collectionTop}>
-          <View style={styles.collectionIcon}><IconGlyph name={icon} color={colors.red} size={19} /></View>
-          {onPress ? <Text allowFontScaling={false} style={styles.collectionArrow}>{'>'}</Text> : null}
+      <Modal
+        visible={Boolean(collection || country)}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        onRequestClose={() => { if (!detailBack.current?.()) close(); }}
+      >
+        <View
+          style={[
+            styles.screen,
+            {
+              paddingTop: insets.top,
+              paddingBottom: insets.bottom + layout.bottomNavHeight,
+              maxWidth: visualWidth,
+              width: "100%",
+              alignSelf: "center",
+            },
+          ]}
+        >
+          {country ? (
+            <CountryArrivalDetail
+              arrival={country}
+              trips={trips}
+              onBack={close}
+              onOpenTrip={openTrip}
+              width={visualWidth}
+              backLabel={collection ? "Countries" : "Passport"}
+              onBackHandlerChange={registerDetailBack}
+            />
+          ) : collection ? (
+            <CollectionList
+              key={collection}
+              kind={collection}
+              archive={archive}
+              onBack={close}
+              onSelectCountry={setCountry}
+              onOpenTrip={openTrip}
+              backLabel={collectionBackLabel}
+              onBackHandlerChange={registerDetailBack}
+            />
+          ) : null}
+          <BottomNav active="passport" onChange={(tab) => { setCountry(null); setCollection(null); onChange(tab); }} />
         </View>
-        <Text allowFontScaling={false} numberOfLines={1} style={styles.collectionTitle}>{title}</Text>
-        <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.collectionValue}>{value}</Text>
-        <Text allowFontScaling={false} numberOfLines={1} style={styles.collectionNote}>{note}</Text>
-      </PaperSurface>
-  );
-
-  return onPress ? (
-    <Pressable onPress={onPress} style={{ width }}>
-      {content}
-    </Pressable>
-  ) : (
-    <View style={{ width }}>
-      {content}
+      </Modal>
     </View>
   );
 }
-
-function CredentialDetail({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.credentialDetail}>
-      <Text allowFontScaling={false} numberOfLines={1} style={styles.credentialLabel}>{label}</Text>
-      <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.credentialValue}>{value}</Text>
-    </View>
-  );
-}
-
-function PassportBookletGraphic() {
-  return (
-    <DarkPanel radius={12} padding={spacing.md} style={styles.booklet}>
-      <Text allowFontScaling={false} style={styles.bookletTitle}>PASSPORT</Text>
-      <View style={styles.bookletGlobe}><IconGlyph name="globe" color={colors.brassSoft} size={44} /></View>
-      <Text allowFontScaling={false} style={styles.bookletCode}>TROTTER / DFW</Text>
-    </DarkPanel>
-  );
-}
-
-function StripStat({ label, value }: { label: string; value: number }) {
-  return (
-    <View style={styles.stripStat}>
-      <SplitFlapNumber value={value} minDigits={label === 'COUNTRIES' ? 2 : 3} />
-      <Text allowFontScaling={false} numberOfLines={1} style={styles.stripLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function StatCard({ label, value, sublabel, icon, width }: { label: string; value: string; sublabel: string; icon: string; width: number }) {
-  return (
-    <PaperSurface radius={12} padding={spacing.md} style={[styles.statCard, { width }]}>
-      <IconGlyph name={icon} color={colors.red} size={22} />
-      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} adjustsFontSizeToFit style={styles.statLabel}>{label}</Text>
-      <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.statValue}>{value}</Text>
-      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.statSub}>{sublabel}</Text>
-    </PaperSurface>
-  );
-}
-
-function RecordRow({ icon, label, value, detail }: { icon: string; label: string; value: string; detail: string }) {
-  return (
-    <View style={styles.recordRow}>
-      <View style={styles.recordIcon}>
-        <IconGlyph name={icon} color={colors.creamText} size={17} />
-      </View>
-      <View style={styles.recordCopy}>
-        <Text allowFontScaling={false} numberOfLines={1} style={styles.recordLabel}>{label}</Text>
-        <Text allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit style={styles.recordValue}>{value}</Text>
-      </View>
-      <Text maxFontSizeMultiplier={1.05} numberOfLines={1} style={styles.recordDetail}>{detail}</Text>
-    </View>
-  );
-}
-
-function YearRow({ year, flights, miles, maxFlights }: { year: string; flights: number; miles: number; maxFlights: number }) {
-  const fill: `${number}%` = maxFlights > 0 ? `${Math.max(8, Math.round((flights / maxFlights) * 100))}%` : '8%';
-  return (
-    <View style={styles.yearRow}>
-      <Text allowFontScaling={false} style={styles.yearLabel}>{year}</Text>
-      <View style={styles.yearTrack}>
-        <View style={[styles.yearFill, { width: fill }]} />
-      </View>
-      <Text allowFontScaling={false} numberOfLines={1} style={styles.yearValue}>{flights} fl / {formatCompactMiles(miles)}</Text>
-    </View>
-  );
-}
-
-function buildPassportStats(trips: TripSummary[]) {
-  const today = new Date().toISOString().split('T')[0];
-  const upcomingTrips = trips.filter((trip) => trip.startDate >= today).length;
-  const tripCountries = trips.map((trip) => trip.country).filter(Boolean);
-  const countries = rankValues(tripCountries);
-  const continents = new Set(tripCountries.map((country) => COUNTRY_CONTINENTS[country]).filter(Boolean)).size;
-  const airportCounts = new Map<string, number>();
-  const routeCounts = new Map<string, number>();
-  const yearStats = new Map<string, { flights: number; miles: number }>();
-  let longestTrip = { label: 'No trips yet', value: '0 days' };
-  let longestFlight = { label: 'No flights yet', value: '0 mi' };
-  let longestFlightMiles = 0;
-
-  for (const trip of trips) {
-    const duration = tripDurationDays(trip);
-    if (duration > Number.parseInt(longestTrip.value, 10)) {
-      longestTrip = { value: `${duration} day${duration === 1 ? '' : 's'}`, label: trip.title };
-    }
-
-    const year = trip.startDate.slice(0, 4) || 'Unknown';
-    const currentYear = yearStats.get(year) ?? { flights: 0, miles: 0 };
-    currentYear.flights += trip.flightCount;
-    currentYear.miles += trip.miles;
-    yearStats.set(year, currentYear);
-
-    const airportList = trip.airports?.length ? trip.airports : routeAirports(trip.routeLabel);
-    for (const airport of airportList) {
-      airportCounts.set(airport, (airportCounts.get(airport) ?? 0) + 1);
-    }
-
-    const route = normalizedRouteLabel(trip);
-    if (route) routeCounts.set(route, (routeCounts.get(route) ?? 0) + 1);
-
-    for (const segment of trip.segments ?? []) {
-      const miles = segment.distanceMiles ?? 0;
-      if (miles > longestFlightMiles) {
-        longestFlightMiles = miles;
-        longestFlight = { value: `${miles.toLocaleString()} mi`, label: segmentRouteLabel(segment) };
-      }
-    }
-
-    if (!trip.segments || trip.segments.length === 0) {
-      const estimated = Math.round(trip.miles / Math.max(1, trip.flightCount));
-      if (estimated > longestFlightMiles) {
-        longestFlightMiles = estimated;
-        longestFlight = { value: `${estimated.toLocaleString()} mi`, label: trip.routeLabel };
-      }
-    }
-  }
-
-  const yearRows = Array.from(yearStats.entries())
-    .map(([year, stats]) => ({ year, ...stats }))
-    .sort((a, b) => Number(b.year) - Number(a.year));
-  const maxYearFlights = Math.max(1, ...yearRows.map((year) => year.flights));
-  const busiestYear = yearRows.reduce(
-    (best, row) => row.flights > best.flights ? row : best,
-    { year: 'None', flights: 0, miles: 0 }
-  );
-
-  return {
-    upcomingTrips,
-    continents,
-    longestTrip,
-    longestFlight,
-    activeYears: yearRows.length,
-    yearRows,
-    maxYearFlights,
-    topAirport: topEntry(airportCounts, 'No airport', 'visit', '0 visits'),
-    topRoute: topEntry(routeCounts, 'No route', 'flight', '0 flights'),
-    topCountry: countries[0]
-      ? { value: countries[0].value, label: `${countries[0].count} trip${countries[0].count === 1 ? '' : 's'}` }
-      : { value: 'No country', label: '0 trips' },
-    busiestYear: {
-      value: busiestYear.year,
-      label: `${busiestYear.flights} flights / ${formatCompactMiles(busiestYear.miles)}`,
-    },
-  };
-}
-
-function buildTripCountryStampPreviews(trips: TripSummary[]) {
-  const firstVisitByCountry = new Map<string, TripSummary>();
-  for (const trip of trips) {
-    const existing = firstVisitByCountry.get(trip.country);
-    const visitDate = trip.firstCountryEntryDate ?? trip.startDate;
-    const existingDate = existing ? existing.firstCountryEntryDate ?? existing.startDate : undefined;
-    if (!existing || !existingDate || visitDate < existingDate) firstVisitByCountry.set(trip.country, trip);
-  }
-
-  const stamps = Array.from(firstVisitByCountry.values())
-    .sort((a, b) => (b.firstCountryEntryDate ?? b.startDate).localeCompare(a.firstCountryEntryDate ?? a.startDate))
-    .map((trip, index) => ({
-      shape: trip.stamp.shape,
-      icon: trip.stamp.icon,
-      color: trip.stamp.color,
-      country: COUNTRY_ABBREVIATIONS[trip.country] ?? trip.country,
-      city: trip.stamp.city ?? trip.city,
-      airportCode: trip.stamp.airportCode ?? trip.airportCode,
-      date: trip.firstCountryEntryDate ?? trip.stamp.date ?? trip.startDate,
-      footer: trip.stamp.footer,
-      rotate: index % 2 === 0 ? -2 : 2,
-    }));
-
-  if (stamps.length > 0) return stamps;
-  return rosterCountryStampPreviews.slice(0, 1);
-}
-
-function rankValues(values: string[]) {
-  const counts = new Map<string, number>();
-  values.forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
-  return Array.from(counts.entries())
-    .map(([value, count]) => ({ value, count }))
-    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
-}
-
-function topEntry(counts: Map<string, number>, emptyValue: string, noun: string, emptyLabel: string) {
-  const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
-  if (!top) return { value: emptyValue, label: emptyLabel };
-  return { value: top[0], label: `${top[1]} ${noun}${top[1] === 1 ? '' : 's'}` };
-}
-
-function tripDurationDays(trip: TripSummary) {
-  const start = new Date(`${trip.startDate}T00:00:00`).getTime();
-  const end = new Date(`${trip.endDate || trip.startDate}T00:00:00`).getTime();
-  if (Number.isNaN(start) || Number.isNaN(end)) return 1;
-  return Math.max(1, Math.round((end - start) / 86400000) + 1);
-}
-
-function routeAirports(routeLabel: string) {
-  return routeLabel.split('->').map((part) => part.trim()).filter(Boolean);
-}
-
-function normalizedRouteLabel(trip: TripSummary) {
-  const airports = routeAirports(trip.routeLabel);
-  if (airports.length >= 2) return `${airports[0]} -> ${airports[airports.length - 1]}`;
-  if (trip.airportCode) return `${trip.airportCode}`;
-  return trip.routeLabel;
-}
-
-function segmentRouteLabel(segment: TripSegmentSummary) {
-  return `${segment.depAirport} -> ${segment.arrAirport}`;
-}
-
-function formatCompactMiles(miles: number) {
-  if (miles >= 1000) return `${Math.round(miles / 1000)}k mi`;
-  return `${miles} mi`;
-}
-
-function formatPassportDate(value: string) {
-  const parsed = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase();
-}
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.paperSoft,
-  },
-  identity: {
-    marginTop: spacing.sm,
-  },
-  identityTop: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  booklet: {
-    width: 92,
-    height: 142,
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#132136',
-  },
-  bookletTitle: {
-    color: colors.brassSoft,
-    fontFamily: fonts.sansBold,
-    fontSize: 13,
-  },
-  bookletGlobe: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bookletCode: {
-    color: colors.brassSoft,
-    fontFamily: fonts.mono,
-    fontSize: 9,
-  },
-  identityCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  kicker: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 10,
-  },
-  name: {
-    color: colors.ink,
-    fontFamily: fonts.display,
-    fontSize: 24,
-    marginTop: 6,
-  },
-  homeAirport: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansBold,
-    fontSize: 11.5,
-    marginTop: 4,
-  },
-  firstFlight: {
-    color: colors.mutedInk,
-    fontFamily: fonts.mono,
-    fontSize: 8,
-    marginTop: 12,
-  },
-  credentialRow: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: colors.paperBorder,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.paperBorder,
-    paddingVertical: spacing.sm,
-  },
-  credentialDetail: {
-    flex: 1,
-    minWidth: 0,
-    paddingHorizontal: spacing.sm,
-    borderRightWidth: 1,
-    borderRightColor: colors.paperBorderSoft,
-  },
-  credentialLabel: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansBold,
-    fontSize: 7,
-    letterSpacing: 0.7,
-  },
-  credentialValue: {
-    color: colors.ink,
-    fontFamily: fonts.mono,
-    fontSize: 13,
-    marginTop: 3,
-  },
-  statStrip: {
-    marginTop: spacing.sm,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: spacing.sm,
-  },
-  stripStat: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  stripLabel: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansBold,
-    fontSize: 9,
-    marginTop: 5,
-  },
-  grid: {
-    marginTop: spacing.lg,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  statCard: {
-    height: 122,
-    minWidth: 0,
-  },
-  statLabel: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansBold,
-    fontSize: 10,
-    marginTop: 8,
-  },
-  statValue: {
-    color: colors.ink,
-    fontFamily: fonts.display,
-    fontSize: 27,
-    marginTop: 2,
-  },
-  statSub: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansRegular,
-    fontSize: 11,
-  },
-  recordsPanel: {
-    marginTop: spacing.lg,
-  },
-  yearPanel: {
-    marginTop: spacing.md,
-  },
-  recordsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-  },
-  recordsTitle: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-    letterSpacing: 0.8,
-  },
-  recordsCount: {
-    color: colors.mutedInk,
-    fontFamily: fonts.mono,
-    fontSize: 11,
-  },
-  recordRow: {
-    minHeight: 54,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: colors.paperBorder,
-    paddingVertical: 9,
-    gap: spacing.sm,
-  },
-  recordIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.ink,
-  },
-  recordCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  recordLabel: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansBold,
-    fontSize: 10,
-    textTransform: 'uppercase',
-  },
-  recordValue: {
-    color: colors.ink,
-    fontFamily: fonts.display,
-    fontSize: 22,
-    marginTop: 1,
-  },
-  recordDetail: {
-    width: 136,
-    color: colors.mutedInk,
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    textAlign: 'right',
-  },
-  yearRow: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  yearLabel: {
-    width: 42,
-    color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-  },
-  yearTrack: {
-    flex: 1,
-    height: 10,
-    borderRadius: 5,
-    overflow: 'hidden',
-    backgroundColor: '#D8CBB4',
-  },
-  yearFill: {
-    height: '100%',
-    borderRadius: 5,
-    backgroundColor: colors.red,
-  },
-  yearValue: {
-    width: 82,
-    color: colors.mutedInk,
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    textAlign: 'right',
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 13,
-    marginTop: spacing.xl,
-    marginBottom: spacing.sm,
-  },
-  collectionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  collectionCard: {
-    height: 126,
-    alignItems: 'flex-start',
-  },
-  collectionTop: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  collectionIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.paperSoft,
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
-  },
-  collectionArrow: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansBold,
-    fontSize: 17,
-  },
-  collectionTitle: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansBold,
-    fontSize: 9,
-    letterSpacing: 0.9,
-    marginTop: 8,
-  },
-  collectionValue: {
-    color: colors.ink,
-    fontFamily: fonts.display,
-    fontSize: 23,
-    lineHeight: 25,
-  },
-  collectionNote: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansRegular,
-    fontSize: 9,
-    marginTop: 1,
-  },
-  countryPreviewPanel: {
-    marginTop: spacing.md,
-  },
-  countryPreviewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
-  },
-  countryPreviewTitle: {
-    color: colors.red,
-    fontFamily: fonts.sansBold,
-    fontSize: 12,
-    letterSpacing: 0.8,
-  },
-  countryPreviewCount: {
-    color: colors.mutedInk,
-    fontFamily: fonts.sansRegular,
-    fontSize: 10,
-    marginTop: 2,
-  },
-  viewStampsButton: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  viewStampsText: {
-    color: colors.ink,
-    fontFamily: fonts.sansBold,
-    fontSize: 9,
-    letterSpacing: 0.5,
-  },
-  countryPreviewGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: spacing.md,
-  },
-  countryPreviewStamp: {
-    minWidth: 0,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.paperBorderSoft,
-    backgroundColor: colors.paperSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  screen: { flex: 1, backgroundColor: colors.paperSoft },
+  book: { alignItems: "center", marginTop: 8, marginBottom: 24 },
+  content: { paddingHorizontal: 24 },
+  activity: { marginTop: 28 },
+  sectionTitle: { fontFamily: fonts.sans, fontSize: 15, lineHeight: 21, color: colors.ink, marginBottom: 16 },
+  records: { marginTop: 28 },
+  record: { paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.paperBorder, gap: 5 },
+  recordCopy: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
+  recordLabel: { fontFamily: fonts.sansRegular, fontSize: 13, color: colors.mutedInk },
+  recordValue: { flex: 1, fontFamily: fonts.display, fontSize: 21, lineHeight: 24, color: colors.ink },
+  recordDetail: { maxWidth: 90, fontFamily: fonts.sansRegular, fontSize: 13, lineHeight: 19.5, color: colors.mutedInk, textAlign: "right" },
 });
