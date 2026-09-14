@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from app.services import flight_query_v4
 from app.services.flight_query_v4 import (
+    build_fast_bilt_confirmation_queries,
     build_fast_known_sender_queries,
     build_fast_strong_keyword_queries,
     build_discovery_plan,
@@ -37,7 +38,17 @@ def test_first_run_defaults_to_fast_user_visible_tiers():
     assert "initial_broad_recent" not in tiers
     assert "exhaustive_backfill" not in tiers
     assert not any("category:travel" in item.query for item in plan if item.tier.startswith("fast_"))
-    assert all("-category:promotions" in item.query for item in plan if item.tier.startswith("fast_"))
+    assert all(
+        "-category:promotions" in item.query
+        for item in plan
+        if item.tier.startswith("fast_") and item.tier != "fast_bilt_confirmations"
+    )
+    category_independent = [item for item in plan if "-category:promotions" not in item.query]
+    assert [item.tier for item in category_independent] == ["fast_bilt_confirmations"]
+    assert category_independent[0].query == (
+        'after:2003/12/31 from:notifications@members.bilt.com '
+        'subject:"your flight booking is confirmed"'
+    )
 
 
 def test_recall_discovery_tiers_are_available_when_enabled(monkeypatch):
@@ -90,6 +101,7 @@ def test_later_run_queries_new_mail_without_automatic_backfill():
     )
 
     assert any("after:2026/4/17" in item.query for item in plan if item.tier == "fast_known_senders")
+    assert any("after:2026/4/17" in item.query for item in plan if item.tier == "fast_bilt_confirmations")
     assert not [item for item in plan if item.tier == "incremental_precise"]
     assert not [item for item in plan if item.tier == "initial_broad_recent"]
     assert not [item for item in plan if item.tier == "exhaustive_backfill"]
@@ -179,7 +191,9 @@ def test_explicit_backfill_flag_can_build_recovery_window(monkeypatch):
 
 
 def test_noisy_domains_are_not_in_fast_known_senders():
-    combined = " ".join(build_fast_known_sender_queries(since="2026/1/1"))
+    combined = " ".join(build_fast_known_sender_queries(
+        since="2026/1/1", learned_sender_domains=["members.bilt.com", "bilt.com", "biltrewards.com"]
+    ))
 
     assert "from:aa.com" in combined
     assert "from:e.delta.com" in combined
@@ -194,7 +208,26 @@ def test_noisy_domains_are_not_in_fast_known_senders():
     assert "from:citicards.com" not in combined
     assert "from:airbnb.com" not in combined
     assert "from:membership.prioritypass.com" not in combined
+    assert "from:members.bilt.com" not in combined
+    assert "from:bilt.com" not in combined
+    assert "from:biltrewards.com" not in combined
     assert "-category:promotions" in combined
+
+
+def test_only_bilt_flight_confirmations_bypass_promotions_category():
+    queries = build_fast_bilt_confirmation_queries(since="2026/9/1")
+    assert queries == [
+        'after:2026/9/1 from:notifications@members.bilt.com '
+        'subject:"your flight booking is confirmed"'
+    ]
+    # No sender-wide Bilt or hotel/newsletter exception joins this query.
+    assert " OR " not in queries[0]
+    assert "-category:promotions" not in queries[0]
+    assert all(
+        "-category:promotions" in query
+        for query in build_fast_known_sender_queries(since="2026/9/1")
+        + build_fast_strong_keyword_queries(since="2026/9/1")
+    )
 
 
 def test_fast_known_senders_include_exact_subdomains_and_roots(tmp_path):

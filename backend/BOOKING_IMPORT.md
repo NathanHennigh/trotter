@@ -1,6 +1,6 @@
 # Booking reconciliation
 
-Parser version 24 separates extracted flight facts from the active itinerary.
+Parser version 25 preserves extracted flight facts separately from the active itinerary and recovers previously ignored Bilt flight confirmations.
 
 ## Import behavior
 
@@ -12,6 +12,16 @@ Parser version 24 separates extracted flight facts from the active itinerary.
 - A per-user lock covers import and repair across message commits. PostgreSQL uses a dedicated advisory-lock connection; SQLite uses an OS file lock. Worker failures roll back the current message before recording failure. Previously committed messages remain safe to replay.
 
 Direct builder calls without a source message ID retain legacy behavior for compatibility. New mailbox integrations must use `apply_booking_message`, rather than calling the legacy builder or full rebuild functions directly.
+
+## Bilt confirmations and recovery (parser 25)
+
+The transactional exception requires `notifications@members.bilt.com`, the subject `Your flight booking is confirmed!` (with an optional final exclamation mark), and a booked itinerary containing an airline confirmation reference, valid airports, a flight number, dates and times. It recognizes Bilt's flight-first cards, standalone airport codes and repeated day-first endpoint dates in plain text or HTML. Hotel bookings and newsletters retain the normal noise filters. Missing passenger names remain `unknown` and await review; paying for a booking does not make it the account holder's travel.
+
+The `fast_bilt_confirmations` discovery query combines that mailbox with the flight-confirmation subject and the usual scan date window. This single fast query includes mail categorized as Promotions. Other fast discovery queries keep their Promotions exclusion, and Bilt domains are excluded from the broad learned-sender list. Full message evidence is still checked after discovery.
+
+Ordinary scans prioritize stored Bilt confirmations ignored as `ignored_nonflight_promo` by an older parser version, even when the message is outside the incremental Gmail window. Recovery is scoped to the current user and the exact sender/subject pattern, within the existing stale-reparse batch limit (250 by default). It does not reset Gmail discovery or reparse all ignored messages. Successfully processed rows advance to the current version, so later scans make progress through any remaining batch.
+
+For a controlled repair, `TROTTER_REPARSE_MESSAGE_IDS` accepts comma-separated provider message IDs and explicitly retries those messages even if they are already resolved at the current parser version. Stored-message selection remains scoped to the user whose import job runs. These IDs bypass discovery skip and evidence prefilter decisions, but still use the normal ownership, cancellation and immutable-evidence policy. Clear the override after the repair. Built-in historical repair IDs remain eligible only at older parser versions. Preview against a disposable copy before applying corrections to saved travel.
 
 ## Review API
 
@@ -39,4 +49,8 @@ The migration deliberately refuses a destructive downgrade. Older application co
 
 Tests cover shared and other-traveler bookings, aliases, payment/forwarding exclusions, cancellation order, newer rebooking, repeated imports, partial and ambiguous notices, exact scope, user decisions, authorization, concurrent workers, scoped enrichment, and injected transaction failures. The anonymized Orlando fixtures retain the original email structures and synthetic ticket-number lengths.
 
-The September 2026 validation ran tests with dotenv disabled, no credentials, a disposable SQLite database and network access blocked. PostgreSQL migration and model DDL were compiled; a live PostgreSQL/PostGIS integration environment was not available. External Gmail and enrichment providers were mocked in worker tests.
+Bilt regressions use synthetic plain-text and HTML fixtures. They cover flight-card extraction, hotel/newsletter negatives, Promotions-independent discovery, bounded recovery of older ignored confirmations, explicit current-version retries, repeat-run idempotence and unresolved ownership without active flight creation.
+
+Regression tests run with dotenv disabled, no credentials, a disposable SQLite database and network access blocked. External Gmail and enrichment providers are mocked in worker tests.
+
+The September 14 Bilt recovery was also rehearsed against an isolated copy of the production PostgreSQL/PostGIS database. It preserved all 159 existing flights and 64 trips, added exactly four user-confirmed legs as one round trip, retained the five other-person legs separately, and preserved active IDs and facts on reverse-order source replay. The default rehearsal rolled back and verified that every database row returned to its original value.

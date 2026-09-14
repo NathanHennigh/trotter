@@ -13,10 +13,12 @@ from email.utils import parsedate_to_datetime
 from hashlib import sha256
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, func, or_
 
 from app.celery_app import celery_app
 from app.db import SessionLocal
 from app.models import Account, Message, MessageStatus, Segment, SyncJob, Trip, User
+from app.services.bilt_booking import BILT_FLIGHT_SENDER, BILT_FLIGHT_SUBJECTS
 
 logger = logging.getLogger(__name__)
 PROGRESS_COMMIT_EVERY = 25
@@ -245,9 +247,9 @@ def _print_phase(label: str, detail: str | None = None) -> None:
     print(f"{BOLD}Phase {label}{RESET}{suffix}")
 
 
-def _message_skip_reason(existing_msg: Message | None, parser_version: int) -> str | None:
+def _message_skip_reason(existing_msg: Message | None, parser_version: int, *, force_parse: bool = False) -> str | None:
     """Return why an existing message is resolved, or None when it should parse."""
-    if not existing_msg:
+    if force_parse or not existing_msg:
         return None
     if existing_msg.status == MessageStatus.PENDING:
         return None
@@ -349,17 +351,20 @@ def _select_stale_reparse_messages(
     parser_version: int,
     limit: int,
     targeted_ids: set[str],
+    force_ids: set[str] | None = None,
 ) -> list[Message]:
     if limit <= 0:
         return []
 
     selected: list[Message] = []
     seen: set[str] = set()
+    force_ids = set(force_ids or ())
+    targeted_ids = set(targeted_ids) | force_ids
     base_filters = (
         Message.user_id == user_id,
         Message.status.in_([MessageStatus.ACCEPTED, MessageStatus.REVIEW_REQUIRED]),
         Message.parse_version < parser_version,
-        Message.ignored.is_(False),
+        or_(Message.ignored.is_(False), _ignored_bilt_confirmation_filter()),
     )
 
     if targeted_ids:
@@ -367,7 +372,7 @@ def _select_stale_reparse_messages(
             db.query(Message)
             .filter(
                 Message.user_id == user_id,
-                Message.parse_version < parser_version,
+                or_(Message.parse_version < parser_version, Message.provider_msg_id.in_(force_ids)),
                 Message.provider_msg_id.in_(targeted_ids),
             )
             .order_by(Message.created_at.desc(), Message.id.desc())
@@ -384,6 +389,20 @@ def _select_stale_reparse_messages(
         return selected
 
     query = db.query(Message).filter(*base_filters)
+    if seen:
+        query = query.filter(Message.provider_msg_id.notin_(seen))
+
+    # Recover this narrowly identified prior classification error for every
+    # user after a parser upgrade, without refetching all ignored newsletters.
+    bilt_rows = query.filter(_ignored_bilt_confirmation_filter()).order_by(
+        Message.created_at.desc(), Message.id.desc(),
+    ).limit(remaining).all()
+    for row in bilt_rows:
+        selected.append(row)
+        seen.add(row.provider_msg_id)
+    remaining = limit - len(selected)
+    if remaining <= 0:
+        return selected
     if seen:
         query = query.filter(Message.provider_msg_id.notin_(seen))
 
@@ -421,9 +440,20 @@ def _count_remaining_stale_reparse_messages(db, *, user_id: int, parser_version:
             Message.user_id == user_id,
             Message.status.in_([MessageStatus.ACCEPTED, MessageStatus.REVIEW_REQUIRED]),
             Message.parse_version < parser_version,
-            Message.ignored.is_(False),
+            or_(Message.ignored.is_(False), _ignored_bilt_confirmation_filter()),
         )
         .count()
+    )
+
+
+def _ignored_bilt_confirmation_filter():
+    """Stored-header candidates only; the full itinerary still passes the gate."""
+    sender = func.lower(func.trim(Message.from_email))
+    return and_(
+        Message.ignored.is_(True),
+        Message.parse_error == "ignored_nonflight_promo",
+        func.lower(func.trim(Message.subject)).in_(BILT_FLIGHT_SUBJECTS),
+        or_(sender == BILT_FLIGHT_SENDER, sender.like(f"%<{BILT_FLIGHT_SENDER}>")),
     )
 
 
@@ -543,6 +573,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
         db.commit()
 
         processed_msg_ids: set[str] = set()
+        force_reparse_ids = _env_message_ids("TROTTER_REPARSE_MESSAGE_IDS")
         phase_labels = _tier_phase_labels(discovery_plan)
         current_tier: str | None = None
 
@@ -565,6 +596,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 tier=candidate.tier,
                 prefilter=candidate.prefilter,
                 evidence=evidence,
+                force_parse=msg_id in force_reparse_ids,
             ):
                 return {
                     "candidate": candidate,
@@ -589,7 +621,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     sender=from_email,
                     body=body_for_filter,
                 )
-                if candidate.prefilter and not flight_like_candidate:
+                if candidate.prefilter and not flight_like_candidate and msg_id not in force_reparse_ids:
                     return {
                         "candidate": candidate,
                         "msg_id": msg_id,
@@ -1006,7 +1038,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 reporter.count(candidate.tier, "candidate")
 
                 existing_msg = existing_by_id.get(msg_id)
-                skip_reason = _message_skip_reason(existing_msg, PARSER_VERSION)
+                skip_reason = _message_skip_reason(existing_msg, PARSER_VERSION, force_parse=msg_id in force_reparse_ids)
                 if skip_reason:
                     reporter.count(candidate.tier, "db_skip")
                     reporter.count(candidate.tier, f"db_skip_{skip_reason}")
@@ -1387,6 +1419,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 parser_version=PARSER_VERSION,
                 limit=sync_limit or MAX_STALE_REPARSE_PER_SYNC,
                 targeted_ids=targeted_reparse_ids,
+                force_ids=force_reparse_ids,
             )
         if stale_messages:
             _ACTIVE_PROGRESS_PHASE = "reparse"
@@ -1433,8 +1466,9 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     body=body_for_filter,
                 )
                 previous_status = stale_msg.status
+                previous_ignored = bool(stale_msg.ignored)
                 stale_msg.status = MessageStatus.ACCEPTED
-                stale_msg.ignored = previous_status != MessageStatus.ACCEPTED
+                stale_msg.ignored = previous_ignored or previous_status != MessageStatus.ACCEPTED
                 stale_msg.parse_error = parse_miss.reason
                 stale_msg.parse_evidence = {
                     **parse_miss.as_dict(),

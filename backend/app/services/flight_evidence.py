@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 
+from .bilt_booking import bilt_confirmation_evidence
+
 
 EVIDENCE_VERSION = 1
 _AIRPORT_PAIR = re.compile(
@@ -71,6 +73,14 @@ class FlightEvidence:
 
 def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confidence: str = "unknown") -> FlightEvidence:
     """Score flight-like structure without deciding import behavior yet."""
+    bilt = bilt_confirmation_evidence(subject=subject, sender=sender, body=body)
+    if bilt:
+        return FlightEvidence(
+            version=EVIDENCE_VERSION, verdict="parse", score=13,
+            signals=("transactional_bilt_confirmation", "booking_identifier", "route_airport_pair",
+                     "flight_number", "date_or_time", "flight_language"),
+            airport_codes=bilt.airport_codes, flight_numbers=bilt.flight_numbers,
+        )
     text = "\n".join(part for part in (subject, sender, body[:200_000]) if part)
     route_text = "\n".join(part for part in (subject, body[:200_000]) if part)
     compact = " ".join(text.split())

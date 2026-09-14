@@ -12,6 +12,7 @@ from typing import Iterable, Optional
 from sqlalchemy.orm import Session
 
 from ..models import GmailDiscoverySignal, GmailDiscoveryState
+from .bilt_booking import BILT_FLIGHT_SENDER, BILT_FLIGHT_SUBJECTS
 from .flight_query import (
     HIGH_CONFIDENCE_FLIGHT_SENDERS,
     NOISY_TRAVEL_SENDERS,
@@ -80,6 +81,7 @@ EXCLUDED_FAST_SENDER_DOMAINS = {
     "airbnb.com",
     "barclaycardus.com",
     "barclays.com",
+    "bilt.com",
     "biltrewards.com",
     "capitalone.com",
     "citi.com",
@@ -158,6 +160,14 @@ def build_discovery_plan(
     plan.extend(
         DiscoveryQuery(tier="fast_strong_keywords", query=query, prefilter=True)
         for query in build_fast_strong_keyword_queries(since=_gmail_after_date(incremental_start))
+    )
+
+    # A booked flight can be labeled Promotions by Gmail. Only this exact
+    # transactional mailbox + subject gets category-independent discovery;
+    # the evidence gate still validates the full dated itinerary afterward.
+    plan.extend(
+        DiscoveryQuery(tier="fast_bilt_confirmations", query=query, prefilter=True)
+        for query in build_fast_bilt_confirmation_queries(since=_gmail_after_date(incremental_start))
     )
 
     if ENABLE_RECALL_DISCOVERY_TIERS:
@@ -327,6 +337,11 @@ def build_fast_known_sender_queries(
 def build_fast_strong_keyword_queries(*, since: str) -> list[str]:
     terms = [f'"{keyword}"' for keyword in STRONG_FLIGHT_KEYWORDS]
     return _chunk_terms(terms, since=since, max_query_length=1400, suffix=PROMOTIONS_EXCLUSION)
+
+
+def build_fast_bilt_confirmation_queries(*, since: str) -> list[str]:
+    subject = BILT_FLIGHT_SUBJECTS[-1]
+    return [f'after:{since} from:{BILT_FLIGHT_SENDER} subject:"{subject}"']
 
 
 def build_background_backscan_queries(window_start: datetime, window_end: datetime) -> list[str]:

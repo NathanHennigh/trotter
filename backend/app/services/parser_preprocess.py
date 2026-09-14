@@ -67,11 +67,15 @@ _STRUCTURAL_REPEAT_RE = re.compile(
     r"""
     (?:
         [A-Z]{3}|
+        [A-Z0-9]{2}\s?\d{1,4}[A-Z]?|
         \d{1,4}[A-Z]?|
         Flight|
         Depart(?:s|ure|ing)?|
         Arriv(?:es|al|ing)?|
         \d{1,2}:\d{2}\s*[AP]M|
+        (?:\d{1,2}h\s*)?\d{1,2}m|
+        (?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?
+            \d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|
         (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)?,?\s+
             (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}
     )

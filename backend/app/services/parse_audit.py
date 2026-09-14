@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .bilt_booking import is_bilt_flight_confirmation
+
 
 _AIRPORT_CODE = re.compile(r"\b[A-Z]{3}\b")
 _ROUTE_PAIR = re.compile(
@@ -74,6 +76,13 @@ def assess_parse_miss(*, subject: str, sender: str, body: str) -> ParseMissEvide
     provider-specific parser decision. Strong misses can be reprocessed by
     later parser versions or inspected in the review endpoint.
     """
+    if is_bilt_flight_confirmation(subject=subject, sender=sender, body=body):
+        # A parser miss on an explicitly booked itinerary must stay recoverable.
+        return ParseMissEvidence(
+            reason="strong_flight_evidence_but_no_segments", score=13,
+            signals=["transactional_bilt_confirmation", "booking_identifier", "route_pair",
+                     "flight_number", "date", "time", "flight_language"],
+        )
     text = "\n".join(part for part in [subject, sender, body] if part)
     compact = re.sub(r"\s+", " ", text)
     upper = compact.upper()

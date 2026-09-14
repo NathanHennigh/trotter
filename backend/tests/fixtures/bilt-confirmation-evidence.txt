@@ -1,0 +1,38 @@
+See details for reservation
+
+Booking
+confirmed!
+
+Airline
+confirmation
+
+QZ8K2M
+
+Passengers
+1
+
+Outbound
+Itinerary
+
+UA1234
+( https://example.invalid/airline )
+1h 35m
+
+SFO
+San Francisco
+09:20am
+Tue, 10 Nov 2026
+
+Class
+Economy
+Seats
+--
+
+LAX
+Los Angeles
+10:55am
+Tue, 10 Nov 2026
+
+Looking for a place to stay?
+Get rewarded on hotel bookings. Book a hotel through the Bilt Travel Portal.
+Manage your preferences

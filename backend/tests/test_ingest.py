@@ -383,6 +383,45 @@ class TestUnparsedCandidates:
 
         assert [row.provider_msg_id for row in selected] == [targeted.provider_msg_id]
 
+    def test_explicit_force_reparse_recovers_current_version_only_for_target_owner(self, test_user, test_db):
+        other = User(email="other@example.com", name="Other User")
+        test_db.add(other)
+        test_db.flush()
+        def message(uid, mid):
+            return Message(user_id=uid, provider_msg_id=mid, status=MessageStatus.ACCEPTED,
+                           ignored=True, parse_version=25, parse_error="ignored_nonflight_promo",
+                           parse_evidence={"resolved": True, "reason": "ignored_nonflight_promo"})
+        selected_row = message(test_user.id, "forced-current")
+        test_db.add_all([selected_row, message(test_user.id, "not-targeted"), message(other.id, "forced-current")])
+        test_db.commit()
+        args = dict(user_id=test_user.id, parser_version=25, limit=10, targeted_ids={"forced-current"})
+        assert _select_stale_reparse_messages(test_db, **args) == []
+        selected = _select_stale_reparse_messages(test_db, **args, force_ids={"forced-current"})
+        assert [row.id for row in selected] == [selected_row.id]
+        assert _message_skip_reason(selected_row, 25) == "ignored_nonflight_promo"
+        assert _message_skip_reason(selected_row, 25, force_parse=True) is None
+
+    def test_upgrade_recovers_only_prior_ignored_bilt_flight_headers_within_bound(self, test_user, test_db):
+        def message(mid, subject="Your flight booking is confirmed!", sender="Bilt <notifications@members.bilt.com>", version=24):
+            return Message(user_id=test_user.id, provider_msg_id=mid, subject=subject, from_email=sender,
+                           status=MessageStatus.ACCEPTED, ignored=True, parse_version=version,
+                           parse_error="ignored_nonflight_promo")
+        test_db.add_all([
+            message("bilt-flight-1"), message("bilt-flight-2"),
+            message("bilt-hotel", subject="Your hotel booking is confirmed!"),
+            message("bilt-newsletter", subject="Bilt newsletter: offers"),
+            message("wrong-domain", sender="notifications@members.bilt.com.attacker.example"),
+            message("already-current", version=25),
+        ])
+        test_db.commit()
+        args = dict(user_id=test_user.id, parser_version=25, limit=1, targeted_ids=set())
+        selected = _select_stale_reparse_messages(test_db, **args)
+        assert len(selected) == 1 and selected[0].provider_msg_id in {"bilt-flight-1", "bilt-flight-2"}
+        selected[0].parse_version = 25
+        test_db.commit()
+        next_rows = _select_stale_reparse_messages(test_db, **args)
+        assert len(next_rows) == 1 and next_rows[0].id != selected[0].id
+
     def test_expensive_parse_gate_skips_newsletter_backfill(self):
         evidence = assess_flight_evidence(
             subject="Leaving The Peacock's Nest",

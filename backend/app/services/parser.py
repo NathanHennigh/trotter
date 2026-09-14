@@ -24,7 +24,7 @@ from .passenger_identity import (
 )
 
 logger = logging.getLogger(__name__)
-PARSER_VERSION = 24
+PARSER_VERSION = 25
 
 # ──────────────────────────── regex patterns ────────────────────────────────
 
@@ -1925,6 +1925,7 @@ def extract_shape_flights(
     flights.extend(_shape_vertical_route_date_time_blocks(text, pnr=pnr))
     flights.extend(_shape_labeled_depart_arrive_segments(text, pnr=pnr))
     flights.extend(_shape_ota_vertical_itinerary(text, pnr=pnr))
+    flights.extend(_shape_dated_flight_cards(text, pnr=pnr))
     flights.extend(_shape_compact_airline_flight_rows(text, pnr=pnr, received_at=received_at))
     flights.extend(_shape_alaska_trip_detail_blocks(text, pnr=pnr, received_at=received_at))
     flights.extend(_shape_southwest_itinerary_blocks(text, pnr=pnr))
@@ -1935,6 +1936,81 @@ def extract_shape_flights(
     flights.extend(_shape_vertical_itinerary_lines(text, pnr=pnr, received_at=received_at))
     flights.extend(_shape_ota_multi_confirmation(text, fallback_pnr=pnr, received_at=received_at))
     return _dedupe_flights(flights)
+
+
+def _shape_dated_flight_cards(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    """Flight-first agency cards with a dated airport/time at each endpoint.
+
+    Bilt uses this layout without Depart/Arrive labels. Bound each card by the
+    next flight number so a missing endpoint cannot borrow a later flight's
+    destination. Account headers and payment names are not passenger evidence.
+    """
+    lines = _normalized_lines(text)
+    flight_line = re.compile(r"([A-Z0-9]{2})\s?(\d{1,4}[A-Z]?)")
+    duration_line = re.compile(r"(?:(\d{1,2})h\s*)?(\d{1,2})m", re.IGNORECASE)
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines):
+        match = flight_line.fullmatch(line)
+        if not match or match.group(1) not in _KNOWN_AIRLINES:
+            continue
+        end = min(index + 25, len(lines))
+        for pos in range(index + 1, end):
+            if flight_line.fullmatch(lines[pos]):
+                end = pos
+                break
+        card = lines[index + 1:end]
+        duration_index = next(
+            (pos for pos, value in enumerate(card[:3]) if duration_line.fullmatch(value)),
+            None,
+        )
+        if duration_index is None:
+            continue
+        duration_match = duration_line.fullmatch(card[duration_index])
+        duration_minutes = int(duration_match.group(1) or 0) * 60 + int(duration_match.group(2))
+        if not 10 <= duration_minutes <= 24 * 60:
+            continue
+        endpoints: list[tuple[str, datetime]] = []
+        invalid_endpoint = False
+        for pos in range(duration_index + 1, len(card)):
+            airport = _airport_token_from_line(card[pos])
+            if not airport:
+                continue
+            endpoint_dt = None
+            # Airport, optional city name, local time, then the explicit date.
+            # Do not cross another airport or accept an inferred arrival date.
+            for clock_pos in range(pos + 1, min(pos + 4, len(card) - 1)):
+                if _airport_token_from_line(card[clock_pos]):
+                    break
+                if _parse_time_only(card[clock_pos]):
+                    endpoint_dt = _parse_date_time(card[clock_pos + 1], card[clock_pos])
+                    break
+            if endpoint_dt is None:
+                invalid_endpoint = True
+                break
+            endpoints.append((airport, endpoint_dt))
+            if len(endpoints) == 2:
+                break
+        if invalid_endpoint or len(endpoints) != 2:
+            continue
+        (dep_airport, dep_dt), (arr_airport, arr_dt) = endpoints
+        if not _valid_route(dep_airport, arr_airport):
+            continue
+        # Endpoint clocks are local, as in the other text extractors. Explicit
+        # dates may cross the date line; don't manufacture a next-day arrival.
+        if not -timedelta(hours=24) <= arr_dt - dep_dt <= timedelta(hours=48):
+            continue
+        flights.append(ParsedFlight(
+            dep_airport=dep_airport,
+            arr_airport=arr_airport,
+            dep_time=dep_dt,
+            arr_time=arr_dt,
+            airline=match.group(1),
+            flight_number=match.group(1) + match.group(2),
+            pnr=pnr,
+            source="shape_dated_flight_cards",
+            confidence=94,
+        ))
+    return flights
 
 
 def _should_run_legacy_recall_fallback(text: str, flights: list[ParsedFlight]) -> bool:
