@@ -45,3 +45,21 @@ Physical-device inspection reproduced a hard rectangular shade displaced above t
 Six postcard interaction tests, seven photo/fallback tests, TypeScript, Expo Doctor and offline 320/420-width normal/enlarged-text checks passed. WSL produced `C:/Users/natha/Documents/builds/trotter-preview-e90771217268-dev-2026-09-14_19-40-18Z.apk`, SHA-256 `28958af2c987558ac527dc75a31f5ed7e2b7e0ea0b2730ee79c6070648a7e481`. Its archive, signature compatibility, bundled font and production API configuration were verified before updating the connected Android phone with `adb install -r`.
 
 The installed build restored the existing account. Device screenshots confirm clean Greece and Thailand photographs, correctly placed country lettering, successful postcard-to-country navigation, and return to the list. Trotter was left on Dreams. Evidence: `artifacts/postcard-shadow-20260914/device-before.png`, `device-after.png`, `device-open.png`, and `device-return.png`. This correction required no backend deployment.
+
+## Postcard turn shadow
+
+A second physical-device recording isolated Android's native elevation shadow: it formed a detached gray plane as the postcard rotated. Commit `a55f806` removes card elevation/shadow and the late opacity fade, preserving the 180 ms rotation, photo lettering, paper borders and interaction safeguards. Unmatched-place copy now says **No reliable match yet**, rather than asserting that the location was not found.
+
+Six postcard interaction tests, seven recovery/editor tests, TypeScript and Expo Doctor passed. WSL built `C:/Users/natha/Documents/builds/trotter-preview-a55f806eb6e9-dev-2026-09-14_19-56-17Z.apk`, SHA-256 `8dda5cab6b444a05648610e08d44b56a24e81f6a230835c6e6833648d5cf8f3a`. Archive, signing compatibility, production API origin and bundled font checks passed before `adb install -r` on the connected phone.
+
+Native video evidence under `artifacts/dream-flip-location-20260914/flip-before.mp4` and `flip-after-verified.mp4` confirms the detached plane is gone and the country opens. Corresponding `*-frames.png` files show the turn at 50 ms intervals. Existing account restoration and return to Dreams were checked. A separate capture interrupted by an unrelated app switch was discarded and was not used as verification evidence.
+
+## Location matching follow-up
+
+Backend commit `e1c83832acb8bf785258f94d9301c051770cc5e0` is deployed on Oracle. Matching now accounts for verified district/locality context and uses bounded alternate provider searches, while retaining strict validation of the saved name, country and precise place geometry. Broader matches require confirmation. The backend suite passed 194 tests; independent review passed 125 focused provider tests with networking disabled. These suites overlap.
+
+A fresh PostgreSQL backup was checksum-verified and its restore catalog checked before deployment. All 17 other tables retained identical row hashes and schemas, and every unrelated location row stayed unchanged. Only the two account-verified saved places were retried; their previous location evidence remains in history. API readiness, authentication, both worker queues and the single scheduler passed. The prior image remains available for rollback.
+
+Kuan Nom Saow Cafe now has one **needs_review** candidate, named Kuan Nom Cafe in Ban Khao Thong / Mueang Krabi District. Keri Lighthouse Restaurant remains **not_found** with no reliable candidate. Neither was automatically pinned. The installed app can retrieve these results on refresh and show the cafe's confirmation action. Google Maps text search remains available for the unresolved restaurant; the lookup provider is Geoapify, and the existing Google account connector does not configure Google Places.
+
+Rollout evidence and backup/image identifiers are recorded in `artifacts/dream-location-match-20260914/ROLLOUT.md`.
