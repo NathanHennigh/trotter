@@ -37,3 +37,11 @@ The initial background pass checked four named saves and returned four `not_foun
 Final backend deployment is `ba85e62d0c12702d71ca31a0b5784b58274770fa`. Its read-only response fallback provides an encoded Google Maps text search for a named place without an existing link. Existing and resolved URLs take precedence; search links never become coordinates. All four named saves across the server now expose Maps links, while their location results remain `not_found`. This server-wide count spans two accounts and is not a single user's count.
 
 The fallback's 135 focused backend tests passed. Internal and external readiness, authenticated endpoints, both worker queues, and the single scheduler passed after deployment. A full comparison including the new location table confirmed no data or schema changes during this final rollout. The original and pre-fallback rollback images are retained. This backend-only follow-up does not require rebuilding the Android artifact above.
+
+## Android postcard shadow correction
+
+Physical-device inspection reproduced a hard rectangular shade displaced above the country names. Removed the percentage-sized SVG gradient from the padded title container; only the letter-shaped shadow remains, strengthened slightly for pale photographs. Product changes are confined to `CountryPostcard.tsx` in commits `289887f` and `e907712`.
+
+Six postcard interaction tests, seven photo/fallback tests, TypeScript, Expo Doctor and offline 320/420-width normal/enlarged-text checks passed. WSL produced `C:/Users/natha/Documents/builds/trotter-preview-e90771217268-dev-2026-09-14_19-40-18Z.apk`, SHA-256 `28958af2c987558ac527dc75a31f5ed7e2b7e0ea0b2730ee79c6070648a7e481`. Its archive, signature compatibility, bundled font and production API configuration were verified before updating the connected Android phone with `adb install -r`.
+
+The installed build restored the existing account. Device screenshots confirm clean Greece and Thailand photographs, correctly placed country lettering, successful postcard-to-country navigation, and return to the list. Trotter was left on Dreams. Evidence: `artifacts/postcard-shadow-20260914/device-before.png`, `device-after.png`, `device-open.png`, and `device-return.png`. This correction required no backend deployment.
