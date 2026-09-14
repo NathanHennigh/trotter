@@ -121,8 +121,7 @@ def test_no_configured_key_blocks_without_using_existing_fallback(monkeypatch):
     "updates",
     [
         {"name": "Completely Different", "rank": {"confidence": 1, "match_type": "full_match"}},
-        {"city": "Mexico City"},
-        {"city": None, "county": "Oaxaca"},
+        {"city": "Mexico City", "state": "Mexico City"},
         {"country": "Spain", "country_code": "es"},
         {"country": None, "country_code": None},
         {"result_type": "city"},
@@ -364,3 +363,169 @@ def test_result_is_bounded_and_deterministic(monkeypatch):
     assert result.status == "needs_review"
     assert [item.id for item in result.candidates] == [f"place-{i}" for i in range(5)]
     assert "raw" not in result.model_dump()["candidates"][0]
+
+
+def test_actual_krabi_district_cafe_is_reviewed_instead_of_rejected(monkeypatch):
+    data = feature(name="Kuan Nom Cafe", city="Ban Khao Thong", county="Mueang Krabi District",
+                   state=None, country="Thailand", country_code="th",
+                   formatted="Kuan Nom Cafe, wievpoint, Ban Khao Thong, Thailand",
+                   rank={"confidence":0.375,"confidence_city_level":0.5,"match_type":"full_match"})
+    data["geometry"]["coordinates"] = [98.7781301,8.1662227]
+    captured = mock_response(monkeypatch,[data])
+    result = lookup(place_name="Kuan Nom Saow Cafe",city="Krabi",country="Thailand")
+    assert result.status == "needs_review" and len(result.candidates) == 1
+    assert result.candidates[0].city == "Ban Khao Thong"
+    assert result.candidates[0].name == "Kuan Nom Cafe"
+    assert result.candidates[0].latitude == 8.1662227
+    assert len([call for call in captured if "url" in call]) == 1
+
+
+@pytest.mark.parametrize("actual",["North Krabi District","Krabiville Province","Other Province",None])
+def test_admin_match_requires_whole_place_name_not_substring(monkeypatch,actual):
+    mock_response(monkeypatch,[feature(city="Another Town",state=None,county=actual)])
+    assert lookup(city="Krabi").status == "not_found"
+
+
+@pytest.mark.parametrize("field,value",[("county","Oaxaca"),("state","Oaxaca Province"),("municipality","Oaxaca Municipal Unit")])
+def test_exact_name_with_broader_admin_context_never_auto_resolves(monkeypatch,field,value):
+    data=feature(city="Village",state=None,**{field:value}) if field != "state" else feature(city="Village",state=value)
+    mock_response(monkeypatch,[data])
+    assert lookup().status == "needs_review"
+
+
+def test_parser_cafe_label_can_review_a_restaurant_but_not_parking(monkeypatch):
+    mock_response(monkeypatch,[feature(category="catering.restaurant")])
+    assert lookup().status == "needs_review"
+    mock_response(monkeypatch,[feature(category="parking.cars")])
+    assert lookup().status == "not_found"
+
+
+def sequence_response(monkeypatch,pages):
+    calls=[]
+    class Client:
+        def __init__(self,**kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self,*args):
+            return False
+        async def get(self,url,params):
+            calls.append({"url":url,"params":params})
+            assert len(calls) <= len(pages), "Lookup exceeded bounded request plan"
+            page = pages[len(calls)-1]
+            return httpx.Response(page, json={"error": "unsafe credential"}) if isinstance(page, int) else httpx.Response(200,json={"features":page})
+    monkeypatch.setattr(search.httpx,"AsyncClient",Client)
+    return calls
+
+
+def area_feature(name="Oaxaca",kind="city",identity="area-city",**extra):
+    return feature(**{"name":name,"result_type":kind,"place_id":identity,"category":"administrative",**extra})
+
+
+def test_canonical_category_suffix_search_retains_original_name_validation(monkeypatch):
+    calls=sequence_response(monkeypatch,[[],[feature(name="Casa Toro Restaurant")]])
+    result=lookup(place_name="Casa Toro Restaurant",category="restaurant")
+    assert result.status == "needs_review"
+    assert calls[1]["params"]["text"] == "Casa Toro, Mexico"
+    assert "city" not in calls[1]["params"]
+
+
+def test_places_recovery_uses_verified_boundaries_and_never_fakes_geocoder_rank(monkeypatch):
+    city=area_feature(county="Oaxaca Regional Unit")
+    county=area_feature(name="Oaxaca Regional Unit",kind="county",identity="area-county",county="Oaxaca Regional Unit")
+    poi=feature(city="Village",state=None,county="Oaxaca Regional Unit",rank=None,result_type=None,
+                categories=["catering","catering.cafe"],category=None)
+    calls=sequence_response(monkeypatch,[[],[],[city],[county],[poi],[poi]])
+    result=lookup()
+    assert len(calls) == 6
+    assert result.status == "needs_review" and len(result.candidates) == 1
+    assert calls[2]["params"]["type"] == "locality"
+    assert calls[3]["params"]["text"] == "Oaxaca Regional Unit, Mexico"
+    assert {call["params"]["filter"] for call in calls[4:]} == {"place:area-city","place:area-county"}
+    assert all(call["params"]["categories"] == "catering" for call in calls[4:])
+    assert result.candidates[0].latitude == 17.0732
+
+
+@pytest.mark.parametrize("bad_area",[
+    {"name":"Other County"}, {"country":"Spain","country_code":"es"},
+    {"result_type":"country"}, {"place_id":None},
+])
+def test_unverified_area_never_triggers_places_search(monkeypatch,bad_area):
+    data=area_feature(**bad_area) if "name" not in bad_area else area_feature(name="Other County")
+    calls=sequence_response(monkeypatch,[[],[],[data]])
+    assert lookup().status == "not_found"
+    assert len(calls) == 3
+
+
+def test_area_centroid_and_wrong_purpose_objects_never_become_candidates(monkeypatch):
+    city=area_feature()
+    centroid=area_feature(categories=["catering.cafe"],name="Casa Toro")
+    parking=feature(result_type=None,category=None,categories=["parking.cars"])
+    calls=sequence_response(monkeypatch,[[],[],[city],[centroid,parking]])
+    result=lookup()
+    assert result.status == "not_found" and result.candidates == []
+    assert len(calls) == 4
+
+
+def test_places_query_name_can_recover_variants_but_full_saved_name_still_filters(monkeypatch):
+    city=area_feature()
+    wrong=feature(name="Casa Elsewhere",result_type=None,categories=["catering.cafe"])
+    right=feature(name="Casa Toro Garden",result_type=None,categories=["catering.cafe"])
+    calls=sequence_response(monkeypatch,[[],[],[city],[wrong,right]])
+    result=lookup(place_name="Casa Toro Garden Cafe")
+    assert calls[-1]["params"]["name"] == "Casa Toro"
+    assert result.status == "needs_review" and [candidate.name for candidate in result.candidates] == ["Casa Toro Garden"]
+
+
+@pytest.mark.parametrize("field", ["place_name", "city", "country"])
+@pytest.mark.parametrize("value", ["---", "???", "…"])
+def test_normalized_empty_identity_never_requests_provider(monkeypatch, field, value):
+    calls = sequence_response(monkeypatch, [])
+    assert lookup(**{field: value}).status == "needs_review"
+    assert calls == []
+
+
+def test_missing_provider_context_cannot_match_empty_normalized_inputs():
+    data = feature(city=None, country=None, country_code=None)
+    assert search._candidate(data, "Casa Toro", "---", "???", "", "cafe") is None
+    assert not search._same_country(data["properties"], "???")
+
+
+@pytest.mark.parametrize("category", [None, "unknown", "unsupported"])
+@pytest.mark.parametrize("purpose", ["parking.cars", "public_transport.platform", "service.toilet"])
+def test_unknown_category_never_resolves_auxiliary_objects(monkeypatch, category, purpose):
+    mock_response(monkeypatch, [feature(category=purpose)])
+    result = lookup(category=category)
+    assert result.status == "not_found" and result.candidates == []
+
+
+@pytest.mark.parametrize("category", [None, "unknown", "unsupported"])
+def test_unknown_category_precise_named_place_requires_confirmation(monkeypatch, category):
+    mock_response(monkeypatch, [feature()])
+    assert lookup(category=category).status == "needs_review"
+
+
+@pytest.mark.parametrize("status", [400, 401, 403])
+@pytest.mark.parametrize("stage", [1, 2, 3, 4])
+def test_secondary_configuration_failure_is_blocked_not_not_found(monkeypatch, status, stage):
+    city = area_feature(county="Oaxaca Regional Unit")
+    county = area_feature(name="Oaxaca Regional Unit", kind="county", identity="area-county")
+    pages = [[], [], [city], [county], []]
+    pages[stage] = status
+    calls = sequence_response(monkeypatch, pages[:stage + 1])
+    result = lookup()
+    assert result.status == "blocked" and len(calls) == stage + 1
+    assert "unsafe" not in result.model_dump_json()
+
+
+def test_beach_places_query_uses_documented_category_only(monkeypatch):
+    calls = sequence_response(monkeypatch, [[], [], [area_feature()], []])
+    assert lookup(place_name="Playa Coral", category="beach").status == "not_found"
+    assert calls[-1]["params"]["categories"] == "beach"
+
+
+@pytest.mark.parametrize("kind", ["city", "county", "state", "district", "suburb", "country", "postcode", "street"])
+def test_places_explicit_area_kinds_never_become_pois(monkeypatch, kind):
+    calls = sequence_response(monkeypatch, [[], [], [area_feature()], [feature(result_type=kind, categories=["catering.cafe"])]])
+    result = lookup()
+    assert result.status == "not_found" and not result.candidates and len(calls) == 4

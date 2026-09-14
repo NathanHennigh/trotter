@@ -10,6 +10,10 @@ An exact saved coordinate URL or existing verified pin remains authoritative. A 
 
 ## Configuration and deployment
 
+The resolver first checks precise geocoder POIs. A saved locality may describe an island, district, or province; matching administrative context can retain a candidate for confirmation, but cannot create an automatic pin. Cafe, restaurant, and bar labels can likewise suggest a review option within the catering family. Wrong-country, unrelated-purpose, parking, transport, street, and area-centre results remain excluded.
+
+When the first search has no reliable candidate, recovery removes only a trailing generic venue description, then uses documented Geoapify locality and Places searches within at most two verified administrative boundaries. All results are checked against the original saved name and country, and every recovery candidate requires confirmation. A lookup makes at most six provider requests. Authorization failures remain `blocked` at every stage; unavailable or ambiguous provider coverage never becomes a guessed pin. This matching update requires no migration or saved-item rewrite. Retry only the intended owned items after deployment; existing terminal results are not bulk-reset.
+
 Set `GEOAPIFY_API_KEY` explicitly in the server's protected `deploy/home-server.env`. Obtain it from the authorized provider account; do not copy legacy source-code defaults or put it in mobile/public environment variables. The new provider uses no default key and no Google Places fallback. Avoid commands that print the environment or expanded Compose configuration. Keep OpenStreetMap and Geoapify attribution visible where new location data is displayed, consistent with the provider plan.
 
 Optional limits: `DREAM_LOCATION_ENABLED=true`, `DREAM_LOCATION_BATCH_SIZE=25` (maximum 100), and `DREAM_LOCATION_MAX_ATTEMPTS=5` (maximum 10). Disabling the feature pauses provider work without deleting queued records or saves.
