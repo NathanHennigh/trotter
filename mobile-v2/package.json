@@ -12,7 +12,7 @@
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
     "typecheck": "tsc --noEmit",
-    "test:world-window": "node scripts/buildPassportRuntime.js --check && node scripts/testNativeAuth.js && node scripts/testIncomingShares.cjs && node scripts/testHomeNavigation.cjs && node scripts/testWorldWindowPassport.js && node --test scripts/testWorldWindowTravel.js && node scripts/testDreamCountryArtwork.cjs --assets && node scripts/testWorldWindowGlobe.cjs && node scripts/testStampSystem.js && node scripts/testNativeQa.cjs && node scripts/testRecoveryScreens.cjs && node scripts/testPassportNavigation.cjs && node scripts/testWorldWindowGlobeInteractions.cjs && node scripts/testWorldWindowRefinements.cjs && node scripts/testTripAtlasLabels.cjs && node scripts/testDisplayTextFit.cjs",
+    "test:world-window": "node scripts/buildPassportRuntime.js --check && node scripts/testNativeAuth.js && node scripts/testIncomingShares.cjs && node scripts/testHomeNavigation.cjs && node scripts/testWorldWindowPassport.js && node --test scripts/testWorldWindowTravel.js && node scripts/testDreamCountryArtwork.cjs --assets && node scripts/testCountryPostcard.cjs && node scripts/testWorldWindowGlobe.cjs && node scripts/testStampSystem.js && node scripts/testNativeQa.cjs && node scripts/testRecoveryScreens.cjs && node scripts/testPassportNavigation.cjs && node scripts/testWorldWindowGlobeInteractions.cjs && node scripts/testWorldWindowRefinements.cjs && node scripts/testTripAtlasLabels.cjs && node scripts/testDisplayTextFit.cjs",
     "stamp-editor": "node tools/stamp-editor/server.js",
     "stamp-audit": "node scripts/auditStampLayout.js"
   },

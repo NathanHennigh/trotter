@@ -16,6 +16,15 @@ export type DreamItemCategory =
   | 'unknown';
 
 export type DreamItemStatus = 'created' | 'processing' | 'parsed' | 'needs_review' | 'confirmed' | 'failed';
+export type DreamLocationStatus = 'queued' | 'running' | 'resolved' | 'needs_review' | 'not_found' | 'failed' | 'blocked' | 'manual';
+export type DreamLocationCandidate = {
+  id: string;
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  googleMapsUrl?: string;
+};
 
 export type Dream = {
   id: string;
@@ -62,6 +71,12 @@ type ApiDreamItem = {
   latitude?: number | null;
   longitude?: number | null;
   coordinate_precision?: 'place' | 'area' | null;
+  location_status?: DreamLocationStatus | null;
+  location_address?: string | null;
+  location_provider?: string | null;
+  location_candidates?: { id: string; name: string; address: string; latitude: number; longitude: number; google_maps_url?: string }[] | null;
+  location_message?: string | null;
+  location_checked_at?: string | null;
   status: DreamItemStatus;
   created_at: string;
   updated_at?: string | null;
@@ -87,6 +102,12 @@ export type DreamItem = {
   latitude?: number;
   longitude?: number;
   coordinatePrecision?: 'place' | 'area';
+  locationStatus?: DreamLocationStatus;
+  locationAddress?: string;
+  locationProvider?: string;
+  locationCandidates?: DreamLocationCandidate[];
+  locationMessage?: string;
+  locationCheckedAt?: string;
   status: DreamItemStatus;
   createdAt: string;
   updatedAt: string;
@@ -161,6 +182,7 @@ function useDreamsState() {
   const dreams = React.useMemo(() => mergeDreams(liveDreams, itemDreams), [liveDreams, itemDreams]);
   const needsReviewItems = React.useMemo(() => items.filter((item) => item.needsReview), [items]);
   const processingItems = React.useMemo(() => items.filter((item) => item.status === 'processing' || item.status === 'created'), [items]);
+  const locatingItems = React.useMemo(() => items.filter((item) => item.locationStatus === 'queued' || item.locationStatus === 'running'), [items]);
 
   React.useEffect(() => {
     itemsRef.current = items;
@@ -207,7 +229,7 @@ function useDreamsState() {
   }, [refresh]);
 
   React.useEffect(() => {
-    if (!processingItems.length) return;
+    if (!processingItems.length && !locatingItems.length) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -216,7 +238,7 @@ function useDreamsState() {
     };
     timer = setTimeout(() => void poll(), 5000);
     return () => { disposed = true; clearTimeout(timer); };
-  }, [processingItems.length, refresh]);
+  }, [processingItems.length, locatingItems.length, refresh]);
 
   const shareInstagramLink = React.useCallback((sourceUrl: string, caption?: string) => {
     const normalizedUrl = normalizeSourceUrl(sourceUrl);
@@ -327,11 +349,51 @@ function useDreamsState() {
     } finally { if (revision === getAuthRevision()) mutationIds.current.delete(id); }
   }, []);
 
+  const locationRequest = React.useCallback(async (path: string, ids: string[], body: object = {}) => {
+    if (!ids.length) return;
+    if (ids.some(id => !/^\d+$/.test(id))) throw new Error('Wait for these places to finish saving first.');
+    if (ids.some(id => mutationIds.current.has(id))) throw new Error('A place is still saving. Please try again shortly.');
+    const revision = getAuthRevision();
+    ids.forEach(id => mutationIds.current.add(id));
+    refreshSequence.current += 1;
+    try {
+      const response = await dreamsAuthenticatedFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await readJson(response);
+      if (!response.ok) throw new Error(response.status === 404
+        ? 'Location lookup is not available on this server yet. You can still add a map pin in Edit details.'
+        : readError(data, 'Location lookup could not start. Your saved places are unchanged.'));
+      if (!mounted.current || revision !== getAuthRevision()) return;
+      refreshSequence.current += 1;
+      const records = (data && typeof data === 'object' && 'items' in data)
+        ? (data as { items: ApiDreamItem[] }).items : [data as ApiDreamItem];
+      const updates = new Map(records.map(record => { const item = mapApiDreamItem(record); return [item.id, item] as const; }));
+      setItems(current => current.map(item => updates.get(item.id) ?? item));
+      setStatus('idle'); setError(undefined);
+    } catch (caught) {
+      if (mounted.current && revision === getAuthRevision()) {
+        setStatus('error'); setError(caught instanceof Error ? caught.message : String(caught));
+      }
+      throw caught;
+    } finally { if (revision === getAuthRevision()) ids.forEach(id => mutationIds.current.delete(id)); }
+  }, []);
+  const locateItem = React.useCallback((id: string) => locationRequest(`/dream-items/${id}/locate`, [id]), [locationRequest]);
+  const confirmLocation = React.useCallback((id: string, candidateId: string) => locationRequest(`/dream-items/${id}/location-confirm`, [id], { candidate_id: candidateId }), [locationRequest]);
+  const locateMissing = React.useCallback(async (ids: string[]) => {
+    const uniqueIds = [...new Set(ids)];
+    const revision = getAuthRevision();
+    for (let start = 0; start < uniqueIds.length; start += 250) {
+      if (revision !== getAuthRevision()) return;
+      const batch = uniqueIds.slice(start, start + 250);
+      await locationRequest('/dreams/locate-missing', batch, { item_ids: batch.map(Number) });
+    }
+  }, [locationRequest]);
+
   return {
     dreams,
     items,
     needsReviewItems,
     processingItems,
+    locatingItems,
     source,
     status,
     error,
@@ -340,6 +402,9 @@ function useDreamsState() {
     updateItem,
     confirmItem,
     deleteItem,
+    locateItem,
+    locateMissing,
+    confirmLocation,
   };
 }
 
@@ -467,6 +532,16 @@ function mapApiDreamItem(item: ApiDreamItem): DreamItem {
     latitude: item.latitude ?? undefined,
     longitude: item.longitude ?? undefined,
     coordinatePrecision: item.coordinate_precision ?? undefined,
+    locationStatus: item.location_status ?? undefined,
+    locationAddress: item.location_address ?? undefined,
+    locationProvider: item.location_provider ?? undefined,
+    locationCandidates: (item.location_candidates ?? []).filter(candidate =>
+      typeof candidate.latitude === 'number' && typeof candidate.longitude === 'number' &&
+      Number.isFinite(candidate.latitude) && Number.isFinite(candidate.longitude) &&
+      Math.abs(candidate.latitude) <= 85.05112878 && Math.abs(candidate.longitude) <= 180
+    ).map(candidate => ({ ...candidate, googleMapsUrl: candidate.google_maps_url })),
+    locationMessage: item.location_message ?? undefined,
+    locationCheckedAt: item.location_checked_at ?? undefined,
     status: item.status,
     createdAt: item.created_at,
     updatedAt: item.updated_at ?? item.created_at,

@@ -9,6 +9,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { fitDisplayFont } from "../displayTextFit";
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 import { colors, fonts } from "../../../theme/trotterTheme";
@@ -26,7 +27,11 @@ export function CountryPostcard({
   onPress: () => void;
 }) {
   const { width, fontScale } = useWindowDimensions();
-  const countrySize = fitDisplayFont(board.title, 40, getMobileVisualWidth(width) - 80, fontScale, "italic");
+  const photoWidth = getMobileVisualWidth(width) - 66;
+  const countrySize = fitDisplayFont(
+    board.title, 40, photoWidth - 32, fontScale, "italic",
+  );
+  const shadeId = `postcard-${React.useId().replace(/:/g, "")}`;
   const turn = React.useRef(new Animated.Value(0)).current;
   const mounted = React.useRef(true),
     opening = React.useRef(false),
@@ -93,7 +98,7 @@ export function CountryPostcard({
       disabled={turning}
       accessibilityRole="button"
       accessibilityState={{ disabled: turning }}
-      accessibilityLabel={`${board.title}, view ${board.items.length} saved places`}
+      accessibilityLabel={`${board.title}, view ${board.items.length} saved ${board.items.length === 1 ? "place" : "places"}`}
     >
       <Animated.View
         renderToHardwareTextureAndroid={turning}
@@ -117,19 +122,51 @@ export function CountryPostcard({
           },
         ]}
       >
-        <View style={s.photo}>
-          <DreamPhoto item={cover} fallbackCountry={board.title} artworkForCountry={board.title} />
+        <View style={[s.photo, { minHeight: photoWidth / 1.65 }]}>
+          <View style={StyleSheet.absoluteFill}>
+            <DreamPhoto item={cover} artworkForCountry={board.title} />
+          </View>
+          <View style={s.printedTitle}>
+            <Svg
+              pointerEvents="none"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={StyleSheet.absoluteFill}
+              width="100%"
+              height="100%"
+              preserveAspectRatio="none"
+              viewBox="0 0 100 100"
+            >
+              <Defs>
+                <LinearGradient id={shadeId} x1="0" y1="0" x2="0" y2="100%">
+                  <Stop offset="0" stopColor="#132E3C" stopOpacity={0} />
+                  <Stop offset="0.4" stopColor="#132E3C" stopOpacity={0.34} />
+                  <Stop offset="1" stopColor="#132E3C" stopOpacity={0.75} />
+                </LinearGradient>
+              </Defs>
+              <Rect width="100" height="100" fill={`url(#${shadeId})`} />
+            </Svg>
+            <Text
+              style={[
+                s.country,
+                { fontSize: countrySize, lineHeight: countrySize * 1.1 },
+              ]}
+            >
+              {board.title}
+            </Text>
+          </View>
         </View>
-        <View style={s.address}>
-          <Text style={[s.country, { fontSize: countrySize, lineHeight: countrySize * 43 / 40 }]}>{board.title}</Text>
+        <View style={s.caption}>
           <Text style={s.cities}>
             {board.items.length} saved{" "}
             {board.items.length === 1 ? "place" : "places"}
             {board.cities.length
-              ? ` · ${board.cities.length} ${board.cities.length === 1 ? "city" : "cities"}`
+              ? ` ·\u00a0${board.cities.length}\u00a0${board.cities.length === 1 ? "city" : "cities"}`
               : ""}
-            <Text style={{ color: colors.blue }}> ↗</Text>
           </Text>
+          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            <WWIcon name="arrow" size={16} color={colors.ink} />
+          </View>
         </View>
       </Animated.View>
     </Pressable>
@@ -138,69 +175,53 @@ export function CountryPostcard({
 const s = StyleSheet.create({
   card: {
     marginHorizontal: 24,
-    marginBottom: 25,
-    padding: 10,
+    marginBottom: 22,
+    padding: 8,
     paddingBottom: 0,
     backgroundColor: "#fffdf5",
     borderWidth: 1,
-    borderColor: "#c6c9bb",
+    borderBottomWidth: 2,
+    borderColor: "#cbd0c5",
+    borderBottomColor: "#bcc5bb",
     shadowColor: colors.ink,
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.1,
     shadowOffset: { width: 0, height: 3 },
-    shadowRadius: 7,
-    elevation: 1,
+    shadowRadius: 5,
+    elevation: 2,
   },
   photo: {
-    height: 197,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "#d7d9ca",
+    justifyContent: "flex-end",
+    backgroundColor: colors.paperDeep,
   },
-  address: {
-    gap: 8,
-    paddingHorizontal: 5,
-    paddingTop: 19,
-    paddingBottom: 21,
+  printedTitle: {
+    paddingHorizontal: 16,
+    paddingTop: 48,
+    paddingBottom: 14,
   },
-  copy: { flex: 1 },
   country: {
-    fontSize: 40,
-    lineHeight: 43,
-    color: colors.ink,
+    color: "#fffdf5",
     fontFamily: fonts.displayItalic,
-    letterSpacing: -1.1,
+    letterSpacing: -0.65,
     includeFontPadding: false,
+    textShadowColor: "rgba(10, 24, 29, 0.3)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  caption: {
+    minHeight: 35,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingHorizontal: 3,
+    paddingVertical: 8,
   },
   cities: {
+    flex: 1,
     fontFamily: fonts.sansRegular,
-    fontSize: 12,
-    lineHeight: 19,
+    fontSize: 11,
+    lineHeight: 17,
     color: colors.mutedInk,
   },
-  count: {
-    minWidth: 48,
-    paddingLeft: 13,
-    borderLeftWidth: 1,
-    borderLeftColor: colors.paperBorderSoft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  number: { fontFamily: fonts.mono, fontSize: 22, color: colors.red },
-  countLabel: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 10,
-    color: colors.mutedInk,
-    marginTop: 3,
-  },
-  footer: {
-    marginHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 7,
-    borderTopWidth: 1,
-    borderTopColor: colors.paperBorderSoft,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  open: { fontFamily: fonts.sansSemi, fontSize: 11, color: colors.blue },
 });

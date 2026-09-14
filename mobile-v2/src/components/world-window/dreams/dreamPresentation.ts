@@ -114,6 +114,7 @@ export function exactMapPoint(item: DreamItem): MapPoint | undefined {
       lon: item.longitude,
       category: item.category,
       area: item.coordinatePrecision === "area",
+      ...(item.locationProvider ? { provider: item.locationProvider } : {}),
     };
   }
   // Google '@lat,lon' describes the camera, NOT the place. Never geocode by city centre.
@@ -151,6 +152,7 @@ export function exactMapPoint(item: DreamItem): MapPoint | undefined {
     lat,
     lon,
     category: item.category,
+    ...(item.locationProvider ? { provider: item.locationProvider } : {}),
   };
 }
 export const safeWebUrl = (value?: string) => {

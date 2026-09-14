@@ -124,6 +124,8 @@ export function DreamPhoto({
           resizeMode="cover"
           onError={() => setFailedThumbnail(renderedKey)}
         />
+      ) : artworkForCountry ? (
+        <View style={s.countryPaper} />
       ) : (
         <View style={s.fallback}>
           {fallbackCountry ? (
@@ -164,6 +166,9 @@ const s = StyleSheet.create({
   // Bundled images carry intrinsic dimensions. Explicit bounds keep those
   // dimensions from overriding the postcard frame in native and web layouts.
   image: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
+  // A country with no usable photo keeps its printed destination on plain
+  // blue paper; a single saved place's category must not represent the country.
+  countryPaper: { flex: 1, backgroundColor: colors.dashboardSoft },
   fallback: {
     flex: 1,
     alignItems: "center",

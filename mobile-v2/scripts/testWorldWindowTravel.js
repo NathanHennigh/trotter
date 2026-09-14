@@ -7,6 +7,7 @@ const root=path.join(__dirname,'../src');
 function load(file,mocks={},extra='',globals={}){const source=fs.readFileSync(path.join(root,file),'utf8');const output=ts.transpileModule(source,{fileName:file,compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText;const module={exports:{}};new Function('module','exports','require',...Object.keys(globals),output+'\n'+extra)(module,module.exports,key=>{if(key in mocks)return mocks[key];throw new Error(`Unexpected dependency ${key}`);},...Object.values(globals));return module.exports;}
 const trip=load('components/world-window/trips/tripPresentation.ts');
 const dreams=load('components/world-window/dreams/dreamPresentation.ts');
+const locations=load('components/world-window/dreams/locationPresentation.ts',{'./dreamPresentation':dreams});
 test('bundled native map HTML has complete executable scripts and no runtime CDN dependency',()=>{const assets=load('components/world-window/trips/leafletAssets.ts'),symbols=load('components/world-window/dreams/placeSymbols.ts');const map=load('components/world-window/trips/PaperMap.tsx',{'react':{},'react/jsx-runtime':{},'react-native':{StyleSheet:{create:value=>value}},'react-native-webview':{},'../../../theme/trotterTheme':{colors:{},fonts:{}},'./leafletAssets':assets,'../dreams/placeSymbols':symbols},'module.exports.html=mapHTML;');const scripts=[...map.html.matchAll(/<script>([\s\S]*?)<\/script>/g)];assert.equal(scripts.length,3);for(const script of scripts)new(require('node:vm').Script)(script[1]);assert(!/<script[^>]+src=/i.test(map.html));assert(assets.leafletLicense.includes('BSD'));assert(assets.clusterLicense.includes('MIT'));});
 const place=(id,changes={})=>({id:String(id),dreamId:'one',sourcePlatform:'instagram',sourceUrl:`https://www.instagram.com/reel/${id}`,category:'cafe',placeName:`Place ${id}`,city:'Lisbon',country:'Portugal',summary:'Saved place',tags:[],needsReview:false,status:'confirmed',createdAt:'2026-01-01',updatedAt:'2026-01-01',...changes});
 const segment=(id,dep,arr,day,changes={})=>({id,mode:'flight',depAirport:dep,arrAirport:arr,depTime:`2026-02-${day}T10:30:00`,arrTime:`2026-02-${day}T12:20:00`,...changes});
@@ -90,6 +91,71 @@ test('delete is server-first and a failure cannot remove the local save',async()
 test('capture rejects bad links and keeps failed post with original caption for retry',async()=>{const env=serviceEnvironment();env.render();await flush();env.fetcher(async()=>response(503,{detail:'Offline'}));const state=env.render();assert.equal(state.shareInstagramLink('not-a-url'),undefined);const pending=state.shareInstagramLink('https://www.instagram.com/reel/new','Original caption');assert(pending);await flush();const item=env.render().items[0];assert.equal(item.status,'failed');assert.equal(item.caption,'Original caption');assert.match(item.sourceUrl,/reel\/new/);env.dispose();});
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+
+test('location queue polls until resolved and automatically creates a real attributed pin', async () => {
+  const env = serviceEnvironment();
+  env.fetcher(async url => response(200, url.endsWith('/dream-items') ? [apiItem(1), apiItem(2)] : []));
+  env.render(); await flush(); env.render();
+  env.fetcher(async () => response(200, { queued: 1, items: [apiItem(1, { location_status: 'queued' })] }));
+  await env.render().locateMissing(['1','1']);
+  assert.deepEqual(JSON.parse(env.calls.at(-1).init.body), {item_ids:[1]});
+  let state=env.render(); assert.equal(state.items.length,2); assert.equal(state.locatingItems.length,1);
+  assert.equal(dreams.exactMapPoint(state.items[0]),undefined);
+  const pending=deferred(); env.fetcher(async url=>{ await pending.promise; return response(200,url.endsWith('/dream-items')?[apiItem(1,{location_status:'resolved',location_provider:'geoapify',location_address:'1 Synthetic Road',latitude:38.71,longitude:-9.13,coordinate_precision:'place'}),apiItem(2)]:[]); });
+  await env.clock.advance(5000); const count=env.calls.length;
+  await env.clock.advance(12000); assert.equal(env.calls.length,count,'Slow location polls never overlap');
+  pending.resolve(); await flush(); state=env.render();
+  assert.equal(state.locatingItems.length,0); assert.equal(state.items[0].locationAddress,'1 Synthetic Road');
+  assert.equal(dreams.exactMapPoint(state.items[0]).provider,'geoapify');
+  assert.equal(env.clock.pending().filter(ms=>ms===5000).length,0); env.dispose();
+});
+
+test('ambiguous candidates stay unpinned until confirmation, and malformed coordinates are excluded', async () => {
+  const env=serviceEnvironment();
+  const candidate={id:'one',name:'Cafe One',address:'1 Synthetic Road',latitude:38.7,longitude:-9.1,google_maps_url:'https://www.google.com/maps/search/?api=1&query=38.7,-9.1'};
+  env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1,{location_status:'needs_review',location_candidates:[candidate,{...candidate,id:'bad',latitude:null}]})]:[]));
+  env.render(); await flush(); let state=env.render();
+  assert.equal(state.items[0].locationCandidates.length,1); assert.equal(dreams.exactMapPoint(state.items[0]),undefined);
+  assert.equal(locations.canFindLocation(state.items[0]),false); assert.equal(locations.locationNote(state.items[0]),'Check location');
+  env.fetcher(async()=>response(200,apiItem(1,{location_status:'manual',google_maps_url:candidate.google_maps_url,latitude:38.7,longitude:-9.1})));
+  await state.confirmLocation('1','one'); assert.deepEqual(JSON.parse(env.calls.at(-1).init.body),{candidate_id:'one'});
+  state=env.render(); assert.equal(dreams.exactMapPoint(state.items[0]).lat,38.7); assert.equal(locations.canFindLocation(state.items[0]),false); env.dispose();
+});
+
+test('location failures retain all saves and duplicate queue/edit writes are guarded', async () => {
+  const env=serviceEnvironment(); env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1)]:[]));
+  env.render(); await flush(); let state=env.render();
+  const pending=deferred(); env.fetcher(()=>pending.promise); const request=state.locateItem('1');
+  await assert.rejects(state.locateItem('1'),/still saving/); await assert.rejects(state.updateItem('1',{city:'Porto'}),/still saving/);
+  pending.resolve(response(503,{detail:'Temporary failure'})); await assert.rejects(request,/Temporary failure/);
+  state=env.render(); assert.equal(state.items.length,1); assert.equal(state.items[0].placeName,'Cafe One');
+  env.fetcher(async()=>response(404,{})); await assert.rejects(state.locateItem('1'),/not available on this server/);
+  assert.equal(env.render().items.length,1); env.dispose();
+});
+
+test('account changes invalidate an in-flight location result', async () => {
+  const env=serviceEnvironment(); env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1)]:[])); env.render(); await flush();
+  const pending=deferred(); env.fetcher(()=>pending.promise); const result=env.render().locateItem('1');
+  const rejected=assert.rejects(result,/account changed/); env.changeToken('account-b'); await rejected;
+  pending.resolve(response(200,apiItem(1,{location_status:'resolved',latitude:1,longitude:1}))); await flush();
+  assert.deepEqual(env.render().items,[]); env.dispose();
+});
+
+test('large country location requests use bounded batches without losing saves',async()=>{
+  const env=serviceEnvironment(), records=Array.from({length:1001},(_,index)=>apiItem(index+1));
+  env.fetcher(async url=>response(200,url.endsWith('/dream-items')?records:[])); env.render(); await flush();
+  env.fetcher(async(_url,init)=>{const ids=JSON.parse(init.body).item_ids;return response(200,{queued:ids.length,items:ids.map(id=>({...records[id-1],location_status:'queued'}))});});
+  await env.render().locateMissing(records.map(record=>String(record.id)));
+  const batches=env.calls.filter(call=>call.url.endsWith('/locate-missing')).map(call=>JSON.parse(call.init.body).item_ids.length);
+  assert.deepEqual(batches,[250,250,250,250,1]); const state=env.render(); assert.equal(state.items.length,1001); assert.equal(state.locatingItems.length,1001); env.dispose();
+});
+
+test('location actions preserve manual pins and incomplete saves without claiming false progress',()=>{
+  assert.equal(locations.canFindLocation(place(1)),true);
+  for(const changes of [{id:'dream-item-pending'}, {placeName:''}, {status:'processing'}, {locationStatus:'running'}, {locationStatus:'queued'}, {latitude:38,longitude:-9}, {googleMapsUrl:'https://www.google.com/maps/search/?query=38,-9'}]) assert.equal(locations.canFindLocation(place(1,changes)),false);
+  assert.equal(locations.locationNote(place(1,{locationStatus:'blocked'})),'Location lookup unavailable');
+  assert.equal(locations.isFindingLocation(place(1,{locationStatus:'failed'})),false);
+});
 test('slow Dreams polls apply completed results and concurrent refreshes share one request pair', async () => {
   const env = serviceEnvironment();
   env.fetcher(async url => response(200, url.endsWith('/dream-items') ? [apiItem(1, { status: 'processing' })] : []));

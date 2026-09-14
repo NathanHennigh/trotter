@@ -30,6 +30,9 @@ function screen(file, exportName, overrides = {}) {
     '../WorldWindowUI': { WWButton: 'WWButton', WWHeader: 'WWHeader', WWIcon: 'WWIcon' },
     '../trips/PaperMap': { PaperMap: 'PaperMap' }, './DreamPhoto': { DreamPhoto: 'DreamPhoto' },
     './dreamPresentation': { categoryLabel: x => x, exactMapPoint: () => undefined, safeWebUrl: x => x },
+    './locationPresentation': { isFindingLocation: item => ['queued','running'].includes(item.locationStatus), locationExplanation: item => item.locationStatus === 'needs_review' ? 'Which location is the one you saved?' : 'Looking for the address.' },
+    '../displayTextFit': { fitDisplayFont: (_text, size) => size },
+    '../../../utils/mobileLayout': { getMobileVisualWidth: width => width },
   };
   const compiled = ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
   const module = { exports: {} };
@@ -87,4 +90,23 @@ test('failed Dreams save keeps the editor and its draft, then allows a deliberat
   assert.equal(nodes(tree).find(node => node.props?.label === 'Place name').props.value, 'My retained draft');
   assert.equal(button(tree, 'Save changes').props.disabled, false);
   button(tree, 'Save changes').props.onPress(); await flush(); assert.equal(closes, 1); host.dispose();
+});
+
+test('editing notes does not silently turn an automatically found location into a manual pin', async () => {
+  let patch;
+  const host=screen('components/world-window/dreams/DreamEditor.tsx','DreamEditor');
+  let tree=host.render({item:{...item,needsReview:false,locationStatus:'resolved',googleMapsUrl:'https://www.google.com/maps/search/?api=1&query=38.7,-9.1'},points:[],onClose:noop,onSave:async(id,value)=>{patch=value;},onDelete:noop,onRetry:noop});
+  button(tree,'Edit details').props.onPress(); tree=host.render();
+  button(tree,'Save changes').props.onPress(); await flush();
+  assert(patch); assert(!Object.hasOwn(patch,'googleMapsUrl'),'An unchanged provider-derived Maps URL stays provider-derived'); host.dispose();
+});
+
+test('location lookup remains open and candidate confirmation sends only the chosen candidate',async()=>{
+  let closes=0,lookups=0,confirmed;
+  const host=screen('components/world-window/dreams/DreamEditor.tsx','DreamEditor');
+  const props={item:{...item,needsReview:false},points:[],onClose:()=>closes++,onSave:noop,onDelete:noop,onRetry:noop,onLocate:async()=>lookups++,onConfirmLocation:async(id,candidate)=>{confirmed=[id,candidate];}};
+  let tree=host.render(props); button(tree,'Find location').props.onPress(); await flush(); assert.equal(lookups,1); assert.equal(closes,0);
+  tree=host.render({...props,item:{...props.item,locationStatus:'needs_review',locationCandidates:[{id:'candidate-2',name:'Cafe One',address:'1 Synthetic Road',latitude:38.7,longitude:-9.1}]}});
+  assert.equal(button(tree,'Find location'),undefined); button(tree,'Use this location').props.onPress(); await flush();
+  assert.deepEqual(confirmed,['1','candidate-2']); assert.equal(closes,1); host.dispose();
 });

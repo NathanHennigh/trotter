@@ -9,16 +9,20 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { DreamItem, DreamItemCategory } from "../../../services/dreams";
 import { colors, fonts } from "../../../theme/trotterTheme";
 import { WWButton, WWHeader, WWIcon } from "../WorldWindowUI";
+import { fitDisplayFont } from "../displayTextFit";
+import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 import { PaperMap } from "../trips/PaperMap";
 import type { MapPoint } from "../trips/tripPresentation";
 import { categoryLabel, exactMapPoint, safeWebUrl } from "./dreamPresentation";
 import { DreamPhoto } from "./DreamPhoto";
+import { isFindingLocation, locationExplanation } from "./locationPresentation";
 
 const categories: DreamItemCategory[] = [
   "restaurant",
@@ -41,6 +45,8 @@ export function DreamEditor({
   onSave,
   onDelete,
   onRetry,
+  onLocate,
+  onConfirmLocation,
 }: {
   item: DreamItem;
   points: MapPoint[];
@@ -48,8 +54,13 @@ export function DreamEditor({
   onSave: (id: string, patch: Partial<DreamItem>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onRetry: () => void;
+  onLocate?: (id: string) => Promise<void>;
+  onConfirmLocation?: (id: string, candidateId: string) => Promise<void>;
 }) {
   const insets = useSafeAreaInsets();
+  const { width, fontScale } = useWindowDimensions();
+  const displayName = item.placeName || item.city || "Saved inspiration";
+  const titleSize = fitDisplayFont(displayName, 34, getMobileVisualWidth(width) - 48, fontScale);
   const mounted = React.useRef(true), closed = React.useRef(false), running = React.useRef(false);
   React.useEffect(() => {
     mounted.current = true;
@@ -73,6 +84,13 @@ export function DreamEditor({
     [tags, setTags] = React.useState(item.tags.join(", ")),
     [maps, setMaps] = React.useState(item.googleMapsUrl || ""),
     [category, setCategory] = React.useState(item.category);
+  const mapsBaseline = React.useRef(item.googleMapsUrl || "");
+  React.useEffect(() => {
+    if (!editing && !placing) {
+      mapsBaseline.current = item.googleMapsUrl || "";
+      setMaps(mapsBaseline.current);
+    }
+  }, [item.googleMapsUrl, editing, placing]);
   const point = exactMapPoint({
     ...item,
     googleMapsUrl: maps,
@@ -87,14 +105,14 @@ export function DreamEditor({
     ],
     [points, point?.lat, point?.lon, item.id],
   );
-  const run = async (action: () => Promise<void>) => {
+  const run = async (action: () => Promise<void>, closeOnSuccess = true) => {
     if (running.current || closed.current) return;
     running.current = true;
     setBusy(true);
     setError(undefined);
     try {
       await action();
-      if (mounted.current && !closed.current) close();
+      if (closeOnSuccess && mounted.current && !closed.current) close();
     } catch (caught) {
       if (!mounted.current || closed.current) return;
       setError(
@@ -156,8 +174,8 @@ export function DreamEditor({
                 <DreamPhoto item={item} />
               </View>
               <Text style={s.category}>{categoryLabel(item.category)}</Text>
-              <Text style={s.title}>
-                {item.placeName || item.city || "Saved inspiration"}
+              <Text style={[s.title, { fontSize: titleSize, lineHeight: titleSize * 39 / 34 }]}>
+                {displayName}
               </Text>
               <Text style={s.location}>
                 {[item.regionOrNeighborhood, item.city, item.country]
@@ -177,6 +195,45 @@ export function DreamEditor({
                 <Text style={s.review}>
                   Reading this post. Its original link is saved.
                 </Text>
+              )}
+              {saved && !processing && (
+                <View style={s.locationPanel}>
+                  <View style={s.locationHeading}>
+                    <WWIcon name="pin" size={17} />
+                    <Text style={s.locationLabel}>Location</Text>
+                  </View>
+                  {item.locationAddress && <Text selectable style={s.locationAddress}>{item.locationAddress}</Text>}
+                  {point ? <PaperMap points={[point]} fitKey={`location-${item.id}`} height={170} /> : (
+                    <>
+                      <Text accessibilityLiveRegion="polite" style={s.locationHint}>{locationExplanation(item)}</Text>
+                      {(item.locationCandidates ?? []).map(candidate => (
+                        <View key={candidate.id} style={s.candidate}>
+                          <Text style={s.candidateName}>{candidate.name}</Text>
+                          <Text selectable style={s.locationHint}>{candidate.address}</Text>
+                          <View style={[s.actions, fontScale > 1.25 && s.actionsStack]}>
+                            {onConfirmLocation && <WWButton label="Use this location" disabled={busy}
+                              onPress={() => void run(() => onConfirmLocation(item.id, candidate.id))} />}
+                            {safeWebUrl(candidate.googleMapsUrl) && <WWButton label="View map ↗" secondary
+                              onPress={() => void open(candidate.googleMapsUrl)} />}
+                          </View>
+                        </View>
+                      ))}
+                      {onLocate && !isFindingLocation(item) && Boolean(item.placeName) && item.locationStatus !== "needs_review" &&
+                        <View style={s.actions}><WWButton
+                          label={item.locationStatus === "failed" || item.locationStatus === "not_found" || item.locationStatus === "blocked" ? "Retry location" : "Find location"}
+                          secondary disabled={busy} onPress={() => void run(() => onLocate(item.id), false)} /></View>}
+                    </>
+                  )}
+                  {item.locationProvider === "geoapify" && !point && (item.locationCandidates?.length ?? 0) > 0 &&
+                    <View style={s.attributionLinks}>
+                      <Pressable accessibilityRole="link" style={s.attribution} onPress={() => void open("https://www.geoapify.com/")}>
+                        <Text style={s.attributionText}>Geoapify</Text>
+                      </Pressable>
+                      <Pressable accessibilityRole="link" style={s.attribution} onPress={() => void open("https://www.openstreetmap.org/copyright")}>
+                        <Text style={s.attributionText}>© OpenStreetMap</Text>
+                      </Pressable>
+                    </View>}
+                </View>
               )}
               <View style={s.actions}>
                 <WWButton
@@ -201,7 +258,7 @@ export function DreamEditor({
                       disabled={busy}
                       onPress={() => setEditing(true)}
                     />
-                  )}{" "}
+                  )}
                   {item.needsReview && saved && (
                     <WWButton
                       label={busy ? "Saving…" : "Confirm place"}
@@ -210,7 +267,7 @@ export function DreamEditor({
                         void run(() => onSave(item.id, { needsReview: false }))
                       }
                     />
-                  )}{" "}
+                  )}
                   {item.status === "failed" && (
                     <WWButton
                       label="Retry save"
@@ -339,7 +396,7 @@ export function DreamEditor({
                           .map((t) => t.trim())
                           .filter(Boolean),
                         category,
-                        googleMapsUrl: maps.trim() || undefined,
+                        ...(maps.trim() !== mapsBaseline.current.trim() ? { googleMapsUrl: maps.trim() || undefined } : {}),
                         needsReview: false,
                       }),
                     );
@@ -419,6 +476,16 @@ function Field({
   );
 }
 const s = StyleSheet.create({
+  locationPanel: { marginTop: 22, paddingTop: 16, paddingBottom: 4, borderTopWidth: 1, borderColor: colors.paperBorder, gap: 10 },
+  locationHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
+  locationLabel: { fontFamily: fonts.sans, fontSize: 14, color: colors.ink },
+  locationAddress: { fontFamily: fonts.sansRegular, fontSize: 14, lineHeight: 21, color: colors.ink },
+  locationHint: { fontFamily: fonts.sansRegular, fontSize: 13, lineHeight: 20, color: colors.mutedInk },
+  candidate: { borderTopWidth: 1, borderColor: colors.paperBorder, paddingVertical: 14, gap: 5 },
+  candidateName: { fontFamily: fonts.sans, fontSize: 16, color: colors.ink },
+  attribution: { minHeight: 44, justifyContent: "center" },
+  attributionLinks: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
+  attributionText: { fontFamily: fonts.sansRegular, fontSize: 11, color: colors.mutedInk },
   screen: { flex: 1, backgroundColor: colors.paperSoft },
   icon: {
     width: 44,
@@ -476,6 +543,7 @@ const s = StyleSheet.create({
     marginTop: 16,
   },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 17 },
+  actionsStack: { flexDirection: "column", alignItems: "stretch" },
   fields: { flexDirection: "row", gap: 12 },
   fieldColumn: { flex: 1 },
   field: { marginBottom: 16 },

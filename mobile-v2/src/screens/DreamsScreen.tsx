@@ -44,6 +44,7 @@ import {
 } from "../components/world-window/dreams/dreamPresentation";
 import { countryRegion } from "../components/world-window/dreams/countryRegion";
 import { dreamCopy } from "../components/world-window/dreams/dreamCopy";
+import { canFindLocation, isFindingLocation, locationNote } from "../components/world-window/dreams/locationPresentation";
 import { PaperMap } from "../components/world-window/trips/PaperMap";
 import type { MapPoint } from "../components/world-window/trips/tripPresentation";
 import type { BottomNavTab } from "../data/trotterMock";
@@ -93,7 +94,7 @@ export function DreamsScreen({
   const reviews = React.useMemo(
     () =>
       store.items.filter(
-        (item) => item.needsReview || item.status === "failed",
+        (item) => item.needsReview || item.status === "failed" || item.locationStatus === "needs_review",
       ),
     [store.items],
   );
@@ -138,6 +139,7 @@ export function DreamsScreen({
           onBack={back}
           onRefresh={() => void store.refresh()}
           onSelect={setSelectedId}
+          onLocateMissing={store.locateMissing}
         />
       ) : (
         <FlatList
@@ -234,6 +236,8 @@ export function DreamsScreen({
           onClose={() => setSelectedId(undefined)}
           onSave={store.updateItem}
           onDelete={store.deleteItem}
+          onLocate={store.locateItem}
+          onConfirmLocation={store.confirmLocation}
           onRetry={() =>
             store.shareInstagramLink(selected.sourceUrl, selected.caption)
           }
@@ -262,6 +266,7 @@ function CountryPlaces({
   onBack,
   onRefresh,
   onSelect,
+  onLocateMissing,
 }: {
   title: string;
   items: DreamItem[];
@@ -273,6 +278,7 @@ function CountryPlaces({
   onBack: () => void;
   onRefresh: () => void;
   onSelect: (id: string) => void;
+  onLocateMissing: (ids: string[]) => Promise<void>;
 }) {
   const { width, fontScale } = useWindowDimensions();
   const countrySize = fitDisplayFont(title, 43, getMobileVisualWidth(width) - 76, fontScale, "italic");
@@ -282,6 +288,9 @@ function CountryPlaces({
     [searching, setSearching] = React.useState(false),
     [opened, setOpened] = React.useState<string>(),
     [selected, setSelected] = React.useState<string>();
+  const [queueing, setQueueing] = React.useState(false);
+  const queueLock = React.useRef(false), mounted = React.useRef(true);
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const list = React.useRef<FlatList<DreamItem>>(null);
   const mapOffset = React.useRef(0);
   const region = React.useMemo(() => countryRegion(title), [title]);
@@ -307,6 +316,15 @@ function CountryPlaces({
     for (const place of visible) counts.set(place.city, (counts.get(place.city) ?? 0) + 1);
     return counts;
   }, [visible]);
+  const missing = React.useMemo(() => visible.filter(canFindLocation), [visible]);
+  const finding = React.useMemo(() => visible.filter(isFindingLocation).length, [visible]);
+  const findLocations = async () => {
+    if (queueLock.current || !missing.length) return;
+    queueLock.current = true; setQueueing(true);
+    try { await onLocateMissing(missing.map(item => item.id)); }
+    catch { /* The shared store keeps the actionable error and all saved places. */ }
+    finally { queueLock.current = false; if (mounted.current) setQueueing(false); }
+  };
   React.useEffect(() => {
     if (city && !cities.includes(city)) setCity("");
   }, [city, cities]);
@@ -405,10 +423,14 @@ function CountryPlaces({
                   </Text>
                 )}
               </View>
-              {!points.length && visible.length > 0 && (
-                <Pressable accessibilityRole="button" accessibilityLabel="Pin a saved place"
-                  style={s.mapSelection} onPress={() => onSelect(visible[0].id)}>
-                  <Text style={s.actionText}>Pin a saved place</Text><WWIcon name="arrow" size={17} />
+              {finding > 0 && <Text accessibilityLiveRegion="polite" style={s.findingNote}>
+                Finding {finding === 1 ? "a location" : `${finding} locations`}… Pins appear here when ready.
+              </Text>}
+              {missing.length > 0 && (
+                <Pressable accessibilityRole="button" accessibilityLabel="Find locations"
+                  accessibilityState={{ disabled: queueing, busy: queueing }} disabled={queueing}
+                  style={s.mapSelection} onPress={() => void findLocations()}>
+                  <Text style={s.actionText}>{queueing ? "Starting lookup…" : "Find locations"}</Text><WWIcon name="pin" size={17} />
                 </Pressable>
               )}
               {selected && visible.find((item) => item.id === selected) && (
@@ -614,7 +636,7 @@ function PlaceRow({
                   : "Review place"}
             </Text>
           ) : (
-            !exactMapPoint(item) && <Text style={s.pinNote}>Add map pin</Text>
+            locationNote(item) && <Text style={s.pinNote}>{locationNote(item)}</Text>
           )}
         </View>
         <WWIcon
@@ -638,11 +660,11 @@ function PlaceRow({
             </Pressable>
             {showOriginal && <Text selectable style={s.placeSummary}>{copy.original}</Text>}
           </View>}
-          {item.regionOrNeighborhood ? (
+          {item.locationAddress || item.regionOrNeighborhood ? (
             <View style={s.addressLine}>
               <WWIcon name="pin" size={15} />
               <Text style={s.addressText}>
-                {[item.regionOrNeighborhood, item.city]
+                {item.locationAddress || [item.regionOrNeighborhood, item.city]
                   .filter(Boolean)
                   .join(", ")}
               </Text>
@@ -651,7 +673,7 @@ function PlaceRow({
           <View style={s.placeActions}>
             <Pressable onPress={onShowMap} style={s.placeAction}>
               <Text style={s.actionText}>
-                {exactMapPoint(item) ? "Show on map" : "Add map pin"}
+                {exactMapPoint(item) ? "Show on map" : item.locationStatus === "needs_review" ? "Check location" : "Location details"}
               </Text>
             </Pressable>
             {safeWebUrl(item.sourceUrl) && (
@@ -884,6 +906,7 @@ const s = StyleSheet.create({
     color: colors.mutedInk,
     flexShrink: 1,
   },
+  findingNote: { paddingHorizontal: 12, paddingBottom: 12, fontFamily: fonts.sansRegular, fontSize: 12, lineHeight: 18, color: colors.mutedInk },
   search: {
     marginHorizontal: 24,
     minHeight: 46,
