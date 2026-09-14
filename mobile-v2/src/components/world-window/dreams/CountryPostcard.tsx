@@ -113,10 +113,6 @@ export function CountryPostcard({
                 }),
               },
             ],
-            opacity: turn.interpolate({
-              inputRange: [0, 0.75, 1],
-              outputRange: [1, 1, 0.5],
-            }),
           },
         ]}
       >
@@ -162,11 +158,6 @@ const s = StyleSheet.create({
     borderBottomWidth: 2,
     borderColor: "#cbd0c5",
     borderBottomColor: "#bcc5bb",
-    shadowColor: colors.ink,
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 3 },
-    shadowRadius: 5,
-    elevation: 2,
   },
   photo: {
     overflow: "hidden",
