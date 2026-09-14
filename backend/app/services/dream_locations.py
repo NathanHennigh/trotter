@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from sqlalchemy import or_, update
 from sqlalchemy.orm import Session
@@ -129,7 +129,17 @@ def location_maps_url(item):
     if explicit_pin(item)[0] is not None:
         return item.google_maps_url
     row = current_resolution(item)
-    return row.google_maps_url if row and row.status in {"resolved", "manual"} and row.google_maps_url else item.google_maps_url
+    if row and row.status in {"resolved", "manual"} and row.google_maps_url:
+        return row.google_maps_url
+    if item.google_maps_url:
+        return item.google_maps_url
+    if not (item.place_name or "").strip():
+        return None
+    query = " ".join(" ".join(str(value or "").split()) for value in (item.place_name, item.city, item.country) if str(value or "").strip())
+    # A numeric-looking name is still a search, never evidence of an exact pin.
+    if re.fullmatch(r"-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?", query):
+        query = "place " + query
+    return "https://www.google.com/maps/search/?" + urlencode({"api": "1", "query": query})
 
 
 def archive_resolution(row, reason, now):

@@ -211,8 +211,9 @@ def test_review_location_change_invalidates_old_pin_but_keeps_provenance(client,
     response = client.post(f"/dream-items/{item.id}/review", json={"decision": "confirm", "edits": {"city": "Barcelona", "google_maps_url": item.google_maps_url}})
     assert response.status_code == 200
     assert response.json()["latitude"] is None
-    assert response.json()["google_maps_url"] is None
+    assert response.json()["google_maps_url"] == "https://www.google.com/maps/search/?api=1&query=Casa+Dani+Barcelona+Spain"
     test_db.refresh(item)
+    assert item.google_maps_url is None
     assert item.google_place_id is None
     assert item.raw_metadata_json["instagram_metadata"] == old_metadata["instagram_metadata"]
     assert item.raw_metadata_json["previous_place_matches"][0]["place_match"] == old_metadata["place_match"]

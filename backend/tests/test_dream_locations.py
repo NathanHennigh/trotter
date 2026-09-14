@@ -346,3 +346,44 @@ def test_location_tasks_are_routed_away_from_default_import_queue():
     discovery = celery_app.amqp.router.route({}, "app.tasks.dream_location_tasks.discover_dream_locations")
     assert discovery["queue"].name == "dream_locations"
     assert celery_app.amqp.router.route({}, "app.tasks.import_tasks.run_gmail_import")["queue"].name == "celery"
+
+
+def test_missing_map_link_is_a_pure_encoded_name_search_without_saved_pin(sessions):
+    from urllib.parse import parse_qs, urlparse
+    add_item(sessions, place_name="Cafe & Garden #2")
+    before = snapshot(sessions)
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        link = location_maps_url(item)
+        assert urlparse(link).netloc == "www.google.com"
+        assert parse_qs(urlparse(link).query) == {"api": ["1"], "query": ["Cafe & Garden #2 Madrid Spain"]}
+        assert location_coordinates(item) == (None, None, None)
+        assert item.google_maps_url is None and item.location is None
+    assert snapshot(sessions) == before
+
+
+@pytest.mark.parametrize("saved_url", ["https://maps.google.com/?q=1.3,103.8", "https://maps.google.com/?cid=existing", "https://www.google.com/maps/search/?query=Original+name"])
+def test_existing_map_links_win_over_generated_text_search(sessions, saved_url):
+    add_item(sessions, google_maps_url=saved_url)
+    with sessions() as db:
+        assert location_maps_url(db.get(DreamItem, 1)) == saved_url
+
+
+def test_coordinate_shaped_name_search_never_becomes_manual_coordinate_evidence(sessions):
+    from types import SimpleNamespace
+    from urllib.parse import parse_qs, urlparse
+    from app.services.dream_locations import explicit_pin
+    add_item(sessions, place_name="40.4, -3.7", city=None, country=None)
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        link = location_maps_url(item)
+        assert parse_qs(urlparse(link).query)["query"] == ["place 40.4, -3.7"]
+        assert explicit_pin(SimpleNamespace(google_maps_url=link)) == (None, None, None)
+        assert location_coordinates(item) == (None, None, None)
+
+
+@pytest.mark.parametrize("name", [None, "", "  "])
+def test_unnamed_item_does_not_get_a_city_only_map_search(sessions, name):
+    add_item(sessions, place_name=name)
+    with sessions() as db:
+        assert location_maps_url(db.get(DreamItem, 1)) is None

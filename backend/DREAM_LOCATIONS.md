@@ -31,6 +31,8 @@ Keep the existing default worker running for Gmail imports. After rollout, check
 
 Item responses add `location_status`, `location_address`, `location_provider`, `location_candidates`, `location_message`, and `location_checked_at`. Status is null until a durable row exists (or `manual` when an exact saved pin already exists). Candidate responses contain only ID, name, address, coordinates, and a coordinate-based Google Maps link; internal scores, job leases, and resolution history are not exposed.
 
+When a named save has no existing or resolved Maps URL, responses provide an encoded Google Maps text search for its name, city, and country. This read-only fallback never writes a saved URL or coordinates; numeric-looking names are explicitly treated as place searches. Unnamed saves receive no city-only fallback, and existing saved or resolved links take precedence.
+
 ## Offline verification
 
 Run with `DATABASE_URL=sqlite:///:memory:` and an empty `GEOAPIFY_API_KEY`, from the repository root:
