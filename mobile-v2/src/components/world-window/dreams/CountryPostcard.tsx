@@ -183,9 +183,9 @@ const s = StyleSheet.create({
     fontFamily: fonts.displayItalic,
     letterSpacing: -0.65,
     includeFontPadding: false,
-    textShadowColor: "rgba(10, 24, 29, 0.3)",
+    textShadowColor: "rgba(10, 24, 29, 0.65)",
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    textShadowRadius: 3,
   },
   caption: {
     minHeight: 35,
