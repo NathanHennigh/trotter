@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import get_db
 from app.main import app
-from app.models import Dream, DreamItem, User
+from app.models import Dream, DreamItem, DreamLocation, User
 from app.routers.auth import get_current_user
 from app.services.dream_parser import DreamParseItem, DreamParseResponse
 
@@ -25,6 +25,7 @@ def test_db():
     User.__table__.create(engine)
     Dream.__table__.create(engine)
     DreamItem.__table__.create(engine)
+    DreamLocation.__table__.create(engine)
     Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override_get_db():
@@ -39,6 +40,7 @@ def test_db():
     yield session
     session.close()
     app.dependency_overrides.pop(get_db, None)
+    DreamLocation.__table__.drop(engine)
     DreamItem.__table__.drop(engine)
     Dream.__table__.drop(engine)
     User.__table__.drop(engine)
@@ -693,7 +695,7 @@ def test_import_instagram_batch_creates_dream_items_and_groups_foreign_by_countr
     assert item.city == "Puerto Escondido"
 
 
-def test_import_instagram_batch_groups_us_by_region_and_attaches_maps(client, test_user, test_db, monkeypatch):
+def test_import_instagram_batch_queues_location_without_provider_regrouping(client, test_user, test_db, monkeypatch):
     def fake_metadata(source_url):
         class Metadata:
             caption = "Onera in Wimberley, United States."
@@ -740,7 +742,10 @@ def test_import_instagram_batch_groups_us_by_region_and_attaches_maps(client, te
 
     monkeypatch.setattr("app.routers.dreams.fetch_instagram_metadata", fake_metadata)
     monkeypatch.setattr("app.routers.dreams.parse_caption_with_fallback_model", fake_parse)
-    monkeypatch.setattr("app.routers.dreams.search_google_place", lambda *args, **kwargs: Match())
+    def forbidden_lookup(*args, **kwargs):
+        raise AssertionError("Saving must not call a location provider")
+    monkeypatch.setattr("app.routers.dreams.search_google_place", forbidden_lookup)
+    monkeypatch.setattr("app.routers.dreams.search_geoapify_place", forbidden_lookup)
 
     response = client.post(
         "/dreams/import-instagram-batch",
@@ -749,6 +754,8 @@ def test_import_instagram_batch_groups_us_by_region_and_attaches_maps(client, te
 
     assert response.status_code == 200
     item = test_db.query(DreamItem).one()
-    assert item.google_maps_url == "https://maps.google.com/?cid=onera"
-    assert item.region_or_neighborhood == "Texas"
-    assert item.dream.title == "Texas"
+    assert "Onera" in item.google_maps_url
+    assert item.region_or_neighborhood is None
+    assert item.dream.title != "Texas"
+    assert item.location.status == "queued"
+    assert item.location.attempts == 0

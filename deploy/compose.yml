@@ -35,6 +35,9 @@ x-backend-environment: &backend-environment
   AERODATABOX_PROVIDER_ORDER: ${AERODATABOX_PROVIDER_ORDER:-rapidapi,apimarket}
   AERODATABOX_MAX_LOOKUPS_PER_SYNC: ${AERODATABOX_MAX_LOOKUPS_PER_SYNC:-60}
   GEOAPIFY_API_KEY: ${GEOAPIFY_API_KEY:-}
+  DREAM_LOCATION_ENABLED: ${DREAM_LOCATION_ENABLED:-true}
+  DREAM_LOCATION_BATCH_SIZE: ${DREAM_LOCATION_BATCH_SIZE:-25}
+  DREAM_LOCATION_MAX_ATTEMPTS: ${DREAM_LOCATION_MAX_ATTEMPTS:-5}
   GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
   VENICE_API_KEY_FILE: /run/secrets/venice_api_key
   DREAM_AI_PROVIDER: ${DREAM_AI_PROVIDER:-venice}
@@ -162,6 +165,37 @@ services:
       redis:
         condition: service_healthy
     stop_grace_period: 2m
+    logging: *default-logging
+
+  worker-locations:
+    image: trotter-backend:local
+    restart: unless-stopped
+    environment: *backend-environment
+    secrets: *backend-secrets
+    command: ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=INFO", "--queues=dream_locations", "--concurrency=1", "--prefetch-multiplier=1", "--hostname=locations@%h"]
+    volumes:
+      - trotter_data:/var/lib/trotter
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    stop_grace_period: 2m
+    logging: *default-logging
+
+  beat:
+    image: trotter-backend:local
+    restart: unless-stopped
+    environment: *backend-environment
+    secrets: *backend-secrets
+    command: ["celery", "-A", "app.celery_app.celery_app", "beat", "--loglevel=INFO", "--schedule=/var/lib/trotter/dream-location-beat"]
+    volumes:
+      - trotter_data:/var/lib/trotter
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     logging: *default-logging
 
   web:

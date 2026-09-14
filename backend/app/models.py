@@ -308,3 +308,36 @@ class DreamItem(Base):
 
     user = relationship("User", back_populates="dream_items")
     dream = relationship("Dream", back_populates="items")
+    location = relationship("DreamLocation", uselist=False, back_populates="item", cascade="all, delete-orphan")
+
+
+class DreamLocation(Base):
+    """Durable, owner-scoped location work; original saved content stays on DreamItem."""
+    __tablename__ = "dream_locations"
+    __table_args__ = (
+        CheckConstraint("status IN ('queued', 'running', 'resolved', 'needs_review', 'not_found', 'failed', 'blocked', 'manual')", name="ck_dream_location_status"),
+    )
+    id = Column(BigInteger().with_variant(Integer, 'sqlite'), primary_key=True)
+    item_id = Column(BigInteger, ForeignKey("dream_items.id", ondelete="CASCADE"), nullable=False, unique=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    fingerprint = Column(String(64), nullable=False)
+    pin_fingerprint = Column(String(64), nullable=False)
+    generation = Column(Integer, nullable=False, default=1, server_default="1")
+    status = Column(String(32), nullable=False, default="queued", server_default="queued", index=True)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    lease_token = Column(String(36), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_dispatched_at = Column(DateTime(timezone=True), nullable=True)
+    provider = Column(String(32), nullable=True)
+    address = Column(Text, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    google_maps_url = Column(Text, nullable=True)
+    candidates = Column(JSON, nullable=False, default=list, server_default="[]")
+    history = Column(JSON, nullable=False, default=list, server_default="[]")
+    message = Column(Text, nullable=True)
+    checked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    item = relationship("DreamItem", back_populates="location")

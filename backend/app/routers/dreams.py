@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, unquote, urlparse, urlunparse
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..db import get_db
 from ..models import Dream, DreamItem, User
@@ -37,6 +37,9 @@ from ..services.google_places import (
     search_google_place,
 )
 from ..services.instagram_metadata import InstagramMetadataError, fetch_instagram_metadata
+from ..services.dream_locations import (
+    confirm_candidate, enqueue_location, location_coordinates, location_maps_url, public_location,
+)
 from .auth import get_current_user
 
 router = APIRouter(tags=["dreams"])
@@ -119,6 +122,23 @@ class DreamOut(BaseModel):
         from_attributes = True
 
 
+class LocationCandidateOut(BaseModel):
+    id: str
+    name: str
+    address: Optional[str] = None
+    latitude: float
+    longitude: float
+    google_maps_url: str
+
+
+class LocateMissingRequest(BaseModel):
+    item_ids: Optional[list[int]] = Field(default=None, max_length=1000)
+
+
+class ConfirmLocationRequest(BaseModel):
+    candidate_id: str = Field(min_length=1, max_length=512)
+
+
 class DreamItemOut(BaseModel):
     id: int
     dream_id: int
@@ -141,6 +161,12 @@ class DreamItemOut(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     coordinate_precision: Optional[Literal["place", "area"]] = None
+    location_status: Optional[Literal["queued", "running", "resolved", "needs_review", "not_found", "failed", "blocked", "manual"]] = None
+    location_address: Optional[str] = None
+    location_provider: Optional[str] = None
+    location_candidates: list[LocationCandidateOut] = Field(default_factory=list)
+    location_message: Optional[str] = None
+    location_checked_at: Optional[datetime] = None
     status: str
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -523,50 +549,8 @@ def delete_empty_dream(db: Session, dream_id: Optional[int], user_id: int) -> No
 
 
 def dream_item_coordinates(item: DreamItem) -> tuple[Optional[float], Optional[float], Optional[str]]:
-    """Read already-saved coordinates. Never issue geocoding requests or infer city centres."""
-    def checked(lat, lon, precision="place"):
-        if isinstance(lat, bool) or isinstance(lon, bool):
-            return None, None, None
-        try:
-            latitude, longitude = float(lat), float(lon)
-        except (TypeError, ValueError):
-            return None, None, None
-        if not math.isfinite(latitude) or not math.isfinite(longitude) or abs(latitude) > 85.05112878 or abs(longitude) > 180:
-            return None, None, None
-        return latitude, longitude, precision
-
-    if item.google_maps_url:
-        parsed = urlparse(item.google_maps_url)
-        if parsed.scheme in {"http", "https"}:
-            exact = re.search(r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)", unquote(item.google_maps_url))
-            query = parse_qs(parsed.query)
-            pin = (query.get("query") or query.get("q") or [""])[0]
-            exact = exact or re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*", pin)
-            if exact:
-                result = checked(exact[1], exact[2])
-                if result[0] is not None:
-                    return result
-    metadata = item.raw_metadata_json or {}
-    match = metadata.get("place_match") if isinstance(metadata, dict) else None
-    raw = match.get("raw") if isinstance(match, dict) else None
-    if not isinstance(raw, dict):
-        return None, None, None
-    # Google Places location (when present in an existing response).
-    location = raw.get("location")
-    if isinstance(location, dict):
-        return checked(location.get("latitude"), location.get("longitude"))
-    properties = raw.get("properties") or {}
-    geometry = raw.get("geometry") or {}
-    if not isinstance(properties, dict) or not isinstance(geometry, dict):
-        return None, None, None
-    result_type = properties.get("result_type")
-    if result_type not in {"amenity", "building", "street", "suburb", "district", "neighbourhood"}:
-        return None, None, None
-    coordinates = geometry.get("coordinates")
-    precision = "area" if result_type in {"street", "suburb", "district", "neighbourhood"} else "place"
-    if geometry.get("type") == "Point" and isinstance(coordinates, list) and len(coordinates) >= 2:
-        return checked(coordinates[1], coordinates[0], precision)
-    return checked(properties.get("lat"), properties.get("lon"), precision)
+    """Read saved location evidence without writes or provider requests."""
+    return location_coordinates(item)
 
 
 def dream_item_out(item: DreamItem) -> DreamItemOut:
@@ -591,7 +575,8 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         needs_review=item.needs_review,
         needs_google_places_lookup=item.needs_google_places_lookup,
         google_place_id=item.google_place_id,
-        google_maps_url=item.google_maps_url,
+        google_maps_url=location_maps_url(item),
+        **public_location(item),
         thumbnail_url=thumbnail_url,
         latitude=latitude,
         longitude=longitude,
@@ -643,63 +628,6 @@ def get_dream_item_thumbnail(
     return Response(content=content, media_type=content_type, headers={"Cache-Control": "private, max-age=604800"})
 
 
-def maybe_attach_google_place(item: DreamItem) -> dict[str, Any]:
-    if not item.place_name or item.needs_review:
-        return {}
-    fallback_maps_url = build_google_maps_search_url(
-        item.place_name,
-        item.city,
-        item.country,
-        item.region_or_neighborhood,
-    )
-    try:
-        match = search_geoapify_place(
-            item.place_name,
-            item.city,
-            item.country,
-            item.region_or_neighborhood,
-        )
-    except GeoapifyError as exc:
-        match = None
-        geoapify_error = str(exc)
-    else:
-        geoapify_error = None
-
-    if not match:
-        try:
-            match = search_google_place(
-                item.place_name,
-                item.city,
-                item.country,
-                item.region_or_neighborhood,
-            )
-        except GooglePlacesError as exc:
-            match = None
-            google_error = str(exc)
-        else:
-            google_error = None
-
-    if not match:
-        item.google_maps_url = fallback_maps_url
-        item.needs_google_places_lookup = False
-        return {
-            "places_status": "search_url_only",
-            **({"geoapify_error": geoapify_error} if geoapify_error else {}),
-            **({"google_places_error": google_error} if "google_error" in locals() and google_error else {}),
-        }
-
-    item.google_place_id = match.place_id
-    item.google_maps_url = match.google_maps_url or fallback_maps_url
-    if match.city:
-        item.city = match.city
-    if match.region:
-        item.region_or_neighborhood = match.region
-    if match.country:
-        item.country = match.country
-    item.needs_google_places_lookup = False
-    return {"place_match": match.model_dump()}
-
-
 def enrich_dream_item_from_url(db: Session, item: DreamItem, current_user: User) -> str | None:
     note = None
     try:
@@ -730,18 +658,11 @@ def enrich_dream_item_from_url(db: Session, item: DreamItem, current_user: User)
         **({"parser_raw": parsed.raw} if parsed.raw else {}),
     }
     apply_parsed_item_to_dream_item(db, item, parsed.items[0], current_user.id)
-    google_metadata = maybe_attach_google_place(item)
-    if google_metadata:
-        item.raw_metadata_json = {
-            **(item.raw_metadata_json or {}),
-            **google_metadata,
-        }
-        dream_city, dream_country, dream_region = dream_group_location(
-            item.city,
-            item.country,
-            item.region_or_neighborhood,
+    if item.place_name and not item.google_maps_url:
+        item.google_maps_url = build_google_maps_search_url(
+            item.place_name, item.city, item.country, item.region_or_neighborhood,
         )
-        item.dream_id = get_or_create_dream(db, current_user.id, dream_city, dream_country, dream_region).id
+    enqueue_location(db, item)
     item.updated_at = datetime.utcnow()
     return note
 
@@ -874,6 +795,7 @@ def share_to_dreams(
     existing = (
         db.query(DreamItem)
         .filter(DreamItem.user_id == current_user.id, DreamItem.source_url == source_url)
+        .with_for_update()
         .first()
     )
     if existing:
@@ -887,6 +809,8 @@ def share_to_dreams(
             enrich_dream_item_from_url(db, existing, current_user)
             db.commit()
             db.refresh(existing)
+        enqueue_location(db, existing)
+        db.commit()
         return ShareDreamResponse(
             dream_item_id=existing.id,
             dream_id=existing.dream_id,
@@ -937,9 +861,11 @@ def import_instagram_batch(
         existing = (
             db.query(DreamItem)
             .filter(DreamItem.user_id == current_user.id, DreamItem.source_url == source_url)
+            .with_for_update()
             .first()
         )
         if existing:
+            enqueue_location(db, existing)
             duplicate_count += 1
             results.append(
                 ImportInstagramBatchResult(
@@ -1042,6 +968,7 @@ def list_dream_items(
     items = (
         db.query(DreamItem)
         .filter(DreamItem.dream_id == dream_id, DreamItem.user_id == current_user.id)
+        .options(selectinload(DreamItem.location))
         .order_by(DreamItem.created_at.desc())
         .all()
     )
@@ -1054,7 +981,7 @@ def list_items(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[DreamItemOut]:
-    query = db.query(DreamItem).filter(DreamItem.user_id == current_user.id)
+    query = db.query(DreamItem).options(selectinload(DreamItem.location)).filter(DreamItem.user_id == current_user.id)
     if item_status:
         if item_status == "needs_review":
             query = query.filter(DreamItem.needs_review.is_(True))
@@ -1070,7 +997,7 @@ def parse_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> DreamItemOut:
-    item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).first()
+    item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dream item not found")
 
@@ -1107,6 +1034,7 @@ def parse_item(
         "parser_model": parsed.model,
     }
     apply_parsed_item_to_dream_item(db, item, parsed.items[0], current_user.id)
+    enqueue_location(db, item)
     db.commit()
     db.refresh(item)
     return dream_item_out(item)
@@ -1119,7 +1047,7 @@ def review_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> DreamItemOut:
-    item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).first()
+    item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dream item not found")
 
@@ -1127,7 +1055,7 @@ def review_item(
         edits = payload.edits.model_dump(exclude_unset=True)
         identity_changed = any(
             field in edits and str(edits[field] or "").strip().casefold() != str(getattr(item, field) or "").strip().casefold()
-            for field in ("place_name", "city", "country", "region_or_neighborhood")
+            for field in ("place_name", "city", "country", "region_or_neighborhood", "category")
         )
         maps_changed = "google_maps_url" in edits and edits["google_maps_url"] != item.google_maps_url
         if identity_changed or maps_changed:
@@ -1171,6 +1099,7 @@ def review_item(
         item.needs_review = True
         item.status = "needs_review"
 
+    enqueue_location(db, item)
     item.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(item)
@@ -1188,9 +1117,54 @@ def delete_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
-    item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).first()
+    item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dream item not found")
     db.delete(item)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/dream-items/{item_id}/locate", response_model=DreamItemOut)
+def locate_item(item_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = db.query(DreamItem).filter_by(id=item_id, user_id=current_user.id).with_for_update().first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Dream item not found")
+    enqueue_location(db, item, force=True)
+    db.commit()
+    db.refresh(item)
+    return dream_item_out(item)
+
+
+@router.post("/dream-items/{item_id}/location-confirm", response_model=DreamItemOut)
+def confirm_item_location(item_id: int, payload: ConfirmLocationRequest,
+                          current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    item = db.query(DreamItem).filter_by(id=item_id, user_id=current_user.id).with_for_update().first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Dream item not found")
+    try:
+        confirm_candidate(db, item, payload.candidate_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(item)
+    return dream_item_out(item)
+
+
+@router.post("/dreams/locate-missing")
+def locate_missing_items(payload: LocateMissingRequest | None = None,
+                         current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query = db.query(DreamItem).filter_by(user_id=current_user.id)
+    requested = set(payload.item_ids) if payload and payload.item_ids is not None else None
+    if requested is not None:
+        query = query.filter(DreamItem.id.in_(requested))
+    items = query.order_by(DreamItem.id).with_for_update().all()
+    if requested is not None and len(items) != len(requested):
+        raise HTTPException(status_code=404, detail="Dream item not found")
+    queued = 0
+    for item in items:
+        if (item.place_name or "").strip() and location_coordinates(item)[0] is None:
+            _, added = enqueue_location(db, item, force=True)
+            queued += int(added)
+    db.commit()
+    return {"queued": queued, "items": [dream_item_out(item) for item in items]}

@@ -110,3 +110,16 @@ test('location lookup remains open and candidate confirmation sends only the cho
   assert.equal(button(tree,'Find location'),undefined); button(tree,'Use this location').props.onPress(); await flush();
   assert.deepEqual(confirmed,['1','candidate-2']); assert.equal(closes,1); host.dispose();
 });
+
+test('entering Edit uses the latest parsed place, then polling preserves an active draft',()=>{
+  const host=screen('components/world-window/dreams/DreamEditor.tsx','DreamEditor');
+  const props={item:{...item,status:'processing',placeName:undefined,city:undefined},points:[],onClose:noop,onSave:noop,onDelete:noop,onRetry:noop};
+  host.render(props);
+  const ready={...props,item:{...item,placeName:'Completed Cafe',city:'Lisbon',summary:'Parsed notes'}};
+  let tree=host.render(ready); button(tree,'Edit details').props.onPress(); tree=host.render();
+  const field=(tree,label)=>nodes(tree).find(node=>node.props?.label===label);
+  assert.equal(field(tree,'Place name').props.value,'Completed Cafe');
+  field(tree,'Place name').props.onChange('My corrected name');
+  tree=host.render({...ready,item:{...ready.item,placeName:'Later server value',locationStatus:'resolved'}});
+  assert.equal(field(tree,'Place name').props.value,'My corrected name'); host.dispose();
+});

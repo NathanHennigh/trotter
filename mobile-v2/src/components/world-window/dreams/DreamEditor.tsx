@@ -256,7 +256,14 @@ export function DreamEditor({
                       label="Edit details"
                       secondary
                       disabled={busy}
-                      onPress={() => setEditing(true)}
+                      onPress={() => {
+                        setName(item.placeName || ""); setCity(item.city || "");
+                        setCountry(item.country || ""); setRegion(item.regionOrNeighborhood || "");
+                        setSummary(item.summary); setTags(item.tags.join(", ")); setCategory(item.category);
+                        mapsBaseline.current = item.googleMapsUrl || "";
+                        setMaps(mapsBaseline.current);
+                        setEditing(true);
+                      }}
                     />
                   )}
                   {item.needsReview && saved && (
