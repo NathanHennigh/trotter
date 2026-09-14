@@ -18,11 +18,13 @@ import { colors, fonts } from "../../../theme/trotterTheme";
 import { WWButton, WWHeader, WWIcon } from "../WorldWindowUI";
 import { fitDisplayFont } from "../displayTextFit";
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
-import { PaperMap } from "../trips/PaperMap";
+import { DreamPlacesMap } from "./DreamPlacesMap";
 import type { MapPoint } from "../trips/tripPresentation";
 import { categoryLabel, exactMapPoint, safeWebUrl } from "./dreamPresentation";
 import { DreamPhoto } from "./DreamPhoto";
 import { isFindingLocation, locationExplanation } from "./locationPresentation";
+import { useLiveDreamLocation } from "./useLiveDreamLocation";
+import { countryRegion } from "./countryRegion";
 
 const categories: DreamItemCategory[] = [
   "restaurant",
@@ -85,6 +87,9 @@ export function DreamEditor({
     [maps, setMaps] = React.useState(item.googleMapsUrl || ""),
     [category, setCategory] = React.useState(item.category);
   const mapsBaseline = React.useRef(item.googleMapsUrl || "");
+  const overview = React.useMemo(() => countryRegion(country), [country]);
+  const liveLocation = useLiveDreamLocation(item, !editing);
+  const locationItem = liveLocation.details ? { ...item, ...liveLocation.details } : item;
   React.useEffect(() => {
     if (!editing && !placing) {
       mapsBaseline.current = item.googleMapsUrl || "";
@@ -95,9 +100,13 @@ export function DreamEditor({
     ...item,
     googleMapsUrl: maps,
     ...(maps !== item.googleMapsUrl
-      ? { latitude: undefined, longitude: undefined }
+      ? { latitude: undefined, longitude: undefined, locationProvider: undefined }
       : {}),
   });
+  const liveCandidate = liveLocation.details && ["resolved", "manual"].includes(liveLocation.details.locationStatus ?? "")
+    ? liveLocation.details.locationCandidates.find(candidate => candidate.id === liveLocation.details?.locationPlaceId) ?? liveLocation.details.locationCandidates[0] : undefined;
+  const shownPoint = point ?? (liveCandidate ? exactMapPoint({ ...item, latitude: liveCandidate.latitude, longitude: liveCandidate.longitude,
+    locationExpiresAt: liveLocation.details?.locationExpiresAt }) : undefined);
   const mapPoints = React.useMemo(
     () => [
       ...points.filter((p) => p.id !== item.id),
@@ -202,11 +211,16 @@ export function DreamEditor({
                     <WWIcon name="pin" size={17} />
                     <Text style={s.locationLabel}>Location</Text>
                   </View>
-                  {item.locationAddress && <Text selectable style={s.locationAddress}>{item.locationAddress}</Text>}
-                  {point ? <PaperMap points={[point]} fitKey={`location-${item.id}`} height={170} /> : (
+                  {liveLocation.loading && <Text accessibilityLiveRegion="polite" style={s.locationHint}>Loading location details…</Text>}
+                  {liveLocation.error && <View>
+                    <Text accessibilityRole="alert" style={s.locationHint}>{liveLocation.error}</Text>
+                    <View style={s.actions}><WWButton label="Retry details" secondary onPress={liveLocation.retry} /></View>
+                  </View>}
+                  {locationItem.locationAddress && <Text selectable style={s.locationAddress}>{locationItem.locationAddress}</Text>}
+                  {shownPoint ? <DreamPlacesMap points={[shownPoint]} fitKey={`location-${item.id}`} height={170} /> : (
                     <>
-                      <Text accessibilityLiveRegion="polite" style={s.locationHint}>{locationExplanation(item)}</Text>
-                      {(item.locationCandidates ?? []).map(candidate => (
+                      <Text accessibilityLiveRegion="polite" style={s.locationHint}>{locationExplanation(locationItem)}</Text>
+                      {(locationItem.locationCandidates ?? []).map(candidate => (
                         <View key={candidate.id} style={s.candidate}>
                           <Text style={s.candidateName}>{candidate.name}</Text>
                           <Text selectable style={s.locationHint}>{candidate.address}</Text>
@@ -216,6 +230,7 @@ export function DreamEditor({
                             {safeWebUrl(candidate.googleMapsUrl) && <WWButton label="View map ↗" secondary
                               onPress={() => void open(candidate.googleMapsUrl)} />}
                           </View>
+                          {locationItem.locationProvider === "google_places" && <GoogleAttribution values={candidate.attributions ?? []} onOpen={open} />}
                         </View>
                       ))}
                       {onLocate && !isFindingLocation(item) && Boolean(item.placeName) && item.locationStatus !== "needs_review" &&
@@ -224,6 +239,8 @@ export function DreamEditor({
                           secondary disabled={busy} onPress={() => void run(() => onLocate(item.id), false)} /></View>}
                     </>
                   )}
+                  {locationItem.locationProvider === "google_places" && Boolean(locationItem.locationAddress || liveLocation.details?.locationAttributions.length) &&
+                    <GoogleAttribution values={liveLocation.details?.locationAttributions ?? []} onOpen={open} />}
                   {item.locationProvider === "geoapify" && !point && (item.locationCandidates?.length ?? 0) > 0 &&
                     <View style={s.attributionLinks}>
                       <Pressable accessibilityRole="link" style={s.attribution} onPress={() => void open("https://www.geoapify.com/")}>
@@ -368,8 +385,9 @@ export function DreamEditor({
                     Move the map to the place, then tap its location. Save
                     changes to keep the pin.
                   </Text>
-                  <PaperMap
+                  <DreamPlacesMap
                     points={mapPoints}
+                    overview={overview}
                     fitKey={`edit-${item.id}`}
                     selectedId={point?.id}
                     placing
@@ -450,6 +468,15 @@ export function DreamEditor({
     </Modal>
   );
 }
+
+function GoogleAttribution({ values, onOpen }: { values: { displayName: string; uri?: string }[]; onOpen: (url?: string) => Promise<void> }) {
+  return <View style={s.googleAttribution}>
+    <Text style={s.googleName}>Google Maps</Text>
+    {values.map((value, index) => safeWebUrl(value.uri)
+      ? <Pressable key={`${value.displayName}-${index}`} accessibilityRole="link" style={s.attribution} onPress={() => void onOpen(value.uri)}><Text style={s.attributionText}>{value.displayName}</Text></Pressable>
+      : <Text key={`${value.displayName}-${index}`} style={s.attributionText}>{value.displayName}</Text>)}
+  </View>;
+}
 function Field({
   label,
   value,
@@ -483,6 +510,8 @@ function Field({
   );
 }
 const s = StyleSheet.create({
+  googleAttribution: { paddingTop: 10, paddingBottom: 5, gap: 4, alignItems: "flex-start" },
+  googleName: { color: "#5e5e5e", fontFamily: fonts.sansRegular, fontSize: 12 },
   locationPanel: { marginTop: 22, paddingTop: 16, paddingBottom: 4, borderTopWidth: 1, borderColor: colors.paperBorder, gap: 10 },
   locationHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
   locationLabel: { fontFamily: fonts.sans, fontSize: 14, color: colors.ink },

@@ -1,0 +1,6 @@
+# Copy to google-maps.properties (ignored by Git).
+# Android: restrict to Maps SDK for Android, com.trotter.mobilev2 and its signing SHA-1.
+# iOS: use a separate Maps SDK for iOS key restricted to com.trotter.mobilev2.
+# Never put GOOGLE_PLACES_API_KEY in this file or any mobile configuration.
+androidApiKey=
+iosApiKey=

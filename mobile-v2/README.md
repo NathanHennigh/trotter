@@ -30,6 +30,19 @@ Local iPhone builds require macOS and Xcode. From Windows, use an EAS iOS develo
 
 ## Build Android Artifacts In WSL
 
+Dreams uses the native Google Maps SDK. Copy `android/google-maps.properties.example`
+to the ignored `android/google-maps.properties` and set `androidApiKey` to a key
+restricted to Maps SDK for Android, `com.trotter.mobilev2`, and the installed
+build's signing certificate SHA-1. The WSL build copies this local configuration.
+For Play builds, add the Play app-signing certificate, not only the upload key.
+`GOOGLE_MAPS_ANDROID_API_KEY` overrides the local file in CI. Never put the backend
+Places key here. `app.config.js` exposes only readiness booleans in Expo `extra`;
+the Android key is installed as SDK metadata. Missing configuration keeps saved
+places accessible and shows an explicit map fallback.
+
+For iOS, supply a separate iOS-restricted `GOOGLE_MAPS_IOS_API_KEY` and prebuild on
+the iOS build host. This does not configure an iOS key automatically.
+
 The helper mirrors the Etch build-only workflow: it copies `mobile-v2` into WSL's Linux filesystem, installs locked dependencies, runs Expo configuration and TypeScript checks, and builds verified artifacts without installing or uploading them. Release mode also requires a clean `main` branch that exactly matches `origin/main`; development mode builds the current working tree for personal testing.
 
 WSL Ubuntu needs nvm with Node `20.20.2`, Java 17, `rsync`, `unzip`, and the Android SDK at `~/Android/Sdk`.

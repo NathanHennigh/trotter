@@ -17,6 +17,7 @@ export type DreamItemCategory =
 
 export type DreamItemStatus = 'created' | 'processing' | 'parsed' | 'needs_review' | 'confirmed' | 'failed';
 export type DreamLocationStatus = 'queued' | 'running' | 'resolved' | 'needs_review' | 'not_found' | 'failed' | 'blocked' | 'manual';
+export type DreamLocationAttribution = { displayName: string; uri?: string };
 export type DreamLocationCandidate = {
   id: string;
   name: string;
@@ -24,7 +25,19 @@ export type DreamLocationCandidate = {
   latitude: number;
   longitude: number;
   googleMapsUrl?: string;
+  attributions?: DreamLocationAttribution[];
 };
+export type DreamLocationDetails = {
+  locationProvider?: string;
+  locationAddress?: string;
+  locationCandidates: DreamLocationCandidate[];
+  locationAttributions: DreamLocationAttribution[];
+  locationPlaceId?: string;
+  locationExpiresAt?: string;
+  locationStatus?: DreamLocationStatus;
+  locationMessage?: string;
+};
+type ApiLocationCandidate = { id: string; name: string; address: string; latitude: number; longitude: number; google_maps_url?: string; attributions?: { display_name: string; uri?: string }[] };
 
 export type Dream = {
   id: string;
@@ -74,7 +87,11 @@ type ApiDreamItem = {
   location_status?: DreamLocationStatus | null;
   location_address?: string | null;
   location_provider?: string | null;
-  location_candidates?: { id: string; name: string; address: string; latitude: number; longitude: number; google_maps_url?: string }[] | null;
+  location_candidates?: ApiLocationCandidate[] | null;
+  location_place_id?: string | null;
+  location_candidate_ids?: string[] | null;
+  location_expires_at?: string | null;
+  location_user_confirmed?: boolean;
   location_message?: string | null;
   location_checked_at?: string | null;
   status: DreamItemStatus;
@@ -108,6 +125,10 @@ export type DreamItem = {
   locationCandidates?: DreamLocationCandidate[];
   locationMessage?: string;
   locationCheckedAt?: string;
+  locationPlaceId?: string;
+  locationCandidateIds?: string[];
+  locationExpiresAt?: string;
+  locationUserConfirmed?: boolean;
   status: DreamItemStatus;
   createdAt: string;
   updatedAt: string;
@@ -415,6 +436,26 @@ async function dreamsApiFetch<T>(path: string): Promise<T> {
   return data as T;
 }
 
+/** Transient Google content belongs to the open detail view, never the saved-items store. */
+export async function fetchDreamLocationDetails(id: string, signal?: AbortSignal): Promise<DreamLocationDetails> {
+  if (!/^\d+$/.test(id)) throw new Error('Wait for this place to finish saving first.');
+  const response = await dreamsAuthenticatedFetch(`/dream-items/${id}/location-details`, { signal, cache: 'no-store', headers: { 'Cache-Control': 'no-store' } });
+  const data = await readJson(response);
+  if (!response.ok) throw new Error(readError(data, 'Location details could not load. Your saved place is unchanged.'));
+  const value = data as {
+    location_provider?: string; location_address?: string; location_candidates?: ApiLocationCandidate[];
+    location_attributions?: { display_name: string; uri?: string }[]; location_place_id?: string;
+    location_expires_at?: string; location_status?: DreamLocationStatus; location_message?: string;
+  };
+  return {
+    locationProvider: value.location_provider, locationAddress: value.location_address || undefined,
+    locationCandidates: mapLocationCandidates(value.location_candidates),
+    locationAttributions: mapLocationAttributions(value.location_attributions),
+    locationPlaceId: value.location_place_id, locationExpiresAt: value.location_expires_at,
+    locationStatus: value.location_status, locationMessage: value.location_message,
+  };
+}
+
 async function shareInstagramLinkRemote(sourceUrl: string, caption?: string) {
   const response = await dreamsAuthenticatedFetch('/dreams/share', {
     method: 'POST',
@@ -429,6 +470,7 @@ async function shareInstagramLinkRemote(sourceUrl: string, caption?: string) {
 
 type DreamsResponse = Pick<Response, 'status' | 'ok' | 'text'>;
 async function dreamsAuthenticatedFetch(path: string, init?: RequestInit): Promise<DreamsResponse> {
+  if (init?.signal?.aborted) throw new Error('The request was cancelled.');
   const initialRevision = getAuthRevision();
   const token = getStoredToken() ?? await hydrateStoredToken();
   if (!token) throw new Error('Sign in to access your saved places.');
@@ -437,7 +479,11 @@ async function dreamsAuthenticatedFetch(path: string, init?: RequestInit): Promi
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let unsubscribe = () => {};
+  let cancel = () => {};
   const deadline = new Promise<never>((_resolve, reject) => {
+    cancel = () => { reject(new Error('The request was cancelled.')); controller.abort(); };
+    init?.signal?.addEventListener('abort', cancel, { once: true });
+    if (init?.signal?.aborted) cancel();
     timer = setTimeout(() => {
       reject(new Error(init?.method && init.method !== 'GET'
         ? 'The request timed out. The change may still finish on the server. Refresh saved places before retrying.'
@@ -451,7 +497,8 @@ async function dreamsAuthenticatedFetch(path: string, init?: RequestInit): Promi
   });
   try {
     const request = (async () => {
-      const response = await fetch(`${getApiBaseUrl()}${path}`, withAuth({ ...init, signal: controller.signal }, token));
+      const response = await fetch(`${getApiBaseUrl()}${path}`, withAuth({ ...init,
+        headers: { ...init?.headers, 'X-Trotter-Maps': 'google' }, signal: controller.signal }, token));
       if (revision !== getAuthRevision() || token !== getStoredToken()) throw new Error('Your account changed.');
       if (response.status === 401) {
         // Remove our listener before invalidating the account so the useful
@@ -468,6 +515,7 @@ async function dreamsAuthenticatedFetch(path: string, init?: RequestInit): Promi
   } finally {
     clearTimeout(timer);
     unsubscribe();
+    init?.signal?.removeEventListener('abort', cancel);
   }
 }
 
@@ -529,23 +577,36 @@ function mapApiDreamItem(item: ApiDreamItem): DreamItem {
     needsReview: item.needs_review,
     googleMapsUrl: item.google_maps_url ?? undefined,
     thumbnailUrl: item.thumbnail_url ?? undefined,
-    latitude: item.latitude ?? undefined,
-    longitude: item.longitude ?? undefined,
+    latitude: item.location_provider === 'google_places' && (!item.location_expires_at || Date.parse(item.location_expires_at) <= Date.now() || !Number.isFinite(Date.parse(item.location_expires_at))) ? undefined : item.latitude ?? undefined,
+    longitude: item.location_provider === 'google_places' && (!item.location_expires_at || Date.parse(item.location_expires_at) <= Date.now() || !Number.isFinite(Date.parse(item.location_expires_at))) ? undefined : item.longitude ?? undefined,
     coordinatePrecision: item.coordinate_precision ?? undefined,
     locationStatus: item.location_status ?? undefined,
-    locationAddress: item.location_address ?? undefined,
+    locationAddress: item.location_provider === 'google_places' ? undefined : item.location_address ?? undefined,
     locationProvider: item.location_provider ?? undefined,
-    locationCandidates: (item.location_candidates ?? []).filter(candidate =>
-      typeof candidate.latitude === 'number' && typeof candidate.longitude === 'number' &&
-      Number.isFinite(candidate.latitude) && Number.isFinite(candidate.longitude) &&
-      Math.abs(candidate.latitude) <= 85.05112878 && Math.abs(candidate.longitude) <= 180
-    ).map(candidate => ({ ...candidate, googleMapsUrl: candidate.google_maps_url })),
+    locationCandidates: item.location_provider === 'google_places' ? [] : mapLocationCandidates(item.location_candidates),
+    locationPlaceId: item.location_place_id ?? undefined,
+    locationCandidateIds: item.location_candidate_ids ?? [],
+    locationExpiresAt: item.location_expires_at ?? undefined,
+    locationUserConfirmed: item.location_user_confirmed,
     locationMessage: item.location_message ?? undefined,
     locationCheckedAt: item.location_checked_at ?? undefined,
     status: item.status,
     createdAt: item.created_at,
     updatedAt: item.updated_at ?? item.created_at,
   };
+}
+
+function mapLocationAttributions(values?: { display_name: string; uri?: string }[] | null): DreamLocationAttribution[] {
+  return (values ?? []).filter(value => typeof value.display_name === 'string' && value.display_name.trim()).map(value => ({ displayName: value.display_name, uri: value.uri }));
+}
+function mapLocationCandidates(values?: ApiLocationCandidate[] | null): DreamLocationCandidate[] {
+  return (values ?? []).filter(candidate => typeof candidate.id === 'string' &&
+    typeof candidate.latitude === 'number' && typeof candidate.longitude === 'number' &&
+    Number.isFinite(candidate.latitude) && Number.isFinite(candidate.longitude) &&
+    Math.abs(candidate.latitude) <= 85.05112878 && Math.abs(candidate.longitude) <= 180
+  ).map(candidate => ({ id: candidate.id, name: candidate.name, address: candidate.address,
+    latitude: candidate.latitude, longitude: candidate.longitude, googleMapsUrl: candidate.google_maps_url,
+    attributions: mapLocationAttributions(candidate.attributions) }));
 }
 
 function mergeDreams(apiDreams: Dream[] | undefined, itemDreams: Dream[]) {

@@ -45,7 +45,7 @@ import {
 import { countryRegion } from "../components/world-window/dreams/countryRegion";
 import { dreamCopy } from "../components/world-window/dreams/dreamCopy";
 import { canFindLocation, isFindingLocation, locationNote } from "../components/world-window/dreams/locationPresentation";
-import { PaperMap } from "../components/world-window/trips/PaperMap";
+import { DreamPlacesMap } from "../components/world-window/dreams/DreamPlacesMap";
 import type { MapPoint } from "../components/world-window/trips/tripPresentation";
 import type { BottomNavTab } from "../data/trotterMock";
 import { DreamItem, useDreams } from "../services/dreams";
@@ -401,7 +401,7 @@ function CountryPlaces({
                 mapOffset.current = event.nativeEvent.layout.y;
               }}
             >
-              {(points.length > 0 || region) && <PaperMap
+              {(points.length > 0 || region) && <DreamPlacesMap
                 overview={region}
                 points={points}
                 fitKey={`${title}-${city}-${category}`}

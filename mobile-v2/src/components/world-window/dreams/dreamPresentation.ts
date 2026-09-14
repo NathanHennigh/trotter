@@ -99,6 +99,9 @@ export function filterDreams(
   );
 }
 export function exactMapPoint(item: DreamItem): MapPoint | undefined {
+  // Never revive an expired Google coordinate from the Maps URL fallback.
+  if (item.locationProvider === "google_places" &&
+      (!item.locationExpiresAt || !Number.isFinite(Date.parse(item.locationExpiresAt)) || Date.parse(item.locationExpiresAt) <= Date.now())) return undefined;
   if (
     typeof item.latitude === "number" &&
     typeof item.longitude === "number" &&
