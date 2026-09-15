@@ -1,0 +1,8 @@
+[out:json][timeout:35];
+(
+ nwr["name"]["amenity"~"^(cafe|restaurant)$"]["website"](38.700,-9.165,38.735,-9.110);
+ nwr["name"]["tourism"="hotel"]["website"](38.700,-9.165,38.735,-9.110);
+ nwr["name"]["amenity"~"^(cafe|restaurant)$"]["website"](41.136,-8.636,41.168,-8.590);
+ nwr["name"]["tourism"="hotel"]["website"](41.136,-8.636,41.168,-8.590);
+);
+out center tags;

@@ -1,0 +1,6 @@
+[out:json][timeout:30];
+(
+ nwr["name"~"Senhora.*Monte",i](38.71,-9.15,38.74,-9.12);
+ nwr[~"^(name|alt_name|official_name)$"~"Ribeira.*Naus",i](38.70,-9.15,38.71,-9.13);
+);
+out center tags;

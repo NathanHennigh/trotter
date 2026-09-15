@@ -1,0 +1,85 @@
+
+  vinext dev  (Vite 8.0.13)
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Debug:   http://localhost:3000/__debug
+ GET /?view=after 200 in 2.3s (compile: 1788894010.2s, render: 2.2s)
+2:10:50 PM [vite] (rsc) hmr update /app/globals.css
+2:10:50 PM [vite] (ssr) page reload app/proposed-directions/trip-archive.tsx
+2:10:50 PM [vite] (rsc) hmr update /app/globals.css
+2:10:50 PM [vite] (ssr) page reload app/proposed-directions/lounge-wallet.tsx
+2:10:50 PM [vite] (rsc) hmr update /app/globals.css
+2:10:50 PM [vite] (ssr) page reload app/proposed-directions/trip-atlas.tsx
+2:10:50 PM [vite] (rsc) hmr update /app/globals.css
+2:10:50 PM [vite] (ssr) page reload app/proposed-directions/wallet-motion.ts
+2:10:50 PM [vite] (rsc) hmr update /app/globals.css
+2:10:50 PM [vite] (ssr) page reload app/proposed-directions/proposed.css
+[vite] program reload
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (rsc) hmr update /app/globals.css
+2:11:04 PM [vite] (ssr) page reload app/refined-directions/stamp-footprints.json
+ GET /?view=after 200 in 673ms (compile: 1788894010.3s, render: 536ms)
+ GET /?view=after 200 in 131ms (compile: 1788894010.2s, render: 114ms)
+2:13:27 PM [vite] (rsc) hmr update /app/globals.css
+2:13:27 PM [vite] (ssr) page reload app/proposed-directions/trip-archive.tsx
+2:13:27 PM [vite] (client) hmr update /app/globals.css?direct, /app/proposed-directions/trip-archive.tsx
+2:13:27 PM [vite] (rsc) hmr update /app/globals.css
+2:13:27 PM [vite] (ssr) page reload app/proposed-directions/wallet-motion.ts
+2:13:27 PM [vite] (client) hmr update /app/globals.css?direct, /app/proposed-directions/product-screens.tsx
+2:13:27 PM [vite] (rsc) hmr update /app/globals.css
+2:13:27 PM [vite] (ssr) page reload app/proposed-directions/proposed.css
+2:13:27 PM [vite] (client) hmr update /app/globals.css?direct, /app/proposed-directions/proposed.css?direct, /app/proposed-directions/proposed.css
+[vite] program reload
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (ssr) page reload app/refined-directions/stamp-footprints.json
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct, /app/refined-directions/passport-stamp.tsx, /app/proposed-directions/passport-book.tsx
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct
+2:13:28 PM [vite] (rsc) hmr update /app/globals.css
+2:13:28 PM [vite] (client) hmr update /app/globals.css?direct

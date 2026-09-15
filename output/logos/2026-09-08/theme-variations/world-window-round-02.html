@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f1e8">
+  <title>World Window / Round 02 — Trotter</title>
+  <style>
+    :root{color-scheme:light;--paper:#f4f1e8;--white:#fcfaf4;--ink:#365767;--blue:#427494;--muted:#7a8582;--line:#d4dad2;font-family:Arial,Helvetica,sans-serif;font-synthesis:none}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased}button,a,input{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{font:inherit;color:inherit;cursor:pointer}a{color:inherit}button:focus-visible,a:focus-visible{outline:2px solid #b56646;outline-offset:5px}button:disabled{opacity:.35;cursor:default}.page-width{width:min(1440px,calc(100% - 80px));margin-inline:auto}.topbar{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-block:26px 22px;border-bottom:1px solid var(--line)}.wordmark{font-size:17px;letter-spacing:.23em;font-weight:600;text-decoration:none}.previous{display:inline-flex;align-items:center;gap:9px;min-height:34px;font-size:11px;text-decoration:none;color:var(--muted)}.previous:hover{color:var(--ink)}.intro{padding:38px 0 32px;display:flex;align-items:baseline;justify-content:space-between;gap:24px}h1{margin:0;font:400 clamp(30px,3.7vw,49px)/1.08 Georgia,'Times New Roman',serif;letter-spacing:-.035em;color:var(--blue)}.intro p{margin:0;font:11px/1.5 'Courier New',monospace;color:var(--muted);white-space:nowrap}.study{padding:21px 0 35px;border-top:1px solid var(--line);scroll-margin-top:20px}.study-head{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:16px}h2{margin:0;font:11px 'Courier New',monospace;letter-spacing:.07em;font-weight:400;color:var(--muted)}.open-link{display:inline-flex;align-items:center;gap:8px;min-height:33px;font:11px/1.5 Arial,Helvetica,sans-serif;text-decoration:none;color:var(--muted)}.open-link:hover{color:var(--ink)}.board-link{display:block;background:var(--white);border:1px solid #e1e0d5;cursor:zoom-in;overflow:hidden}.board{display:block;width:100%;height:auto}.study-foot{padding-top:14px;font:10px/1.5 'Courier New',monospace;letter-spacing:.04em;color:var(--muted)}footer{border-top:1px solid var(--line);padding-block:21px 32px;display:flex;justify-content:space-between;gap:20px;font:10px/1.5 'Courier New',monospace;color:var(--muted)}
+    .viewer{position:fixed;inset:0;width:100vw;max-width:none;height:100dvh;max-height:none;margin:0;padding:0;border:0;background:var(--paper);color:var(--ink);overflow:hidden}.viewer[open]{display:flex;flex-direction:column}.viewer::backdrop{background:#29464fed}.viewer-toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-shrink:0;min-height:74px;padding:14px 24px;border-bottom:1px solid var(--line);background:var(--paper)}.viewer-title{font:400 23px/1.15 Georgia,'Times New Roman',serif;margin:0;letter-spacing:-.02em;color:var(--blue)}.viewer-controls{display:flex;align-items:center;gap:7px}.control{display:inline-flex;align-items:center;justify-content:center;min-width:39px;min-height:39px;padding:8px 10px;border:1px solid var(--line);border-radius:3px;background:var(--white);font-size:12px;text-decoration:none}.control:hover{border-color:#9eafac}.zoom-value{font:11px 'Courier New',monospace;min-width:42px;text-align:center}.viewer-close{margin-left:9px;background:var(--ink);color:var(--white);border-color:var(--ink)}.viewer-stage{flex:1;min-height:0;overflow:auto;padding:24px;overscroll-behavior:contain;scrollbar-color:#a0ada0 var(--paper);touch-action:pan-x pan-y}.viewer-stage.can-pan{cursor:grab}.viewer-stage.panning{cursor:grabbing;user-select:none}.viewer-image{display:block;max-width:none;height:auto;object-fit:contain;margin:0 auto;user-select:none;-webkit-user-drag:none}.viewer-help{flex-shrink:0;padding:9px 24px 11px;font:10px/1.5 'Courier New',monospace;color:var(--muted);border-top:1px solid var(--line)}
+    @media(max-width:700px){.page-width{width:calc(100% - 30px)}.topbar{padding-block:19px 16px}.wordmark{font-size:15px}.previous{font-size:10px}.intro{padding:29px 0 24px;display:block}.intro p{margin-top:13px}.study{padding-top:15px;padding-bottom:27px}.study-head{padding-bottom:12px}h2{font-size:10px}.study-foot{font-size:9px}.viewer-toolbar{padding:12px 14px;flex-wrap:wrap;gap:11px}.viewer-title{font-size:22px}.viewer-controls{width:100%}.viewer-close{margin-left:auto}.viewer-stage{padding:11px}.viewer-help{padding:8px 14px;font-size:9px}.control{min-width:37px;padding:7px 9px}footer{font-size:9px}}
+  </style>
+</head>
+<body>
+  <header class="topbar page-width"><a class="wordmark" href="index.html">TROTTER</a><a class="previous" href="index.html"><span aria-hidden="true">←</span> Previous 27 studies</a></header>
+  <main class="page-width">
+    <div class="intro"><h1>World Window / Round 02</h1><p>12 T + orbit studies</p></div>
+    <section class="study" aria-labelledby="sheet-a-title">
+      <header class="study-head"><h2 id="sheet-a-title">R01–R06</h2><a class="open-link" href="world-window-round-02a.png" target="_blank" rel="noopener">Full size <span aria-hidden="true">↗</span></a></header>
+      <a class="board-link" href="world-window-round-02a.png" data-viewer="World Window / R01–R06" aria-label="Enlarge World Window logo studies R01 through R06"><img class="board" src="world-window-round-02a.png" alt="World Window Round 02: T and orbit logo studies R01, R02, R03, R04, R05 and R06" decoding="async"></a>
+      <div class="study-foot">R01 · R02 · R03 · R04 · R05 · R06</div>
+    </section>
+    <section class="study" aria-labelledby="sheet-b-title">
+      <header class="study-head"><h2 id="sheet-b-title">R07–R12</h2><a class="open-link" href="world-window-round-02b.png" target="_blank" rel="noopener">Full size <span aria-hidden="true">↗</span></a></header>
+      <a class="board-link" href="world-window-round-02b.png" data-viewer="World Window / R07–R12" aria-label="Enlarge World Window logo studies R07 through R12"><img class="board" src="world-window-round-02b.png" alt="World Window Round 02: T and orbit logo studies R07, R08, R09, R10, R11 and R12" decoding="async"></a>
+      <div class="study-foot">R07 · R08 · R09 · R10 · R11 · R12</div>
+    </section>
+    <footer><span>TROTTER / WORLD WINDOW</span><span>ROUND 02</span></footer>
+  </main>
+  <dialog class="viewer" aria-labelledby="viewer-title">
+    <header class="viewer-toolbar"><h2 class="viewer-title" id="viewer-title">World Window</h2><div class="viewer-controls"><button class="control" id="zoom-out" aria-label="Zoom out">−</button><span class="zoom-value" id="zoom-value" aria-live="polite">Fit</span><button class="control" id="zoom-in" aria-label="Zoom in">+</button><button class="control" id="zoom-fit">Fit</button><a class="control" id="viewer-original" target="_blank" rel="noopener">Full size ↗</a><button class="control viewer-close" id="viewer-close" aria-label="Close image viewer">Close ×</button></div></header>
+    <div class="viewer-stage" tabindex="0" aria-label="Logo board. Scroll to inspect when zoomed."><img class="viewer-image" alt="" draggable="false"></div>
+    <div class="viewer-help">+ / − to zoom · Drag or scroll to move · Esc to close</div>
+  </dialog>
+  <script>
+    const viewer=document.querySelector('.viewer'),stage=document.querySelector('.viewer-stage'),picture=document.querySelector('.viewer-image');
+    const zoomLabel=document.getElementById('zoom-value'),zoomIn=document.getElementById('zoom-in'),zoomOut=document.getElementById('zoom-out');
+    let scale=1,fitWidth=0,drag=null,lastFocus=null;
+    function fit(){
+      const styles=getComputedStyle(stage),availableWidth=stage.clientWidth-parseFloat(styles.paddingLeft)-parseFloat(styles.paddingRight),availableHeight=stage.clientHeight-parseFloat(styles.paddingTop)-parseFloat(styles.paddingBottom);
+      if(!picture.naturalWidth)return;
+      fitWidth=Math.min(availableWidth,availableHeight*picture.naturalWidth/picture.naturalHeight,picture.naturalWidth);
+      scale=1;updateZoom(false);stage.scrollTo(0,0);
+    }
+    function updateZoom(preserve=true){
+      const oldRect=picture.getBoundingClientRect(),stageRect=stage.getBoundingClientRect(),oldWidth=oldRect.width||fitWidth;
+      const centerX=(stageRect.left+stage.clientWidth/2-oldRect.left)/oldWidth,centerY=(stageRect.top+stage.clientHeight/2-oldRect.top)/oldWidth;
+      picture.style.width=fitWidth*scale+'px';
+      zoomLabel.textContent=scale===1?'Fit':Math.round(scale*100)+'%';zoomIn.disabled=scale>=5;zoomOut.disabled=scale<=1;
+      stage.classList.toggle('can-pan',scale>1);
+      if(preserve){const newRect=picture.getBoundingClientRect();stage.scrollLeft+=newRect.left+centerX*newRect.width-stageRect.left-stage.clientWidth/2;stage.scrollTop+=newRect.top+centerY*newRect.width-stageRect.top-stage.clientHeight/2;}
+    }
+    function changeZoom(delta){scale=Math.min(5,Math.max(1,scale+delta));updateZoom();}
+    document.querySelectorAll('[data-viewer]').forEach(link=>link.addEventListener('click',event=>{
+      if(!viewer.showModal||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+      event.preventDefault();lastFocus=link;document.getElementById('viewer-title').textContent=link.dataset.viewer;document.getElementById('viewer-original').href=link.href;
+      picture.alt=link.querySelector('img').alt;picture.onload=fit;picture.src=link.href;
+      viewer.showModal();document.body.style.overflow='hidden';if(picture.complete&&picture.naturalWidth)requestAnimationFrame(fit);
+    }));
+    zoomIn.addEventListener('click',()=>changeZoom(.5));zoomOut.addEventListener('click',()=>changeZoom(-.5));document.getElementById('zoom-fit').addEventListener('click',fit);
+    document.getElementById('viewer-close').addEventListener('click',()=>viewer.close());
+    viewer.addEventListener('close',()=>{document.body.style.overflow='';drag=null;stage.classList.remove('panning');lastFocus?.focus();});
+    viewer.addEventListener('keydown',event=>{if(event.key==='+'||event.key==='='){event.preventDefault();changeZoom(.5);}if(event.key==='-'){event.preventDefault();changeZoom(-.5);}if(event.key==='0'){event.preventDefault();fit();}});
+    stage.addEventListener('pointerdown',event=>{if(scale<=1||event.pointerType==='touch'||event.button!==0)return;drag={x:event.clientX,y:event.clientY,left:stage.scrollLeft,top:stage.scrollTop};stage.setPointerCapture(event.pointerId);stage.classList.add('panning');event.preventDefault();});
+    stage.addEventListener('pointermove',event=>{if(!drag)return;stage.scrollLeft=drag.left+drag.x-event.clientX;stage.scrollTop=drag.top+drag.y-event.clientY;});
+    function release(){drag=null;stage.classList.remove('panning');}stage.addEventListener('pointerup',release);stage.addEventListener('pointercancel',release);stage.addEventListener('lostpointercapture',release);
+    window.addEventListener('resize',()=>{if(viewer.open)fit();});
+  </script>
+</body>
+</html>

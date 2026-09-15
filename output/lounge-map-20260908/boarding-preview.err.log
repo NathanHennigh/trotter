@@ -1,0 +1,287 @@
+2:40:49 PM [vite] (client) [console.error] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <div className="single-phone" style={{width:410, ...}} data-screen="globe" onClick={function captureNavigation}>
+      <div className="checkpoint..." hidden={true}>
+        <ProductScreens camera={{current:{...}}} variant="window" paused={true}>
+          <Phone>
+          ...
+            <div className="phone them...">
+              <div>
+              <div className="phone-scroll">
+                <Head>
+                <Title>
+                <div>
+                <TripArchive trips={[...]} variant="window" selected="trip-081" limit={12} hideMap={false} ...>
+                  <section className="journey-ar..." aria-label="Trip archive">
+                    <div>
+                    <div className="archive-ma..." ref={{current:null}}>
+                      <TripAtlas trip={{id:"trip-081", ...}}>
+                        <div className="trip-atlas" ref={{current:null}} role="img" aria-label="Punta Cana...">
+                          <svg viewBox="0 0 400 230" fill="none" aria-hidden="true">
+                            <path>
+                            <path>
+                            <path>
+                            <path>
+                            <path>
+                            <g>
+                            <g className="atlas-port">
+                              <circle
++                               cx={51.43179071728042}
+-                               cx="51.43179071728011"
+                                cy={32.500000000000085}
+                                r={2.7}
+                              >
+                              <g>
+                                <rect
++                                 x={57.43179071728042}
+-                                 x="57.43179071728011"
+                                  y={16.500000000000085}
+                                  width={38}
+                                  height={17}
+                                  rx="2"
+                                >
+                                <text
++                                 x={60.43179071728042}
+-                                 x="60.43179071728011"
+                                  y={29.500000000000085}
+                                >
++                                 DFW
+                            <g className="atlas-port">
+                              <circle
++                               cx={226.41033771020594}
+-                               cx="226.4103377102056"
+                                cy={111.07754882374441}
+                                r={2.7}
+                              >
+                              <g>
+                                <rect
++                                 x={232.41033771020594}
+-                                 x="232.4103377102056"
+                                  y={95.07754882374441}
+                                  width={38}
+                                  height={17}
+                                  rx="2"
+                                >
+                                <text
++                                 x={235.41033771020594}
+-                                 x="235.4103377102056"
+                                  y={108.07754882374441}
+                                >
++                                 FLL
+                          ...
+                      ...
+                    ...
+              ...
+          <Phone variant="window" screen="detail" label={"03 / Tri..."}>
+            <article className="device" id="checkpoint...">
+              <div>
+              <div className="phone them...">
+                <div>
+                <div className="phone-scroll">
+                  <Head>
+                  <TripDetail trip={{id:"trip-081", ...}} variant="window" selected="flight-158" expanded={1} ...>
+                    <div className="trip-detai...">
+                      <TripAtlas trip={{id:"trip-081", ...}}>
+                        <div className="trip-atlas" ref={{current:null}} role="img" aria-label="Punta Cana...">
+                          <svg viewBox="0 0 400 230" fill="none" aria-hidden="true">
+                            <path>
+                            <path>
+                            <path>
+                            <path>
+                            <path>
+                            <g>
+                            <g className="atlas-port">
+                              <circle
++                               cx={51.43179071728042}
+-                               cx="51.43179071728011"
+                                cy={32.500000000000085}
+                                r={2.7}
+                              >
+                              <g>
+                                <rect
++                                 x={57.43179071728042}
+-                                 x="57.43179071728011"
+                                  y={16.500000000000085}
+                                  width={38}
+                                  height={17}
+                                  rx="2"
+                                >
+                                <text
++                                 x={60.43179071728042}
+-                                 x="60.43179071728011"
+                                  y={29.500000000000085}
+                                >
++                                 DFW
+                            <g className="atlas-port">
+                              <circle
++                               cx={226.41033771020594}
+-                               cx="226.4103377102056"
+                                cy={111.07754882374441}
+                                r={2.7}
+                              >
+                              <g>
+                                <rect
++                                 x={232.41033771020594}
+-                                 x="232.4103377102056"
+                                  y={95.07754882374441}
+                                  width={38}
+                                  height={17}
+                                  rx="2"
+                                >
+                                <text
++                                 x={235.41033771020594}
+-                                 x="235.4103377102056"
+                                  y={108.07754882374441}
+                                >
++                                 FLL
+                          ...
+                      ...
+                      ...
+                ...
+          ...
+      ...
+        <div ref={{current:null}} className="proposed-s..." onClickCapture={function capture} onClick={function bubble} ...>
+          <Phone>
+          ...
+            <div className="phone them...">
+              <div>
+              <div className="phone-scroll">
+                <Head>
+                <Title>
+                <div>
+                <TripArchive year="All years" onReveal={function bound dispatchSetState} trips={[...]} variant="window" ...>
+                  <section ref={{current:null}} className="journey-ar..." aria-label="Trip archive">
+                    <div>
+                    <div className="archive-ma..." ref={{current:null}}>
+                      <TripAtlas trip={{id:"trip-081", ...}}>
+                        <div className={"trip-atlas "} ref={{current:null}} role="img" aria-label="Punta Cana...">
+                          <svg viewBox="0 0 400 230" fill="none" aria-hidden="true">
+                            <path>
+                            <path>
+                            <g>
+                            <g>
+                            <g className="atlas-port">
+                              <circle
++                               cx={51.43179071728042}
+-                               cx="51.43179071728011"
+                                cy={32.500000000000085}
+                                r={2.7}
+                              >
+                              <g>
+                                <rect
++                                 x={57.43179071728042}
+-                                 x="57.43179071728011"
+                                  y={16.500000000000085}
+                                  width={38}
+                                  height={17}
+                                  rx="2"
+                                >
+                                <text
++                                 x={60.43179071728042}
+-                                 x="60.43179071728011"
+                                  y={29.500000000000085}
+                                >
++                                 DFW
+                            <g className="atlas-port">
+                              <circle
++                               cx={226.41033771020594}
+-                               cx="226.4103377102056"
+                                cy={111.07754882374441}
+                                r={2.7}
+                              >
+                              <g>
+                                <rect
++                                 x={232.41033771020594}
+-                                 x="232.4103377102056"
+                                  y={95.07754882374441}
+                                  width={38}
+                                  height={17}
+                                  rx="2"
+                                >
+                                <text
++                                 x={235.41033771020594}
+-                                 x="235.4103377102056"
+                                  y={108.07754882374441}
+                                >
++                                 FLL
+                          ...
+                      ...
+                    ...
+              ...
+          <Phone variant="window" screen="detail" label={"03 / Tri..."}>
+            <article className="device" id="proposed-w...">
+              <div>
+              <div className="phone them...">
+                <div>
+                <div className="phone-scroll">
+                  <Head>
+                  <TripDetail trip={{id:"trip-081", ...}} variant="window" selected="flight-158" expanded={1} ...>
+                    <div className="trip-detai...">
+                      <TripAtlas trip={{id:"trip-081", ...}}>
+                        <div className={"trip-atlas "} ref={{current:null}} role="img" aria-label="Punta Cana...">
+                          <svg viewBox="0 0 400 230" fill="none" aria-hidden="true">
+                            <path>
+                            <path>
+                            <g>
+                            <g>
+                            <g className="atlas-port">
+                              <circle
++                               cx={51.43179071728042}
+-                               cx="51.43179071728011"
+                                cy={32.500000000000085}
+                                r={2.7}
+                              >
+                              <g>
+                                <rect
++                                 x={57.43179071728042}
+-                                 x="57.43179071728011"
+                                  y={16.500000000000085}
+                                  width={38}
+                                  height={17}
+                                  rx="2"
+                                >
+                                <text
++                                 x={60.43179071728042}
+-                                 x="60.43179071728011"
+                                  y={29.500000000000085}
+                                >
++                                 DFW
+                            <g className="atlas-port">
+                              <circle
++                               cx={226.41033771020594}
+-                               cx="226.4103377102056"
+                                cy={111.07754882374441}
+                                r={2.7}
+                              >
+                              <g>
+                                <rect
++                                 x={232.41033771020594}
+-                                 x="232.4103377102056"
+                                  y={95.07754882374441}
+                                  width={38}
+                                  height={17}
+                                  rx="2"
+                                >
+                                <text
++                                 x={235.41033771020594}
+-                                 x="235.4103377102056"
+                                  y={108.07754882374441}
+                                >
++                                 FLL
+                          ...
+                      ...
+                      ...
+                ...
+          ...
+

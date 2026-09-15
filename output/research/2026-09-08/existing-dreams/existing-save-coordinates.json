@@ -1,0 +1,62 @@
+[
+  {
+    "id": "belem",
+    "lat": 38.6916021,
+    "lon": -9.2159192,
+    "precision": "place",
+    "sourceUrl": "https://www.openstreetmap.org/way/24341353",
+    "mappedName": "Torre de Belém",
+    "coordinateSource": "OSM feature bounding-box centre",
+    "note": "Actual Belém Tower building bounds centre."
+  },
+  {
+    "id": "river",
+    "lat": 38.7060535,
+    "lon": -9.1399017,
+    "precision": "area",
+    "sourceUrl": "https://www.openstreetmap.org/way/310530266",
+    "mappedName": "Avenida da Ribeira das Naus",
+    "coordinateSource": "OSM feature bounding-box centre",
+    "note": "Representative point along the mapped Ribeira das Naus waterfront avenue. Existing save describes a walk, not a single venue; do not imply an exact start or entrance."
+  },
+  {
+    "id": "light",
+    "lat": 38.7191545,
+    "lon": -9.1327698,
+    "precision": "place",
+    "sourceUrl": "https://www.openstreetmap.org/way/526129020",
+    "mappedName": "Miradouro Nossa Senhora do Monte",
+    "coordinateSource": "OSM feature bounding-box centre",
+    "note": "Actual Miradouro Nossa Senhora do Monte viewpoint grounds bounds centre."
+  },
+  {
+    "id": "yanaka",
+    "lat": 35.7247892,
+    "lon": 139.7685576,
+    "precision": "area",
+    "sourceUrl": "https://www.openstreetmap.org/node/6793554270",
+    "mappedName": "谷中",
+    "coordinateSource": "OSM feature point",
+    "note": "OSM Yanaka quarter label point, not a specific cafe."
+  },
+  {
+    "id": "bookshop",
+    "lat": 35.6956696,
+    "lon": 139.7569835,
+    "precision": "area",
+    "sourceUrl": "https://www.openstreetmap.org/node/13674307491",
+    "mappedName": "神田神保町",
+    "coordinateSource": "OSM feature point",
+    "note": "OSM Kanda-Jimbocho quarter label point, not a specific bookshop."
+  },
+  {
+    "id": "coyoacan",
+    "lat": 19.3492853,
+    "lon": -99.1636565,
+    "precision": "area",
+    "sourceUrl": "https://www.openstreetmap.org/way/54235991",
+    "mappedName": "Plaza Jardín Centenario",
+    "coordinateSource": "OSM feature bounding-box centre",
+    "note": "Coyoacán neighborhood save anchored at the actual Plaza Jardín Centenario garden bounds centre, matching its photo. Not a whole Mexico City or borough centre."
+  }
+]

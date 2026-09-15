@@ -1,0 +1,17 @@
+{
+  "method": "Original blue silhouette threshold b-r>39; SVG alpha >=128, at source pixel scale",
+  "intersectionOverUnion": 0.9834160995647109,
+  "differingPixels": 541,
+  "originalBluePixels": 32322,
+  "vectorBluePixels": 32381,
+  "connectedComponents": 5,
+  "componentAreas": [
+    21934,
+    5669,
+    3750,
+    625,
+    403
+  ],
+  "viewBox": "64 147 450 333",
+  "fittingToleranceSourcePixels": 0.65
+}

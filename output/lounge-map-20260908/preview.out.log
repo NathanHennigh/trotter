@@ -1,0 +1,25 @@
+
+  vinext dev  (Vite 8.0.13)
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Debug:   http://localhost:3000/__debug
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+2:17:47 PM [vite] (rsc) hmr update /app/globals.css
+ GET /?view=after 200 in 2.0s (compile: 1788895055.8s, render: 1.8s)
+ GET /?view=after 200 in 118ms (compile: 1788895055.7s, render: 104ms)

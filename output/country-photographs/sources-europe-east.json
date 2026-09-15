@@ -1,0 +1,62 @@
+[
+  {
+    "country": "Greece",
+    "code": "GR",
+    "title": "Agistri coastline in daylight",
+    "photographer": "Cesar Andriola",
+    "sourcePage": "https://unsplash.com/photos/coastal-village-with-white-houses-on-a-cliffside-overlooking-turquoise-water-k2N2xtvMQi8",
+    "imageUrl": "https://images.unsplash.com/photo-1757036909317-451d200044a4?fm=jpg&q=92&w=2400",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "width": 2400,
+    "height": 1600,
+    "verifiedOn": "2026-09-08",
+    "sourceEvidence": "Individual source identifies Agistri, Greece; credits Cesar Andriola; lists Canon EOS Rebel T6 and free use under the standard Unsplash License.",
+    "cropNotes": "Already 3:2. Keep full frame: coastline slopes from lower left to upper right, with natural sea and sky."
+  },
+  {
+    "country": "United Kingdom",
+    "code": "GB",
+    "title": "Westminster from the Thames",
+    "photographer": "Ugur Akdemir",
+    "sourcePage": "https://unsplash.com/photos/landscape-photography-of-big-ben-under-white-sky-HbYnglDQmuo",
+    "imageUrl": "https://images.unsplash.com/photo-1512734099960-65a682cbfe2b?fm=jpg&q=92&w=2400",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "width": 2400,
+    "height": 1600,
+    "verifiedOn": "2026-09-08",
+    "sourceEvidence": "Individual source identifies Houses of Parliament and Big Ben, London; credits Ugur Akdemir; published December 2017, Canon EOS 7D, free use under the standard Unsplash License.",
+    "cropNotes": "Already 3:2. Restrained warm overcast photograph with boats, bridge, a red bus, and ample pale sky; keep full frame."
+  },
+  {
+    "country": "Switzerland",
+    "code": "CH",
+    "title": "Lauterbrunnen village and the Alps",
+    "photographer": "Daniel Cox",
+    "sourcePage": "https://unsplash.com/photos/assorted-houses-by-a-forest-and-mountains-AbIPvuEKRcY",
+    "imageUrl": "https://images.unsplash.com/photo-1571274793214-675177edf552?fm=jpg&q=92&w=2400",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "width": 2400,
+    "height": 1600,
+    "verifiedOn": "2026-09-08",
+    "sourceEvidence": "Individual source identifies Lauterbrunnen, Switzerland; credits Daniel Cox; published October 2019, Sony ILCE-7M3, free use under the standard Unsplash License.",
+    "cropNotes": "Already 3:2. Natural overcast valley view, church below the mountain backdrop, muted autumn trees. Keep full frame."
+  },
+  {
+    "country": "Türkiye",
+    "code": "TR",
+    "title": "Daytime crossing on the Bosphorus",
+    "photographer": "Adnan Uludag",
+    "sourcePage": "https://unsplash.com/photos/white-boat-on-sea-near-bridge-under-blue-sky-during-daytime-y1BI7y1vaW8",
+    "imageUrl": "https://images.unsplash.com/photo-1625840550787-5f6a9044d7ce?fm=jpg&q=92&w=2400",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "width": 2400,
+    "height": 1350,
+    "verifiedOn": "2026-09-08",
+    "sourceEvidence": "Individual source identifies Bosphorus Bridge, Besiktas, Turkey; credits Adnan Uludag; published July 2021, iPhone 12 Pro, free use under the standard Unsplash License.",
+    "cropNotes": "16:9 source. Center 3:2 crop retains bridge tower and both boats; natural hazy daylight and subdued blue water."
+  }
+]

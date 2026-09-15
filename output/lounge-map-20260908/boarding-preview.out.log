@@ -1,0 +1,7 @@
+
+  vinext dev  (Vite 8.0.13)
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Debug:   http://localhost:3000/__debug
+ GET /?view=after 200 in 1.9s (compile: 1788896421.0s, render: 1.8s)
+ GET /?view=after 200 in 132ms (compile: 1788896420.9s, render: 113ms)

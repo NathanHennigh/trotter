@@ -1,0 +1,38 @@
+[
+  {
+    "code": "US",
+    "country": "United States",
+    "title": "Morning coastal fog at Big Sur, California",
+    "photographer": "Mick Kirchman",
+    "sourcePage": "https://unsplash.com/photos/a-body-of-water-surrounded-by-a-lush-green-hillside-xlJhRJVqxoY",
+    "imageUrl": "https://images.unsplash.com/photo-1688603210667-337a5c99cdd7?fm=jpg&q=90&w=2400&fit=max",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "sourceEvidence": "Individual page identifies Big Sur, USA; Nikon D3300; published July 6, 2023; free under the standard Unsplash License.",
+    "notes": "Natural fog, blue water and coastal vegetation. Replaces a rejected heavily teal-graded coastal photograph."
+  },
+  {
+    "code": "MX",
+    "country": "Mexico",
+    "title": "Papel picado above a street in Jalatlaco, Oaxaca",
+    "photographer": "Anastasiia Malai",
+    "sourcePage": "https://unsplash.com/photos/a-street-lined-with-colorful-flags-and-buildings-8JNAY3kbfpI",
+    "imageUrl": "https://images.unsplash.com/photo-1686448921254-b326a7914d2f?fm=jpg&q=90&w=2400&fit=max",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "sourceEvidence": "Individual page identifies Jalatlaco, Oaxaca, Mexico; Sony ILCE-6000; published June 11, 2023; free under the standard Unsplash License.",
+    "notes": "Horizontal street photograph with real bunting, worn walls, overhead wires and a distant rider; no synthetic cleanup or added grading."
+  },
+  {
+    "code": "MA",
+    "country": "Morocco",
+    "title": "Jemaa el-Fnaa market, Marrakech",
+    "photographer": "CALIN STAN",
+    "sourcePage": "https://unsplash.com/photos/people-walking-on-street-during-daytime-7a_PHX91su8",
+    "imageUrl": "https://images.unsplash.com/photo-1587974928442-77dc3e0dba72?fm=jpg&q=90&w=2400&fit=max",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "sourceEvidence": "Individual page identifies Marrakech's Jama el Fna market; Fujifilm X-T1; published April 27, 2020; free under the standard Unsplash License.",
+    "notes": "A real market at sunset with people, stalls, satellite dishes and weathered buildings. The warmth comes from the source photograph, with no added app filter."
+  }
+]

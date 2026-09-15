@@ -1,0 +1,114 @@
+[
+  {
+    "code": "FR",
+    "country": "France",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of France. Scene: A quiet view across the Seine in Paris toward the Eiffel Tower at late golden hour, pale limestone quay, one classic riverboat, soft blue water, abundant open sky. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/FR.webp"
+  },
+  {
+    "code": "ES",
+    "country": "Spain",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Spain. Scene: A beautiful Mediterranean cove on Mallorca with clear turquoise water, pale limestone cliffs, pines and a tiny traditional whitewashed village; view from a coastal path in warm afternoon light. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/ES.webp"
+  },
+  {
+    "code": "IT",
+    "country": "Italy",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Italy. Scene: A beautiful view down to Positano on the Amalfi Coast, ochre and pastel houses stacked along the hillside, blue Mediterranean sea, flowering bougainvillea at one edge, late afternoon sun. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/IT.webp"
+  },
+  {
+    "code": "GR",
+    "country": "Greece",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Greece. Scene: A quiet Greek island harbor on Milos, whitewashed houses with a few blue shutters, a small wooden fishing boat on luminous sea, clear warm afternoon light. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/GR.webp"
+  },
+  {
+    "code": "PT",
+    "country": "Portugal",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Portugal. Scene: Lisbon from a hillside terrace with warm terracotta roofs and one historic yellow tram on a cobbled street, Tagus river in the distance, soft late-afternoon light. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/PT.webp"
+  },
+  {
+    "code": "GB",
+    "country": "United Kingdom",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of United Kingdom. Scene: London seen from the south bank of the Thames, Westminster Bridge and Elizabeth Tower on a bright softly overcast afternoon, a subtle red bus on the bridge, warm stone and muted blue river. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/GB.webp"
+  },
+  {
+    "code": "CH",
+    "country": "Switzerland",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Switzerland. Scene: The Lauterbrunnen valley in the Swiss Alps, green meadows and a small timber chalet, towering limestone cliffs and slender waterfall, clear blue sky and warm summer light. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/CH.webp"
+  },
+  {
+    "code": "TR",
+    "country": "Türkiye",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Türkiye. Scene: Istanbul seen from a ferry on the Bosphorus, elegant domes and minarets of the historic skyline, soft golden morning light and gently rippled blue water, one distant traditional ferry. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/TR.webp"
+  },
+  {
+    "code": "US",
+    "country": "United States",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of United States. Scene: Big Sur on California's Pacific coast, curving coastal cliffs with green coastal vegetation and the small distant Bixby Creek Bridge, deep blue Pacific, soft clear afternoon light. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/US.webp"
+  },
+  {
+    "code": "MX",
+    "country": "Mexico",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Mexico. Scene: San Miguel de Allende viewed along a quiet cobbled street with terracotta and ochre facades, the pink neo-gothic parish church in the distance, jacaranda blossoms, warm afternoon light. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/MX.webp"
+  },
+  {
+    "code": "JP",
+    "country": "Japan",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Japan. Scene: Mount Fuji seen across Lake Kawaguchi, a few cherry blossom branches framing the upper edge, clear lake, small traditional rooftops along the distant shore, luminous crisp spring morning. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/JP.webp"
+  },
+  {
+    "code": "TH",
+    "country": "Thailand",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Thailand. Scene: Railay beach in Krabi, Thailand: graceful limestone karsts rising over pale turquoise sea, one traditional wooden longtail boat at the shore, soft morning light and lush tropical vegetation. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/TH.webp"
+  },
+  {
+    "code": "ID",
+    "country": "Indonesia",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Indonesia. Scene: Bali's Jatiluwih rice terraces curving through lush green hills, a small traditional Balinese field shrine beside a path, distant volcano softly veiled in morning haze, golden green light. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/ID.webp"
+  },
+  {
+    "code": "VN",
+    "country": "Vietnam",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Vietnam. Scene: Hoi An in Vietnam from beside the Thu Bon river, ochre historic riverside buildings, a few colorful silk lanterns and one small wooden boat, soft late afternoon sunlight. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/VN.webp"
+  },
+  {
+    "code": "MA",
+    "country": "Morocco",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Morocco. Scene: Marrakech viewed from an airy courtyard doorway, pale terracotta arches and a small courtyard pool with a few palms, distant medina rooftops and Atlas mountains, warm early morning light. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/MA.webp"
+  },
+  {
+    "code": "SG",
+    "country": "Singapore",
+    "prompt": "Use case: photorealistic-natural. Asset type: landscape country postcard cover for the Trotter travel app, World Window theme. Generate one gorgeous, credible travel photograph of Singapore. Scene: Singapore's Marina Bay from across the water, recognizable Marina Bay Sands and the ArtScience Museum, soft tropical blue sky, lush greenery framing one side, late afternoon sunlight reflected on calm water. Style: refined photographic postcard with the quiet elegance of mid-century color travel photography; real architecture and geography, gently warm light, balanced rich blues, natural greens and warm stone, very fine film grain, crisp detail, sophisticated restrained color grading. Composition: landscape 3:2 photograph, full bleed, clear focal point and depth, composed to remain beautiful when cropped to a wide 1.75:1 postcard. No collage, no illustrations, no artificial border, no text, no lettering, no logos, no watermark, no paper texture, no oversaturation. Atmospheric but clear, not hazy or blurry. Output at 1536x1024 or larger landscape resolution.",
+    "generatedWith": "built-in image_gen",
+    "target": "mobile-v2/assets/world-window/dreams/countries/SG.webp"
+  }
+]

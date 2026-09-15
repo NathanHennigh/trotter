@@ -1,0 +1,760 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-09-08T21:40:37Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "node",
+      "id": 3811136836,
+      "lat": 38.6919367,
+      "lon": -9.2151838,
+      "tags": {
+        "artist_name": "Maria Leal da Costa",
+        "artwork_subject": "figurative",
+        "description": "No âmbito das comemorações do Centenário do Rotary Internacional (1905-2005) e por iniciativa do Rotary Clube de Lisboa Norte foi colocada, junto à Torre de Belém, uma réplica em bronze da referida Torre, à escala 1:50.",
+        "historic": "memorial",
+        "information": "tactile_model",
+        "material": "bronze",
+        "memorial": "sculpture",
+        "name": "Réplica da Torre de Belém",
+        "source": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "9_297",
+        "start_date": "2005",
+        "tourism": "information",
+        "website": "http://www.cm-lisboa.pt/equipamentos/equipamento/info/replica-da-torre-de-belem"
+      }
+    },
+    {
+      "type": "node",
+      "id": 4783523494,
+      "lat": 38.6951141,
+      "lon": -9.2144664,
+      "tags": {
+        "addr:housenumber": "172B",
+        "addr:street": "Rua Bartolomeu Dias",
+        "amenity": "pharmacy",
+        "contact:phone": "+351 218 685 264",
+        "dispensing": "yes",
+        "healthcare": "pharmacy",
+        "name": "Farmácia Torre de Belém"
+      }
+    },
+    {
+      "type": "node",
+      "id": 6793554270,
+      "lat": 35.7247892,
+      "lon": 139.7685576,
+      "tags": {
+        "name": "谷中",
+        "name:en": "Yanaka",
+        "name:es": "Yanaka",
+        "name:fr": "Yanaka",
+        "name:id": "Yanaka",
+        "name:ja": "谷中",
+        "name:ja-Hira": "やなか",
+        "name:ja-Latn": "Yanaka",
+        "place": "quarter",
+        "population": "8414",
+        "postal_code": "110-0001",
+        "wikidata": "Q11632597",
+        "wikipedia": "ja:谷中 (台東区)"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8359178996,
+      "lat": 35.695365,
+      "lon": 139.754275,
+      "tags": {
+        "name": "神田神保町三丁目",
+        "name:en": "Kanda-Jinbocho 3",
+        "name:fr": "Kanda-Jinbochō 3",
+        "name:id": "Kanda-Jinbocho 3",
+        "name:ja": "神田神保町三丁目",
+        "name:ja-Hira": "かんだじんぼうちょう3ちょうめ",
+        "name:ja-Latn": "Kanda-Jinbochō 3-chōme",
+        "place": "neighbourhood"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8359178997,
+      "lat": 35.696637,
+      "lon": 139.756454,
+      "tags": {
+        "name": "神田神保町二丁目",
+        "name:en": "Kanda-Jinbocho 2-chome",
+        "name:id": "Kanda-Jinbocho 2-chome",
+        "name:ja": "神田神保町二丁目",
+        "name:ja-Hira": "かんだじんぼうちょう2ちょうめ",
+        "place": "neighbourhood"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8359178998,
+      "lat": 35.696491,
+      "lon": 139.759073,
+      "tags": {
+        "name": "神田神保町一丁目",
+        "name:en": "Kanda-Jinbocho 1-chome",
+        "name:id": "Kanda-Jinbocho 1-chome",
+        "name:ja": "神田神保町一丁目",
+        "name:ja-Hira": "かんだじんぼうちょう1ちょうめ",
+        "place": "neighbourhood"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8373681392,
+      "lat": 35.7251953,
+      "lon": 139.7714782,
+      "tags": {
+        "name": "谷中七丁目",
+        "name:en": "Yanaka 7",
+        "name:fr": "Yanaka 7",
+        "name:id": "Yanaka 7",
+        "name:ja": "谷中七丁目",
+        "name:ja-Hira": "やなかななちょうめ",
+        "name:ja-Latn": "Yanaka 7-chōme",
+        "place": "neighbourhood"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8373681393,
+      "lat": 35.7222165,
+      "lon": 139.7698393,
+      "tags": {
+        "name": "谷中六丁目",
+        "name:en": "Yanaka 6",
+        "name:fr": "Yanaka 6",
+        "name:id": "Yanaka 6",
+        "name:ja": "谷中六丁目",
+        "name:ja-Hira": "やなかろくちょうめ",
+        "name:ja-Latn": "Yanaka 6-chōme",
+        "place": "neighbourhood"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8373681394,
+      "lat": 35.725596,
+      "lon": 139.7676802,
+      "tags": {
+        "name": "谷中五丁目",
+        "name:en": "Yanaka 5",
+        "name:fr": "Yanaka 5",
+        "name:id": "Yanaka 5",
+        "name:ja": "谷中五丁目",
+        "name:ja-Hira": "やなかごちょうめ",
+        "name:ja-Latn": "Yanaka 5-chōme",
+        "place": "neighbourhood"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8373681395,
+      "lat": 35.7225932,
+      "lon": 139.7673958,
+      "tags": {
+        "name": "谷中四丁目",
+        "name:en": "Yanaka 4",
+        "name:fr": "Yanaka 4",
+        "name:id": "Yanaka 4",
+        "name:ja": "谷中四丁目",
+        "name:ja-Hira": "やなかよんちょうめ",
+        "name:ja-Latn": "Yanaka 4-chōme",
+        "place": "neighbourhood"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8373681396,
+      "lat": 35.726835,
+      "lon": 139.7658348,
+      "tags": {
+        "name": "谷中三丁目",
+        "name:en": "Yanaka 3",
+        "name:fr": "Yanaka 3",
+        "name:id": "Yanaka 3",
+        "name:ja": "谷中三丁目",
+        "name:ja-Hira": "やなかさんちょうめ",
+        "name:ja-Latn": "Yanaka 3-chōme",
+        "place": "neighbourhood"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8373681397,
+      "lat": 35.7222535,
+      "lon": 139.7648451,
+      "tags": {
+        "name": "谷中二丁目",
+        "name:en": "Yanaka 2",
+        "name:fr": "Yanaka 2",
+        "name:id": "Yanaka 2",
+        "name:ja": "谷中二丁目",
+        "name:ja-Hira": "やなかにちょうめ",
+        "name:ja-Latn": "Yanaka 2-chōme",
+        "place": "neighbourhood"
+      }
+    },
+    {
+      "type": "node",
+      "id": 8373681398,
+      "lat": 35.7201227,
+      "lon": 139.767587,
+      "tags": {
+        "name": "谷中一丁目",
+        "name:en": "Yanaka 1",
+        "name:fr": "Yanaka 1",
+        "name:id": "Yanaka 1",
+        "name:ja": "谷中一丁目",
+        "name:ja-Hira": "やなかいちちょうめ",
+        "name:ja-Latn": "Yanaka 1-chōme",
+        "place": "neighbourhood"
+      }
+    },
+    {
+      "type": "node",
+      "id": 12839694105,
+      "lat": 38.691689,
+      "lon": -9.2159062,
+      "tags": {
+        "description": "Do terraço da torre tem-se ampla vista do estuário do Tejo e das suas margens, bem como de toda a zona de Belém e seus monumentos.",
+        "direction": "0-360",
+        "fee": "yes",
+        "height": "29.8",
+        "name": "Miradouro da Torre de Belém",
+        "source": "dadosabertos.cm-lisboa.pt",
+        "tourism": "viewpoint",
+        "wheelchair": "no"
+      }
+    },
+    {
+      "type": "node",
+      "id": 12842723933,
+      "lat": 38.6970056,
+      "lon": -9.2146601,
+      "tags": {
+        "bus": "yes",
+        "name": "Avenida da Torre de Belém",
+        "network": "Carris",
+        "operator": "Carris",
+        "public_transport": "stop_position",
+        "ref": "13213",
+        "short_name": "Av. Torre Belém"
+      }
+    },
+    {
+      "type": "node",
+      "id": 12842723934,
+      "lat": 38.6969902,
+      "lon": -9.2145507,
+      "tags": {
+        "bench": "no",
+        "bus": "yes",
+        "highway": "bus_stop",
+        "name": "Avenida da Torre de Belém",
+        "network": "Carris",
+        "network:wikidata": "Q1045108",
+        "network:wikipedia": "pt:Companhia Carris de Ferro de Lisboa",
+        "operator": "Carris",
+        "operator:wikidata": "Q1045108",
+        "operator:wikipedia": "pt:Companhia Carris de Ferro de Lisboa",
+        "public_transport": "platform",
+        "ref": "13213",
+        "route_ref": "723;79B",
+        "shelter": "no",
+        "short_name": "Av. Torre Belém"
+      }
+    },
+    {
+      "type": "node",
+      "id": 13674307491,
+      "lat": 35.6956696,
+      "lon": 139.7569835,
+      "tags": {
+        "name": "神田神保町",
+        "name:en": "Kanda-Jimbocho",
+        "name:es": "Kanda-Jimbocho",
+        "name:fr": "Kanda-Jimbōchō",
+        "name:id": "Kanda-Jimbocho",
+        "name:ja": "神田神保町",
+        "name:ja-Hira": "かんだじんぼうちょう",
+        "name:ja-Latn": "Kanda-Jimbōchō",
+        "name:ru": "Канда-Дзимботё",
+        "place": "quarter",
+        "postal_code": "101-0051",
+        "wikidata": "Q1689258"
+      }
+    },
+    {
+      "type": "way",
+      "id": 19652510,
+      "center": {
+        "lat": 38.6980808,
+        "lon": -9.214408
+      },
+      "tags": {
+        "description": "Toponímia: Instituições, Militar. Início: Avenida da Índia. Fim: Avenida do Restelo.",
+        "highway": "tertiary",
+        "lanes": "4",
+        "name": "Avenida da Torre de Belém",
+        "name:etymology:wikidata": "Q215003",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "296",
+        "start_date": "1945-08-20",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=296"
+      }
+    },
+    {
+      "type": "way",
+      "id": 22289794,
+      "center": {
+        "lat": 38.7066215,
+        "lon": -9.1416742
+      },
+      "tags": {
+        "description": "Início: Cais do Sodré. Fim: Praça do Comércio.",
+        "highway": "primary",
+        "lanes": "2",
+        "name": "Avenida da Ribeira das Naus",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "2529",
+        "start_date": "1948-06-25",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=2529"
+      }
+    },
+    {
+      "type": "way",
+      "id": 24341353,
+      "center": {
+        "lat": 38.6916021,
+        "lon": -9.2159192
+      },
+      "tags": {
+        "addr:city": "Lisboa",
+        "addr:housename": "Torre de Belém",
+        "addr:postcode": "1400-038",
+        "addr:street": "Avenida de Brasília",
+        "alt_name": "Torre de São Vicente de Belém",
+        "alt_name:it": "Torre di Betlemme",
+        "building": "fort",
+        "building:material": "limestone",
+        "charge": "15 EUR",
+        "description": "Monumento Nacional e Património Mundial da UNESCO é um belo exemplar da arquitectura militar em Portugal.Construída em honra do santo patrono de Lisboa,S. Vicente,no local onde estava ancorada a Grande Nau,que cruzava fogo com a fortaleza de S. Sebast",
+        "fee": "yes",
+        "heritage": "1",
+        "heritage:operator": "whc;pc",
+        "heritage:website": "https://whc.unesco.org/en/list/263",
+        "heritage:website:pc": "https://imovel.patrimoniocultural.gov.pt/detalhes.php?code=323060",
+        "heritage:website:sipa": "http://monumentos.pt/Site/APP_PagesUser/SIPA.aspx?id=4065",
+        "historic": "fort",
+        "int_name": "Tower of Belém",
+        "name": "Torre de Belém",
+        "name:de": "Turm von Belém",
+        "name:en": "Tower of Belém",
+        "name:es": "Torre de Belém",
+        "name:et": "Belémi torn",
+        "name:fr": "Tour de Belém",
+        "name:it": "Torre di Belém",
+        "name:ja": "ベレンの塔",
+        "name:ko": "벨렝탑",
+        "name:lb": "Tuerm vu Belém",
+        "name:nl": "Toren van Belém",
+        "name:pl": "Wieża Belém",
+        "name:pt": "Torre de Belém",
+        "name:ro": "Turnul din Belem",
+        "name:ru": "Башня Белем",
+        "name:zh": "貝倫塔",
+        "name:zh-Hans": "贝伦塔",
+        "official_name": "Torre de São Vicente",
+        "old_name": "Torre de São Vicente a Par de Belém",
+        "opening_hours": "Oct-Apr: Tu-Su 10:00-17:30; May-Sep: Tu-Su 10:00-18:30",
+        "pc:inscription_date": "1907",
+        "protection_title": "PM;MN",
+        "ref:ipa": "4065",
+        "ref:pc": "323060",
+        "ref:whc": "263bis-002",
+        "short_protection_title": "Património Mundial;Monumento Nacional",
+        "source": "dadosabertos.cm-lisboa.pt",
+        "source:name": "CICL",
+        "start_date": "1514..1520",
+        "tourism": "attraction",
+        "whc:criteria": "(iii),(vi)",
+        "whc:inscription_date": "1983",
+        "wheelchair": "no",
+        "wikidata": "Q215003",
+        "wikimedia_commons": "Category:Torre de Belém",
+        "wikipedia": "pt:Torre de Belém"
+      }
+    },
+    {
+      "type": "way",
+      "id": 54235991,
+      "center": {
+        "lat": 19.3492853,
+        "lon": -99.1636565
+      },
+      "tags": {
+        "landcover": "trees",
+        "leisure": "garden",
+        "name": "Plaza Jardín Centenario"
+      }
+    },
+    {
+      "type": "way",
+      "id": 98437596,
+      "center": {
+        "lat": 38.7065832,
+        "lon": -9.1373851
+      },
+      "tags": {
+        "cycleway": "shared_lane",
+        "description": "Início: Cais do Sodré. Fim: Praça do Comércio.",
+        "highway": "primary",
+        "lanes": "2",
+        "lit": "yes",
+        "maxspeed": "30",
+        "name": "Avenida da Ribeira das Naus",
+        "paving_stones:length": "0.3",
+        "paving_stones:shape": "square",
+        "sidewalk": "both",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "2529",
+        "start_date": "1948-06-25",
+        "surface": "paving_stones",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=2529"
+      }
+    },
+    {
+      "type": "way",
+      "id": 310530266,
+      "center": {
+        "lat": 38.7060535,
+        "lon": -9.1399017
+      },
+      "tags": {
+        "description": "Início: Cais do Sodré. Fim: Praça do Comércio.",
+        "highway": "primary",
+        "lanes": "2",
+        "lit": "yes",
+        "maxspeed": "30",
+        "name": "Avenida da Ribeira das Naus",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "2529",
+        "start_date": "1948-06-25",
+        "surface": "unhewn_cobblestone",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=2529"
+      }
+    },
+    {
+      "type": "way",
+      "id": 310530271,
+      "center": {
+        "lat": 38.7064065,
+        "lon": -9.1381186
+      },
+      "tags": {
+        "bridge": "yes",
+        "cycleway": "shared_lane",
+        "description": "Início: Cais do Sodré. Fim: Praça do Comércio.",
+        "highway": "primary",
+        "lanes": "2",
+        "layer": "1",
+        "lit": "yes",
+        "maxspeed": "30",
+        "maxweight:signed": "no",
+        "name": "Avenida da Ribeira das Naus",
+        "sidewalk": "both",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "2529",
+        "start_date": "1948-06-25",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=2529"
+      }
+    },
+    {
+      "type": "way",
+      "id": 373909289,
+      "center": {
+        "lat": 38.6943034,
+        "lon": -9.215309
+      },
+      "tags": {
+        "description": "Toponímia: Instituições, Militar. Início: Avenida da Índia. Fim: Avenida do Restelo.",
+        "highway": "tertiary",
+        "lanes": "4",
+        "name": "Avenida da Torre de Belém",
+        "name:etymology:wikidata": "Q215003",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "296",
+        "start_date": "1945-08-20",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=296"
+      }
+    },
+    {
+      "type": "way",
+      "id": 678710656,
+      "center": {
+        "lat": 38.7056445,
+        "lon": -9.1415062
+      },
+      "tags": {
+        "amenity": "cafe",
+        "building": "yes",
+        "name": "Quiosque Ribeira das Naus",
+        "opening_hours": "Tu-Th 00:00-01:00; Fr-Su,Mo 00:00-02:00; Mo-Su 10:00-24:00",
+        "outdoor_seating": "yes",
+        "shop": "kiosk",
+        "toilets": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 705748790,
+      "center": {
+        "lat": 38.705074,
+        "lon": -9.1423616
+      },
+      "tags": {
+        "area": "yes",
+        "man_made": "pier",
+        "name": "Cais da Ribeira das Naus"
+      }
+    },
+    {
+      "type": "way",
+      "id": 705748791,
+      "center": {
+        "lat": 38.7050854,
+        "lon": -9.1423993
+      },
+      "tags": {
+        "bridge": "yes",
+        "highway": "footway",
+        "layer": "1",
+        "man_made": "pier",
+        "name": "Cais da Ribeira das Naus",
+        "surface": "wood"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1029688294,
+      "center": {
+        "lat": 38.6951847,
+        "lon": -9.2150575
+      },
+      "tags": {
+        "description": "Toponímia: Instituições, Militar. Início: Avenida da Índia. Fim: Avenida do Restelo.",
+        "highway": "tertiary",
+        "lanes": "4",
+        "name": "Avenida da Torre de Belém",
+        "name:etymology:wikidata": "Q215003",
+        "oneway": "yes",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "296",
+        "start_date": "1945-08-20",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=296"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1029688295,
+      "center": {
+        "lat": 38.6948516,
+        "lon": -9.215145
+      },
+      "tags": {
+        "description": "Toponímia: Instituições, Militar. Início: Avenida da Índia. Fim: Avenida do Restelo.",
+        "highway": "tertiary",
+        "lanes": "4",
+        "name": "Avenida da Torre de Belém",
+        "name:etymology:wikidata": "Q215003",
+        "oneway": "yes",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "296",
+        "start_date": "1945-08-20",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=296"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1029688296,
+      "center": {
+        "lat": 38.6951858,
+        "lon": -9.2151051
+      },
+      "tags": {
+        "description": "Toponímia: Instituições, Militar. Início: Avenida da Índia. Fim: Avenida do Restelo.",
+        "highway": "tertiary",
+        "lanes": "4",
+        "name": "Avenida da Torre de Belém",
+        "name:etymology:wikidata": "Q215003",
+        "oneway": "yes",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "296",
+        "start_date": "1945-08-20",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=296"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1029859572,
+      "center": {
+        "lat": 38.6948527,
+        "lon": -9.2151901
+      },
+      "tags": {
+        "description": "Toponímia: Instituições, Militar. Início: Avenida da Índia. Fim: Avenida do Restelo.",
+        "highway": "tertiary",
+        "lanes": "4",
+        "name": "Avenida da Torre de Belém",
+        "name:etymology:wikidata": "Q215003",
+        "oneway": "yes",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "296",
+        "start_date": "1945-08-20",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=296"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1270762916,
+      "center": {
+        "lat": 38.6959034,
+        "lon": -9.2149186
+      },
+      "tags": {
+        "description": "Toponímia: Instituições, Militar. Início: Avenida da Índia. Fim: Avenida do Restelo.",
+        "highway": "tertiary",
+        "lanes": "4",
+        "name": "Avenida da Torre de Belém",
+        "name:etymology:wikidata": "Q215003",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "296",
+        "start_date": "1945-08-20",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=296"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1270762917,
+      "center": {
+        "lat": 38.6938588,
+        "lon": -9.2154172
+      },
+      "tags": {
+        "description": "Toponímia: Instituições, Militar. Início: Avenida da Índia. Fim: Avenida do Restelo.",
+        "highway": "tertiary",
+        "lanes": "4",
+        "name": "Avenida da Torre de Belém",
+        "name:etymology:wikidata": "Q215003",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "296",
+        "start_date": "1945-08-20",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=296"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1270762940,
+      "center": {
+        "lat": 38.7062863,
+        "lon": -9.1414999
+      },
+      "tags": {
+        "description": "Início: Cais do Sodré. Fim: Praça do Comércio.",
+        "highway": "primary",
+        "lanes": "2",
+        "lit": "yes",
+        "maxspeed": "30",
+        "maxweight:bus": "none",
+        "maxweight:conditional": "3.5 @ (08:00-20:00)",
+        "name": "Avenida da Ribeira das Naus",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "2529",
+        "start_date": "1948-06-25",
+        "surface": "unhewn_cobblestone",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=2529"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 3545322,
+      "center": {
+        "lat": 35.696477,
+        "lon": 139.7590641
+      },
+      "tags": {
+        "admin_level": "10",
+        "boundary": "administrative",
+        "name": "神田神保町一丁目",
+        "name:en": "Kanda-Jimbocho 1",
+        "name:ja": "神田神保町一丁目",
+        "place": "neighbourhood",
+        "sorting_name": "神田神保町1丁目",
+        "type": "boundary"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 3545323,
+      "center": {
+        "lat": 35.6966953,
+        "lon": 139.7563803
+      },
+      "tags": {
+        "admin_level": "10",
+        "boundary": "administrative",
+        "name": "神田神保町二丁目",
+        "name:en": "Kanda-Jimbocho 2",
+        "name:ja": "神田神保町二丁目",
+        "place": "neighbourhood",
+        "sorting_name": "神田神保町2丁目",
+        "type": "boundary"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 3545325,
+      "center": {
+        "lat": 35.6960667,
+        "lon": 139.7569419
+      },
+      "tags": {
+        "admin_level": "9",
+        "boundary": "administrative",
+        "name": "神田神保町",
+        "name:en": "Kanda-Jimbocho",
+        "name:es": "Kanda-Jimbocho",
+        "name:fr": "Kanda-Jimbōchō",
+        "name:ja": "神田神保町",
+        "name:ja-Hira": "かんだじんぼうちょう",
+        "name:ja-Latn": "Kanda-Jimbōchō",
+        "name:ru": "Канда-Дзимботё",
+        "place": "quarter",
+        "postal_code": "101-0051",
+        "type": "boundary",
+        "wikidata": "Q1689258",
+        "wikimedia_commons": "Category:Kanda-Jinbocho",
+        "wikipedia": "ja:神田神保町"
+      }
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+[
+  {
+    "country": "CH",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 546770
+  },
+  {
+    "country": "ES",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 616538
+  },
+  {
+    "country": "FR",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 412540
+  },
+  {
+    "country": "GB",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 367296
+  },
+  {
+    "country": "GR",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 451836
+  },
+  {
+    "country": "ID",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 500078
+  },
+  {
+    "country": "IT",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 527318
+  },
+  {
+    "country": "JP",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 387064
+  },
+  {
+    "country": "MA",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 388860
+  },
+  {
+    "country": "MX",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 594080
+  },
+  {
+    "country": "PT",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 559198
+  },
+  {
+    "country": "SG",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 400620
+  },
+  {
+    "country": "TH",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 429124
+  },
+  {
+    "country": "TR",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 379480
+  },
+  {
+    "country": "US",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 526076
+  },
+  {
+    "country": "VN",
+    "width": 1536,
+    "height": 1024,
+    "bytes": 483692
+  }
+]

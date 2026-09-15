@@ -1,0 +1,522 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-09-08T21:40:37Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    {
+      "type": "node",
+      "id": 1911337287,
+      "lat": 38.71863,
+      "lon": -9.132256,
+      "tags": {
+        "check_date": "2026-04-19",
+        "name": "Albergaria Senhora do Monte",
+        "tourism": "guest_house",
+        "wikidata": "Q111870753"
+      }
+    },
+    {
+      "type": "node",
+      "id": 9491134776,
+      "lat": 38.7058995,
+      "lon": -9.1413988,
+      "tags": {
+        "addr:city": "Lisboa",
+        "addr:street": "Avenida da Ribeira das Naus",
+        "amenity": "bicycle_rental",
+        "bicycle_rental": "docking_station",
+        "brand": "Gira",
+        "brand:wikidata": "Q65049332",
+        "brand:wikipedia": "en:Gira (bicycle rental)",
+        "capacity": "27",
+        "description": "Gira. Bicicletas de Lisboa",
+        "email": "gira@emel.pt",
+        "internet_access": "wlan",
+        "internet_access:fee": "no",
+        "name": "Bicicletas Gira Estação 209",
+        "network": "Gira",
+        "note": "Sistema de Bicicletas Públicas Partilhadas",
+        "official_name": "Gira 209 - Ribeira das Naus",
+        "opening_hours": "24/7",
+        "operator": "EMEL",
+        "operator:type": "private",
+        "payment:paypal": "yes",
+        "payment:wire_transfer": "yes",
+        "phone": "+351 211 163 060",
+        "ref": "209",
+        "website": "https://www.gira-bicicletasdelisboa.pt"
+      }
+    },
+    {
+      "type": "node",
+      "id": 11875228192,
+      "lat": 38.7198304,
+      "lon": -9.131688,
+      "tags": {
+        "name": "Escondidinho da Senhora do Monte",
+        "tourism": "apartment"
+      }
+    },
+    {
+      "type": "node",
+      "id": 11875228194,
+      "lat": 38.7197954,
+      "lon": -9.1321117,
+      "tags": {
+        "name": "Duplex Senhora Do Monte",
+        "tourism": "apartment"
+      }
+    },
+    {
+      "type": "way",
+      "id": 9262323,
+      "center": {
+        "lat": 38.7194513,
+        "lon": -9.1305183
+      },
+      "tags": {
+        "description": "Toponímia: Igrejas e Ermidas, Hagiotopónimo. Início: Rua da Graça. Fim: Calçada do Monte.",
+        "highway": "residential",
+        "lane_markings": "no",
+        "lit": "yes",
+        "maxspeed:type": "PT:urban",
+        "name": "Rua da Senhora do Monte",
+        "oneway": "yes",
+        "parking:lane:both": "parallel",
+        "parking:lane:both:parallel": "painted_area_only",
+        "sidewalk": "both",
+        "sidewalk:both:surface": "sett",
+        "smoothness": "intermediate",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "1430",
+        "start_date": "1903-12-18",
+        "surface": "sett",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=1430"
+      }
+    },
+    {
+      "type": "way",
+      "id": 22289794,
+      "center": {
+        "lat": 38.7066215,
+        "lon": -9.1416742
+      },
+      "tags": {
+        "description": "Início: Cais do Sodré. Fim: Praça do Comércio.",
+        "highway": "primary",
+        "lanes": "2",
+        "name": "Avenida da Ribeira das Naus",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "2529",
+        "start_date": "1948-06-25",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=2529"
+      }
+    },
+    {
+      "type": "way",
+      "id": 98437596,
+      "center": {
+        "lat": 38.7065832,
+        "lon": -9.1373851
+      },
+      "tags": {
+        "cycleway": "shared_lane",
+        "description": "Início: Cais do Sodré. Fim: Praça do Comércio.",
+        "highway": "primary",
+        "lanes": "2",
+        "lit": "yes",
+        "maxspeed": "30",
+        "name": "Avenida da Ribeira das Naus",
+        "paving_stones:length": "0.3",
+        "paving_stones:shape": "square",
+        "sidewalk": "both",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "2529",
+        "start_date": "1948-06-25",
+        "surface": "paving_stones",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=2529"
+      }
+    },
+    {
+      "type": "way",
+      "id": 171888103,
+      "center": {
+        "lat": 38.718806,
+        "lon": -9.1322664
+      },
+      "tags": {
+        "highway": "residential",
+        "lane_markings": "no",
+        "lit": "yes",
+        "maxspeed:type": "PT:urban",
+        "name": "Calçada da Senhora do Monte",
+        "oneway": "yes",
+        "sidewalk": "both",
+        "smoothness": "intermediate",
+        "surface": "sett"
+      }
+    },
+    {
+      "type": "way",
+      "id": 185492962,
+      "center": {
+        "lat": 38.719193,
+        "lon": -9.1323231
+      },
+      "tags": {
+        "addr:city": "Lisboa",
+        "addr:housenumber": "50",
+        "addr:street": "Rua da Senhora do Monte",
+        "amenity": "place_of_worship",
+        "building": "house",
+        "building:levels": "2",
+        "name": "Capela de Nossa Senhora do Monte",
+        "religion": "christian",
+        "roof:shape": "hipped"
+      }
+    },
+    {
+      "type": "way",
+      "id": 238326582,
+      "center": {
+        "lat": 38.719274,
+        "lon": -9.1324505
+      },
+      "tags": {
+        "addr:housename": "Capela de Nossa Senhora do Monte",
+        "addr:street": "Largo do Monte",
+        "alt_name": "Capelinha de São Gens",
+        "amenity": "place_of_worship",
+        "building": "chapel",
+        "denomination": "roman_catholic",
+        "description": "Erigida no Monte de S. Gens, esta capela data da reconquista cristã e assenta no local onde existiu o ermitério dos frades Agostinhos Calçados que, em 1291, passaram para o novo Convento da Graça. Reedificada após o terramoto de 1755...",
+        "name": "Capela de Nossa Senhora do Monte",
+        "religion": "christian",
+        "source": "dadosabertos.cm-lisboa.pt",
+        "source:name": "CICL",
+        "wheelchair": "no",
+        "wikidata": "Q9695644",
+        "wikimedia_commons": "Category:Capela de Nossa Senhora do Monte",
+        "wikipedia": "pt:Capela de Nossa Senhora do Monte (Lisboa)"
+      }
+    },
+    {
+      "type": "way",
+      "id": 310530266,
+      "center": {
+        "lat": 38.7060535,
+        "lon": -9.1399017
+      },
+      "tags": {
+        "description": "Início: Cais do Sodré. Fim: Praça do Comércio.",
+        "highway": "primary",
+        "lanes": "2",
+        "lit": "yes",
+        "maxspeed": "30",
+        "name": "Avenida da Ribeira das Naus",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "2529",
+        "start_date": "1948-06-25",
+        "surface": "unhewn_cobblestone",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=2529"
+      }
+    },
+    {
+      "type": "way",
+      "id": 310530271,
+      "center": {
+        "lat": 38.7064065,
+        "lon": -9.1381186
+      },
+      "tags": {
+        "bridge": "yes",
+        "cycleway": "shared_lane",
+        "description": "Início: Cais do Sodré. Fim: Praça do Comércio.",
+        "highway": "primary",
+        "lanes": "2",
+        "layer": "1",
+        "lit": "yes",
+        "maxspeed": "30",
+        "maxweight:signed": "no",
+        "name": "Avenida da Ribeira das Naus",
+        "sidewalk": "both",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "2529",
+        "start_date": "1948-06-25",
+        "surface": "asphalt",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=2529"
+      }
+    },
+    {
+      "type": "way",
+      "id": 526129020,
+      "center": {
+        "lat": 38.7191545,
+        "lon": -9.1327698
+      },
+      "tags": {
+        "addr:street": "Largo do Monte",
+        "alt_name": "Miradouro da Nossa Senhora do Monte",
+        "description": "Coroado pela capelinha de São Gens ou de Nossa Senhora do Monte, este é um dos miradouros mais elevados da cidade, com vista sobre o estuário do Tejo, a Igreja da Graça, o Castelo de São Jorge e o bairro da Mouraria. Dali ainda se avistam também a",
+        "direction": "S-N",
+        "landuse": "forest",
+        "leaf_cycle": "evergreen",
+        "leaf_type": "needleleaved",
+        "leisure": "park",
+        "name": "Miradouro Nossa Senhora do Monte",
+        "operator": "Câmara Municipal de Lisboa",
+        "operator:type": "government",
+        "operator:wikidata": "Q30255955",
+        "source": "dadosabertos.cm-lisboa.pt",
+        "taxon": "Pinus pinea",
+        "tourism": "viewpoint",
+        "wheelchair": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 678710656,
+      "center": {
+        "lat": 38.7056445,
+        "lon": -9.1415062
+      },
+      "tags": {
+        "amenity": "cafe",
+        "building": "yes",
+        "name": "Quiosque Ribeira das Naus",
+        "opening_hours": "Tu-Th 00:00-01:00; Fr-Su,Mo 00:00-02:00; Mo-Su 10:00-24:00",
+        "outdoor_seating": "yes",
+        "shop": "kiosk",
+        "toilets": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 705748790,
+      "center": {
+        "lat": 38.705074,
+        "lon": -9.1423616
+      },
+      "tags": {
+        "area": "yes",
+        "man_made": "pier",
+        "name": "Cais da Ribeira das Naus"
+      }
+    },
+    {
+      "type": "way",
+      "id": 705748791,
+      "center": {
+        "lat": 38.7050854,
+        "lon": -9.1423993
+      },
+      "tags": {
+        "bridge": "yes",
+        "highway": "footway",
+        "layer": "1",
+        "man_made": "pier",
+        "name": "Cais da Ribeira das Naus",
+        "surface": "wood"
+      }
+    },
+    {
+      "type": "way",
+      "id": 851584097,
+      "center": {
+        "lat": 38.7192834,
+        "lon": -9.1318876
+      },
+      "tags": {
+        "description": "Toponímia: Igrejas e Ermidas, Hagiotopónimo. Início: Rua da Graça. Fim: Calçada do Monte.",
+        "highway": "residential",
+        "lane_markings": "no",
+        "lit": "yes",
+        "maxspeed:type": "PT:urban",
+        "name": "Rua da Senhora do Monte",
+        "oneway": "yes",
+        "parking:both": "yes",
+        "parking:both:orientation": "parallel",
+        "parking:lane:both:parallel": "painted_area_only",
+        "sidewalk": "both",
+        "sidewalk:both:surface": "sett",
+        "smoothness": "intermediate",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "1430",
+        "start_date": "1903-12-18",
+        "surface": "sett",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=1430"
+      }
+    },
+    {
+      "type": "way",
+      "id": 851808646,
+      "center": {
+        "lat": 38.7186339,
+        "lon": -9.1319788
+      },
+      "tags": {
+        "highway": "service",
+        "lit": "yes",
+        "maxspeed:type": "PT:urban",
+        "name": "Calçada da Senhora do Monte",
+        "oneway": "no",
+        "sidewalk": "no",
+        "smoothness": "intermediate",
+        "surface": "sett"
+      }
+    },
+    {
+      "type": "way",
+      "id": 851808647,
+      "center": {
+        "lat": 38.7188309,
+        "lon": -9.131876
+      },
+      "tags": {
+        "highway": "service",
+        "lit": "yes",
+        "maxspeed:type": "PT:urban",
+        "name": "Calçada da Senhora do Monte",
+        "oneway": "no",
+        "smoothness": "very_bad",
+        "surface": "sett"
+      }
+    },
+    {
+      "type": "way",
+      "id": 851808648,
+      "center": {
+        "lat": 38.7186969,
+        "lon": -9.1319416
+      },
+      "tags": {
+        "highway": "service",
+        "layer": "-1",
+        "lit": "yes",
+        "maxheight": "3.8",
+        "maxheight:signed": "no",
+        "maxspeed:type": "PT:urban",
+        "name": "Calçada da Senhora do Monte",
+        "oneway": "no",
+        "sidewalk": "no",
+        "smoothness": "very_bad",
+        "source:maxheight": "ARCore",
+        "surface": "sett",
+        "tunnel": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 851808675,
+      "center": {
+        "lat": 38.7179402,
+        "lon": -9.1323198
+      },
+      "tags": {
+        "highway": "residential",
+        "lit": "yes",
+        "maxspeed:type": "PT:urban",
+        "name": "Calçada da Senhora do Monte",
+        "oneway": "yes",
+        "sidewalk": "both",
+        "smoothness": "bad",
+        "surface": "sett"
+      }
+    },
+    {
+      "type": "way",
+      "id": 851808676,
+      "center": {
+        "lat": 38.7190908,
+        "lon": -9.1325522
+      },
+      "tags": {
+        "description": "Toponímia: Igrejas e Ermidas, Hagiotopónimo. Início: Rua da Graça. Fim: Calçada do Monte.",
+        "highway": "residential",
+        "lane_markings": "no",
+        "lit": "yes",
+        "maxspeed:type": "PT:urban",
+        "name": "Rua da Senhora do Monte",
+        "oneway": "no",
+        "parking:lane:both": "parallel",
+        "parking:lane:both:parallel": "painted_area_only",
+        "sidewalk": "both",
+        "smoothness": "good",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "1430",
+        "start_date": "1903-12-18",
+        "surface": "sett",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=1430"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1080492142,
+      "center": {
+        "lat": 38.7184187,
+        "lon": -9.1316236
+      },
+      "tags": {
+        "highway": "residential",
+        "lane_markings": "no",
+        "lit": "yes",
+        "maxspeed:type": "PT:urban",
+        "name": "Calçada da Senhora do Monte",
+        "oneway": "yes",
+        "sidewalk": "both",
+        "sidewalk:both:surface": "sett",
+        "smoothness": "bad",
+        "source:width": "ARCore",
+        "surface": "sett",
+        "width": "2.9"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1080492144,
+      "center": {
+        "lat": 38.718148,
+        "lon": -9.131127
+      },
+      "tags": {
+        "highway": "residential",
+        "lanes": "1",
+        "lit": "yes",
+        "maxspeed:type": "PT:urban",
+        "name": "Calçada da Senhora do Monte",
+        "oneway": "yes",
+        "sidewalk": "both",
+        "sidewalk:both:surface": "sett",
+        "smoothness": "excellent",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "way",
+      "id": 1270762940,
+      "center": {
+        "lat": 38.7062863,
+        "lon": -9.1414999
+      },
+      "tags": {
+        "description": "Início: Cais do Sodré. Fim: Praça do Comércio.",
+        "highway": "primary",
+        "lanes": "2",
+        "lit": "yes",
+        "maxspeed": "30",
+        "maxweight:bus": "none",
+        "maxweight:conditional": "3.5 @ (08:00-20:00)",
+        "name": "Avenida da Ribeira das Naus",
+        "source:description": "dadosabertos.cm-lisboa.pt",
+        "source:pkey": "2529",
+        "start_date": "1948-06-25",
+        "surface": "unhewn_cobblestone",
+        "website": "https://revelar.lisboa.pt/explorar/toponimia/detalhe?tx_toponimia_pi1%5Baction%5D=show&tx_toponimia_pi1%5Bcontroller%5D=Toponimia&tx_toponimia_pi1%5Btopid%5D=2529"
+      }
+    }
+  ]
+}

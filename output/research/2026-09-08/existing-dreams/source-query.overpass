@@ -1,0 +1,8 @@
+[out:json][timeout:40];
+(
+ nwr["name"~"Torre de Belém|Ribeira das Naus|Miradouro da Senhora do Monte",i](38.68,-9.23,38.74,-9.10);
+ nwr["name"~"谷中|神保町|Jimbocho|Yanaka",i]["place"](35.68,139.73,35.75,139.79);
+ nwr["name:en"~"Jimbocho|Yanaka",i]["place"](35.68,139.73,35.75,139.79);
+ nwr["name"~"Jardín Centenario|Jardin Centenario",i](19.33,-99.18,19.37,-99.14);
+);
+out center tags;

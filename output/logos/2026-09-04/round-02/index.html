@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Trotter — Logo explorations, round two</title>
+  <style>
+    :root { --paper:#f4f0e7; --ink:#183c3e; --muted:#687977; --line:#d5dcd2; --gold:#b48c3c; --card:#ece9e0; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:"Segoe UI",Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+    main { max-width:1440px; margin:auto; padding:42px 52px 32px; }
+    a { color:inherit; text-underline-offset:4px; }
+    a:focus-visible { outline:2px solid var(--ink); outline-offset:5px; }
+    .topline { display:flex; justify-content:space-between; align-items:center; gap:18px; margin-bottom:44px; }
+    .brand { margin:0; font-family:Georgia,"Times New Roman",serif; font-size:27px; letter-spacing:-.035em; }
+    .round { margin-left:14px; color:var(--muted); font-family:"Segoe UI",Arial,sans-serif; font-size:10px; font-weight:500; letter-spacing:.12em; text-transform:uppercase; }
+    nav { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:22px; font-size:12px; }
+    header { padding-bottom:32px; border-bottom:1px solid var(--ink); }
+    .eyebrow { margin:0 0 15px; color:var(--muted); font-size:10px; font-weight:600; letter-spacing:.18em; text-transform:uppercase; }
+    h1 { margin:0; font-family:Georgia,"Times New Roman",serif; font-size:clamp(42px,5.2vw,74px); font-weight:normal; line-height:1.04; letter-spacing:-.045em; }
+    .intro { max-width:660px; margin:22px 0 0; color:var(--muted); font-size:14px; line-height:1.65; }
+    .overview { display:flex; flex-wrap:wrap; align-items:baseline; gap:12px 32px; padding:18px 0; color:var(--muted); font-size:11px; }
+    .overview b { color:var(--ink); font-weight:600; }
+    .overview .hint { margin-left:auto; }
+    .family { margin-top:34px; }
+    .section-head { display:flex; justify-content:space-between; align-items:baseline; gap:18px; margin-bottom:18px; }
+    h2 { margin:0; font-family:Georgia,"Times New Roman",serif; font-size:29px; font-weight:normal; letter-spacing:-.025em; }
+    .family-number { display:inline-block; margin-right:12px; color:var(--gold); font-family:"Segoe UI",Arial,sans-serif; font-size:12px; font-weight:600; letter-spacing:.03em; vertical-align:middle; }
+    .section-note { margin:0; color:var(--muted); font-size:11px; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:22px; }
+    figure { min-width:0; margin:0; }
+    .art { display:block; aspect-ratio:1; overflow:hidden; background:var(--card); border:1px solid rgba(24,60,62,.1); border-radius:3px; }
+    .art img { display:block; width:100%; height:100%; object-fit:contain; transition:transform .24s ease; }
+    .art:hover img { transform:scale(1.025); }
+    figcaption { padding:14px 1px 0; }
+    .lineage { display:flex; align-items:center; gap:7px; margin:0 0 8px; color:var(--muted); font-size:9px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
+    .tag { padding:4px 6px; border:1px solid var(--line); border-radius:2px; color:var(--ink); line-height:1; }
+    .tag.original { background:var(--ink); border-color:var(--ink); color:var(--paper); }
+    h3 { margin:0 0 5px; font-size:15px; font-weight:600; line-height:1.3; }
+    .caption { margin:0; color:var(--muted); font-size:12px; line-height:1.5; }
+    .separator { height:1px; margin-top:34px; background:var(--line); }
+    .more { margin-top:40px; }
+    .more .grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+    footer { display:flex; justify-content:space-between; flex-wrap:wrap; gap:18px; margin-top:45px; padding-top:20px; border-top:1px solid var(--ink); color:var(--muted); font-size:11px; line-height:1.5; }
+    footer .links { display:flex; flex-wrap:wrap; gap:22px; }
+    @media (max-width:1000px) { main { padding:30px 28px; } .grid { gap:16px; } .more .grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:28px 16px; } .section-head { align-items:flex-start; flex-direction:column; gap:8px; } h2 { font-size:27px; } }
+    @media (max-width:680px) { main { padding:26px 20px; } .topline { align-items:flex-start; margin-bottom:34px; } nav { max-width:170px; gap:12px 16px; font-size:11px; } .round { display:block; margin:5px 0 0; } h1 { font-size:43px; } .intro { font-size:13px; } .overview { gap:10px 18px; } .overview .hint { width:100%; margin-left:0; } .grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:25px 14px; } .grid > figure:first-child { grid-column:1 / -1; max-width:72%; width:100%; margin:auto; } .more .grid > figure:first-child { grid-column:auto; max-width:none; } .family { margin-top:28px; } h3 { font-size:14px; } .lineage { flex-wrap:wrap; font-size:8px; } .caption { font-size:11px; } }
+    @media (max-width:390px) { h1 { font-size:37px; } .grid { grid-template-columns:1fr; } .grid > figure:first-child { max-width:none; } .more .grid { grid-template-columns:1fr; } }
+    @media (prefers-reduced-motion:reduce) { .art img { transition:none; } }
+    @media print { main { padding:0; } .topline { margin-bottom:24px; } nav, .hint, footer .links { display:none; } h1 { font-size:45px; } .family { break-inside:avoid; } .grid { grid-template-columns:repeat(3,minmax(0,1fr)); } .more .grid { grid-template-columns:repeat(4,minmax(0,1fr)); } .art:hover img { transform:none; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topline">
+      <p class="brand">Trotter <span class="round">Logo explorations · Round 02</span></p>
+      <nav aria-label="Exploration resources"><a href="../index.html">First round</a><a href="prompts.md">Generation prompts</a><a href="../trotter-logo-round-02.zip" download>Download collection ↗</a></nav>
+    </div>
+    <header>
+      <p class="eyebrow">Developing the favorites</p>
+      <h1>Four favorites.<br>Twelve new directions.</h1>
+      <p class="intro">The four selected marks, each paired with two new iterations. Four additional ideas explore the same midcentury travel spirit.</p>
+    </header>
+    <div class="overview"><span><b>04</b> kept originals</span><span><b>08</b> family iterations</span><span><b>04</b> more ideas</span><span class="hint">Select any image to view full size ↗</span></div>
+
+    <section class="family" aria-labelledby="family-06">
+      <div class="section-head"><h2 id="family-06"><span class="family-number">06</span>Sunrise stride</h2><p class="section-note">The runner and the sun, in three expressions.</p></div>
+      <div class="grid">
+        <figure><a class="art" href="06-sunrise-stride.png" aria-label="View original 06 Sunrise stride full size"><img src="06-sunrise-stride.png" alt="Original 06 Sunrise stride logo"></a><figcaption><p class="lineage"><span class="tag original">Kept original</span><span>06</span></p><h3>Sunrise stride</h3><p class="caption">The selected starting point.</p></figcaption></figure>
+        <figure><a class="art" href="06a-lifted-stride.png" aria-label="View iteration 06A Lifted stride full size"><img src="06a-lifted-stride.png" alt="06A Lifted stride, an iteration of Sunrise stride"></a><figcaption><p class="lineage"><span class="tag">Iteration A</span><span>06 → 06A</span></p><h3>Lifted stride</h3><p class="caption">A lighter, lifted running gesture.</p></figcaption></figure>
+        <figure><a class="art" href="06b-sun-cut.png" aria-label="View iteration 06B Sun cut full size"><img src="06b-sun-cut.png" alt="06B Sun cut, an iteration of Sunrise stride"></a><figcaption><p class="lineage"><span class="tag">Iteration B</span><span>06 → 06B</span></p><h3>Sun cut</h3><p class="caption">The figure cut into a sun emblem.</p></figcaption></figure>
+      </div>
+    </section>
+    <div class="separator" aria-hidden="true"></div>
+
+    <section class="family" aria-labelledby="family-10">
+      <div class="section-head"><h2 id="family-10"><span class="family-number">10</span>Traveling T</h2><p class="section-note">An initial shaped by forward motion.</p></div>
+      <div class="grid">
+        <figure><a class="art" href="10-traveling-t.png" aria-label="View original 10 Traveling T full size"><img src="10-traveling-t.png" alt="Original 10 Traveling T logo"></a><figcaption><p class="lineage"><span class="tag original">Kept original</span><span>10</span></p><h3>Traveling T</h3><p class="caption">The selected starting point.</p></figcaption></figure>
+        <figure><a class="art" href="10a-compact-t.png" aria-label="View iteration 10A Compact T full size"><img src="10a-compact-t.png" alt="10A Compact T, an iteration of Traveling T"></a><figcaption><p class="lineage"><span class="tag">Iteration A</span><span>10 → 10A</span></p><h3>Compact T</h3><p class="caption">A tighter, more concentrated initial.</p></figcaption></figure>
+        <figure><a class="art" href="10b-orbit-t.png" aria-label="View iteration 10B Orbit T full size"><img src="10b-orbit-t.png" alt="10B Orbit T, an iteration of Traveling T"></a><figcaption><p class="lineage"><span class="tag">Iteration B</span><span>10 → 10B</span></p><h3>Orbit T</h3><p class="caption">The initial meets a circular journey.</p></figcaption></figure>
+      </div>
+    </section>
+    <div class="separator" aria-hidden="true"></div>
+
+    <section class="family" aria-labelledby="family-11">
+      <div class="section-head"><h2 id="family-11"><span class="family-number">11</span>Winged foot</h2><p class="section-note">A travel symbol with a sense of flight.</p></div>
+      <div class="grid">
+        <figure><a class="art" href="11-winged-foot.png" aria-label="View original 11 Winged foot full size"><img src="11-winged-foot.png" alt="Original 11 Winged foot logo"></a><figcaption><p class="lineage"><span class="tag original">Kept original</span><span>11</span></p><h3>Winged foot</h3><p class="caption">The selected starting point.</p></figcaption></figure>
+        <figure><a class="art" href="11a-free-flight.png" aria-label="View iteration 11A Free flight full size"><img src="11a-free-flight.png" alt="11A Free flight, an iteration of Winged foot"></a><figcaption><p class="lineage"><span class="tag">Iteration A</span><span>11 → 11A</span></p><h3>Free flight</h3><p class="caption">An open, flowing take on the wing.</p></figcaption></figure>
+        <figure><a class="art" href="11b-wing-cut.png" aria-label="View iteration 11B Wing cut full size"><img src="11b-wing-cut.png" alt="11B Wing cut, an iteration of Winged foot"></a><figcaption><p class="lineage"><span class="tag">Iteration B</span><span>11 → 11B</span></p><h3>Wing cut</h3><p class="caption">A wing reduced to bold cut shapes.</p></figcaption></figure>
+      </div>
+    </section>
+    <div class="separator" aria-hidden="true"></div>
+
+    <section class="family" aria-labelledby="family-12">
+      <div class="section-head"><h2 id="family-12"><span class="family-number">12</span>Globe trot</h2><p class="section-note">A traveler with the world in reach.</p></div>
+      <div class="grid">
+        <figure><a class="art" href="12-globe-trot.png" aria-label="View original 12 Globe trot full size"><img src="12-globe-trot.png" alt="Original 12 Globe trot logo"></a><figcaption><p class="lineage"><span class="tag original">Kept original</span><span>12</span></p><h3>Globe trot</h3><p class="caption">The selected starting point.</p></figcaption></figure>
+        <figure><a class="art" href="12a-light-footed.png" aria-label="View iteration 12A Light footed full size"><img src="12a-light-footed.png" alt="12A Light footed, an iteration of Globe trot"></a><figcaption><p class="lineage"><span class="tag">Iteration A</span><span>12 → 12A</span></p><h3>Light footed</h3><p class="caption">A more buoyant globe-trotting gesture.</p></figcaption></figure>
+        <figure><a class="art" href="12b-meridian-stride.png" aria-label="View iteration 12B Meridian stride full size"><img src="12b-meridian-stride.png" alt="12B Meridian stride, an iteration of Globe trot"></a><figcaption><p class="lineage"><span class="tag">Iteration B</span><span>12 → 12B</span></p><h3>Meridian stride</h3><p class="caption">The globe's curve flows into its stride.</p></figcaption></figure>
+      </div>
+    </section>
+    <div class="separator" aria-hidden="true"></div>
+
+    <section class="more" aria-labelledby="more-ideas">
+      <div class="section-head"><h2 id="more-ideas">More ideas</h2><p class="section-note">Four fresh concepts in the same visual family.</p></div>
+      <div class="grid">
+        <figure><a class="art" href="13-world-traveler.png" aria-label="View new idea 13 World traveler full size"><img src="13-world-traveler.png" alt="New idea 13 World traveler logo"></a><figcaption><p class="lineage"><span class="tag">New idea</span><span>13</span></p><h3>World traveler</h3><p class="caption">A traveler and a world of possibility.</p></figcaption></figure>
+        <figure><a class="art" href="14-winged-world.png" aria-label="View new idea 14 Winged world full size"><img src="14-winged-world.png" alt="New idea 14 Winged world logo"></a><figcaption><p class="lineage"><span class="tag">New idea</span><span>14</span></p><h3>Winged world</h3><p class="caption">A globe with the spirit of flight.</p></figcaption></figure>
+        <figure><a class="art" href="15-flight-path-t.png" aria-label="View new idea 15 Flight path T full size"><img src="15-flight-path-t.png" alt="New idea 15 Flight path T logo"></a><figcaption><p class="lineage"><span class="tag">New idea</span><span>15</span></p><h3>Flight path T</h3><p class="caption">A route becomes a Trotter initial.</p></figcaption></figure>
+        <figure><a class="art" href="16-sun-trot.png" aria-label="View new idea 16 Sun trot full size"><img src="16-sun-trot.png" alt="New idea 16 Sun trot logo"></a><figcaption><p class="lineage"><span class="tag">New idea</span><span>16</span></p><h3>Sun trot</h3><p class="caption">A new stride through a solar emblem.</p></figcaption></figure>
+      </div>
+    </section>
+    <footer><span>Trotter · Logo explorations · Round 02</span><div class="links"><a href="../index.html">First round</a><a href="prompts.md">Generation prompts</a><a href="../trotter-logo-round-02.zip" download>Download collection ↗</a></div></footer>
+  </main>
+</body>
+</html>
