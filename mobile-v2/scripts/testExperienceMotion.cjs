@@ -42,6 +42,7 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
         }; return animation;
       },
       divide: (left, right) => ({ operator: 'divide', left, right }),
+      subtract: (left, right) => ({ operator: 'subtract', left, right }),
       sequence(children) {
         let active, cancelled = false, done = false, callback;
         const complete = finished => { if (!done) { done = true; callback?.({ finished }); } };
@@ -104,6 +105,7 @@ const ghost = tree => byId(tree, 'wallet-source-cover');
 function sampled(value, progress) {
   if (typeof value === 'number') return value;
   if (value.operator === 'divide') return sampled(value.left, progress) / sampled(value.right, progress);
+  if (value.operator === 'subtract') return sampled(value.left, progress) - sampled(value.right, progress);
   if (value.inputRange) {
     const amount = sampled(value.parent, progress), input = value.inputRange, output = value.outputRange;
     let index = 0;
@@ -165,12 +167,40 @@ test('wallet entry waits for native layout and two painted frames, then lifts be
   assert.equal(ghost(tree).props.pointerEvents, 'none');
   assert.equal(ghost(tree).props.importantForAccessibility, 'no-hide-descendants');
   assert.equal(sampled(flatten(ghost(tree).props.style).opacity, .22), 1);
-  assert.equal(sampled(flatten(byId(tree, 'wallet-popup-content').props.style).opacity, .22), 0);
+  assert.equal(sampled(flatten(byId(tree, 'wallet-popup-content').props.style).opacity, .22), 1);
+  assert.equal(sampled(flatten(byId(tree, 'wallet-reveal-curtain').props.style).opacity, .22), 1);
   lift.finish(); assert.equal(env.animations.length, 2);
   const opening = env.animations[1]; assert.equal(opening.config.toValue, 1); assert.equal(opening.config.duration, 245);
   assert.equal(opening.config.useNativeDriver, true); assert.equal(opening.value.value, .22);
   opening.finish(); assert.equal(sampled(flatten(ghost(tree).props.style).opacity), 0);
   assert.equal(sampled(flatten(byId(tree, 'wallet-popup-content').props.style).opacity), 1);
+  assert.equal(sampled(flatten(byId(tree, 'wallet-reveal-curtain').props.style).opacity), 0);
+  h.dispose();
+});
+
+test('opaque sibling curtain allows first paint while preserving the blue-paper reveal composition', async () => {
+  const env = environment(); await env.ready(); const h = env.mount(surface(env));
+  const tree = h.render(props()), content = byId(tree, 'wallet-popup-content'), curtain = byId(tree, 'wallet-reveal-curtain');
+  const clip = nodes(tree).find(node => node.props?.children?.includes(content));
+  assert(clip.props.children.indexOf(content) < clip.props.children.indexOf(curtain), 'Curtain paints after the itinerary as a sibling');
+  assert.equal(flatten(content.props.style).opacity, 1, 'Native SVGs must be eligible to draw from the first paint');
+  assert.equal(curtain.props.pointerEvents, 'none'); assert.equal(curtain.props.accessible, false);
+  assert.equal(curtain.props.importantForAccessibility, 'no-hide-descendants');
+  const curtainStyle = flatten(curtain.props.style);
+  assert.equal(curtainStyle.backgroundColor, flatten(movingSurface(tree).props.style).backgroundColor);
+  for (const edge of ['top', 'left', 'right', 'bottom']) assert.equal(curtainStyle[edge], 0);
+  assert.equal(curtainStyle.position, 'absolute');
+  const blue = [0x42, 0x74, 0x94];
+  for (let step = 0; step <= 1000; step++) {
+    const progress = step / 1000, reveal = Math.max(0, Math.min(1, (progress - .34) / (.56 - .34)));
+    const veil = sampled(curtainStyle.opacity, progress);
+    assert(Math.abs(veil - (1 - reveal)) < 1e-12);
+    for (const pixel of [[248, 246, 237], [49, 93, 119], [0, 0, 0]]) for (let channel = 0; channel < 3; channel++) {
+      const previous = pixel[channel] * reveal + blue[channel] * (1 - reveal);
+      const current = blue[channel] * veil + pixel[channel] * (1 - veil);
+      assert(Math.abs(previous - current) < 1e-10, 'Changing layer order must not change the displayed color');
+    }
+  }
   h.dispose();
 });
 
@@ -248,6 +278,7 @@ test('reduced motion exposes real paper immediately and closes without lift or s
   assert.deepEqual(flatten(movingSurface(tree).props.style).transform, []);
   const content = flatten(byId(tree, 'wallet-popup-content').props.style);
   assert.deepEqual(content.transform, []); assert.equal(content.opacity, 1); assert.equal(env.frames.size, 0);
+  assert.equal(flatten(byId(tree, 'wallet-reveal-curtain').props.style).opacity, 0);
   tree = h.render({ ...base, closing: true }); assert.equal(env.animations.at(-1).config.duration, 0);
   env.animations.at(-1).finish(); assert.equal(closes, 1); h.dispose();
   const paper = env.mount(env.motion.PaperReveal); const rendered = paper.render({ children: 'Paper' });
@@ -296,7 +327,8 @@ for (const dimensions of [
     for (const key of ['translateX', 'translateY', 'scaleX', 'scaleY']) assert(Number.isFinite(sampled(transform(tree, 'wallet-popup-panel', key), progress)));
     const sy = sampled(scaleY, progress); assert(sy > 0);
     assert(Math.abs(sy * sampled(inverseY, progress) - 1) < 1e-12, 'Native type/map height must remain unscaled');
-    const contentAlpha = sampled(flatten(byId(tree, 'wallet-popup-content').props.style).opacity, progress);
+    assert.equal(sampled(flatten(byId(tree, 'wallet-popup-content').props.style).opacity, progress), 1);
+    const contentAlpha = 1 - sampled(flatten(byId(tree, 'wallet-reveal-curtain').props.style).opacity, progress);
     const coverAlpha = sampled(flatten(ghost(tree).props.style).opacity, progress);
     const summaryAlpha = sampled(ghost(tree).props.children[0].props.bodyOpacity, progress) * coverAlpha;
     assert.equal(summaryAlpha * contentAlpha, 0, 'Coupon text and route-map text never overlap during the handoff');
@@ -323,6 +355,7 @@ test('absent, invalid or fully offscreen sources use finite nearby reveal geomet
     const tree = h.render(props({ origin })); assert.equal(ghost(tree), undefined);
     assert.equal(sampled(transform(tree, 'wallet-popup-panel', 'translateY'), 0), 34);
     assert.equal(sampled(flatten(byId(tree, 'wallet-popup-content').props.style).opacity, 0), 1);
+    assert.equal(sampled(flatten(byId(tree, 'wallet-reveal-curtain').props.style).opacity, 0), 0);
     paintEntry(h, env, tree); assert.equal(env.animations.length, 1); assert.equal(env.animations[0].config.toValue, 1);
     h.dispose();
   }

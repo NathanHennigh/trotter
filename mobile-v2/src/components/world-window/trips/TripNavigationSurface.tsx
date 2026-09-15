@@ -66,7 +66,7 @@ export function TripNavigationSurface({ origin, closing, onClosed, onRequestClos
   const translateY = progress.interpolate({ inputRange: frames, outputRange: [dy, dy - (anchored ? 22 : 0), 0] });
   const scaleX = progress.interpolate({ inputRange: frames, outputRange: [source.width / target.width, source.width / target.width, 1] });
   const scaleY = progress.interpolate({ inputRange: frames, outputRange: [source.height / target.height, source.height / target.height, 1] });
-  const detailOpacity = progress.interpolate({ inputRange: [0, .34, .56, 1], outputRange: [anchored ? 0 : 1, anchored ? 0 : 1, 1, 1] });
+  const detailReveal = progress.interpolate({ inputRange: [0, .34, .56, 1], outputRange: [anchored ? 0 : 1, anchored ? 0 : 1, 1, 1] });
   const coverOpacity = progress.interpolate({ inputRange: [0, .34, .56, 1], outputRange: [1, 1, 0, 0] });
   const summaryOpacity = progress.interpolate({ inputRange: [0, .22, .34, 1], outputRange: [1, 1, 0, 0] });
 
@@ -83,11 +83,16 @@ export function TripNavigationSurface({ origin, closing, onClosed, onRequestClos
           transform: reduced ? [] : [{ translateX }, { translateY }, { scaleX }, { scaleY }] }]}>
         <View style={styles.paperClip}>
           <Animated.View testID="wallet-popup-content" style={{ width: target.width, height: target.height,
-            transformOrigin: "top left", opacity: reduced ? 1 : detailOpacity,
+            transformOrigin: "top left", opacity: 1,
             // Grow the clipping surface without stretching the type or map vertically.
             transform: reduced ? [] : [{ scaleY: Animated.divide(1, scaleY) }] }}>
             {children}
           </Animated.View>
+          {/* Paint native SVGs behind blue paper before revealing them, rather than first rasterizing mid-turn. */}
+          <Animated.View testID="wallet-reveal-curtain" pointerEvents="none" accessible={false}
+            accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+            style={[StyleSheet.absoluteFill, { backgroundColor: walletColors.blue,
+              opacity: reduced ? 0 : Animated.subtract(1, detailReveal) }]} />
         </View>
       </Animated.View>
       {anchored && !reduced && capturedOrigin?.wallet && (
