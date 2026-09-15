@@ -3,6 +3,19 @@ import { ExpoTextureLoader } from '../../lib/expoThree';
 
 function cancelled() { const error = new Error('Globe initialization cancelled'); error.name = 'AbortError'; return error; }
 
+/** Keep useful native/JS failure text without logging asset paths, URLs or credentials. */
+export function globeFailureDetails(error: unknown) {
+  const name = error instanceof Error && ['Error', 'TypeError', 'ReferenceError', 'RangeError', 'SyntaxError'].includes(error.name) ? error.name : 'NativeError';
+  const message = (error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown graphics failure')
+    .replace(/(?:https?|file|content|asset|ph):\/\/[^\s)]+/gi, '[uri]')
+    .replace(/[A-Z]:[\\/][^\s)]+/gi, '[path]')
+    .replace(/\/(?:data|storage|sdcard|Users|home|tmp|var|private|cache|android_asset)\/[^\s)]+/g, '[path]')
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email]')
+    .replace(/[A-Z0-9_=-]{36,}/gi, '[token]')
+    .replace(/[\r\n\t]+/g, ' ').slice(0, 220);
+  return `${name}: ${message}`;
+}
+
 /** Resolve a texture before drawing it; retries are bounded and stale callbacks own no GPU resources. */
 export async function loadGlobeTexture(asset: number, signal?: AbortSignal, attempts = 2): Promise<THREE.Texture> {
   let failure: unknown;

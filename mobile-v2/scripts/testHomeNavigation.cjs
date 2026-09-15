@@ -420,6 +420,35 @@ test("Explicit navigation from a trip clears its retained passport overlay; ordi
 const flattenStyle = value => Array.isArray(value) ? Object.assign({}, ...value.map(flattenStyle)) : value || {};
 const screenLayers = tree => nodes(tree).filter(n => /^screen-layer-/.test(n.props?.testID ?? ""));
 
+test("Native screen boundaries stay stable through tab hiding, blur entry and close", () => {
+  const host = appHost(); let tree = host.render({ consumeShare: noOp });
+  const boundaries = new Map();
+  const checkBoundaries = () => {
+    for (const layer of screenLayers(tree)) {
+      assert.equal(layer.props.collapsable, false, "Fabric must retain the same native stacking boundary before opacity/pointerEvents/filter change");
+      const signature = { type: layer.type, key: layer.props.key, childType: layer.props.children[0]?.type };
+      if (boundaries.has(layer.props.testID)) assert.deepEqual(signature, boundaries.get(layer.props.testID), "A retained screen cannot move into a replacement native wrapper");
+      else boundaries.set(layer.props.testID, signature);
+    }
+    assert(screenLayers(tree).some(layer => layer.props.testID === "screen-layer-globe"), "Globe boundary remains mounted on every tab");
+  };
+  checkBoundaries();
+  for (const tab of ["trips", "passport", "dreams", "profile", "globe"]) {
+    find(tree, "HomeGlobeScreen").props.onChange(tab); tree = host.render(); checkBoundaries();
+    const globe = screenLayers(tree).find(layer => layer.props.testID === "screen-layer-globe");
+    assert.equal(globe.props.pointerEvents, tab === "globe" ? "auto" : "none");
+    assert.equal(flattenStyle(globe.props.style).opacity, tab === "globe" ? undefined : 0);
+  }
+  find(tree, "HomeGlobeScreen").props.onOpenTrip(trip); tree = host.render(); checkBoundaries();
+  assert.equal(flattenStyle(screenLayers(tree).find(layer => layer.props.testID === "screen-layer-globe").props.style).filter, "blur(4px)");
+  find(tree, "TripNavigationSurface").props.onEntered(); tree = host.render(); checkBoundaries();
+  find(tree, "TripNavigationSurface").props.onRequestClose(); tree = host.render(); checkBoundaries();
+  tree = finishTripTransition(host); checkBoundaries();
+  const globe = screenLayers(tree).find(layer => layer.props.testID === "screen-layer-globe");
+  assert.equal(globe.props.pointerEvents, "auto"); assert.equal(flattenStyle(globe.props.style).filter, undefined);
+  host.unmount();
+});
+
 for (const platform of [{ OS: "android", Version: 31 }, { OS: "android", Version: 35 }, { OS: "android", Version: 30 }, { OS: "ios", Version: "18.0" }, { OS: "web" }]) {
   test(`Background blur capability and crisp modal separation: ${platform.OS} ${platform.Version ?? ""}`, () => {
     const host = appHost({ Platform: platform });
@@ -429,6 +458,7 @@ for (const platform of [{ OS: "android", Version: 31 }, { OS: "android", Version
     find(tree, "ProfileScreen").props.onChange("globe"); tree = host.render();
     find(tree, "HomeGlobeScreen").props.onOpenTrip(trip, "flight-one"); tree = host.render();
     const layers = screenLayers(tree), filtered = layers.filter(layer => flattenStyle(layer.props.style).filter);
+    assert(layers.every(layer => layer.props.collapsable === false), "Platform fallback must not change native screen boundaries");
     const supported = platform.OS === "web" || platform.OS === "android" && platform.Version >= 31;
     assert.deepEqual(filtered.map(layer => layer.props.testID), supported ? ["screen-layer-globe"] : []);
     if (supported) assert.equal(flattenStyle(filtered[0].props.style).filter, "blur(4px)");

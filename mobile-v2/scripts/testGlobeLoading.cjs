@@ -113,14 +113,14 @@ function globeHarness() {
       AccessibilityInfo: { isReduceMotionEnabled: async () => false, addEventListener: () => ({ remove() {} }) } };
     if (name === 'expo-gl') return { GLView: 'GLView' };
     if (name.includes('expoThree')) return { ExpoRenderer: Renderer };
-    if (name === './globeAssets') return { loadGlobeBaseTextures: (_sources, signal) => new Promise((resolve, reject) => pending.push({ signal, resolve, reject })), loadGlobeTexture: async () => texture() };
+    if (name === './globeAssets') return { globeFailureDetails: assetHarness().globeFailureDetails, loadGlobeBaseTextures: (_sources, signal) => new Promise((resolve, reject) => pending.push({ signal, resolve, reject })), loadGlobeTexture: async () => texture() };
     if (name === './globe-geography') return { globeCountries: [], sunPosition: () => ({ lat: 0, lon: 0 }) };
     if (name === './routeSelection') return { flightPathKey: () => '' };
     if (name.includes('trotterTheme')) return { colors: { paperSoft: '#faf4e8' }, fonts: {} };
     if (name.includes('DetailTiles')) return { [name.split('/').pop()]: [] };
     if (/\.(jpg|png)$/.test(name)) return 1;
     throw Error(name);
-  }, { requestAnimationFrame: callback => { const id = ++frameId; frames.set(id, callback); return id; }, cancelAnimationFrame: id => frames.delete(id), console: { warn() {} } });
+  }, { requestAnimationFrame: callback => { const id = ++frameId; frames.set(id, callback); return id; }, cancelAnimationFrame: id => frames.delete(id), console: { warn() {}, info() {} } });
   const render = next => { props = next ?? props; cursor = 0; effects = []; tree = api.WorldWindowGlobe(props); effects.forEach(fn => fn()); return tree; };
   const gl = () => ({ pixelStorei() {}, drawingBufferWidth: 390, drawingBufferHeight: 800, getParameter: () => 4096, endFrameEXP() {} });
   const textures = () => ({ day: texture(), night: texture(), index: texture() });
@@ -175,4 +175,28 @@ test('an initialization failure after leaving Home waits to recover until Home i
   h.pending.shift().reject(Error('Failure while away')); await creating; view = h.render(); assert.equal(find(view, 'GLView').props.key, 0); assert.equal(h.frames.size, 0);
   h.render(h.initial); view = h.render(); assert.equal(find(view, 'GLView').props.key, 1); assert.equal(h.renderers.length, 1, 'Only the native remount may create a replacement renderer');
   h.unmount();
+});
+test('duplicate and unavailable native callbacks cannot dispose a healthy or initializing context', async () => {
+  const h = globeHarness(), view = h.render(h.initial), create = find(view, 'GLView').props.onContextCreate, gl = h.gl();
+  const creating = create(gl); await create(gl); await create(undefined);
+  assert.equal(h.renderers.length, 1); assert.equal(h.pending.length, 1); assert.equal(h.renderers[0].disposals, 0);
+  const base = h.textures(); h.pending.shift().resolve(base); await creating; h.step();
+  await create(gl); await create(undefined); assert.equal(h.renderers.length, 1); assert.equal(h.frames.size, 1); assert.equal(h.renderers[0].disposals, 0);
+  h.unmount(); assert(Object.values(base).every(t => t.disposals === 1));
+});
+test('queued native callbacks from an old GLView are rejected before they can replace its retry', async () => {
+  const h = globeHarness(); let view = h.render(h.initial); const oldCreate = find(view, 'GLView').props.onContextCreate;
+  const first = oldCreate(h.gl()); h.pending.shift().reject(Error('Retry this context')); await first;
+  // The old event is already invalid before React renders the new key.
+  await oldCreate(h.gl()); assert.equal(h.renderers.length, 1);
+  view = h.render(); const second = find(view, 'GLView').props.onContextCreate(h.gl()), base = h.textures(); h.pending.shift().resolve(base); await second;
+  await oldCreate(h.gl()); await oldCreate(undefined); assert.equal(h.renderers.length, 2); assert.equal(h.renderers[1].disposals, 0); assert.equal(h.frames.size, 1);
+  h.unmount();
+});
+test('failure diagnostics retain useful JS error text while removing paths, URLs, email and long tokens', () => {
+  const { globeFailureDetails } = assetHarness();
+  assert.equal(globeFailureDetails(new TypeError("Cannot read property 'pixelStorei' of undefined")), "TypeError: Cannot read property 'pixelStorei' of undefined");
+  const message = globeFailureDetails(new Error('Decode failed file:///data/user/0/private/cache.jpg https://example.test/?token=secret C:\\Users\\private\\image.jpg user@example.test abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN'));
+  assert(!message.includes('private')); assert(!message.includes('secret')); assert(!message.includes('example.test')); assert(!message.includes('abcdefghijklmnopqrstuvwxyz'));
+  assert(message.includes('Decode failed'));
 });

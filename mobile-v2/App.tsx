@@ -360,7 +360,9 @@ function AppShell({
 
   // Retain navigation state without exposing or accepting input on hidden screens.
   const layer = (key: string, visible: boolean, content: React.ReactNode) => (
-    <View key={key} testID={`screen-layer-${key}`} style={[styles.overlay, !visible && styles.inactive,
+    // Keep Fabric's native boundary stable as opacity, pointer events and blur
+    // change; flattening/reparenting this layer would detach the globe TextureView.
+    <View key={key} testID={`screen-layer-${key}`} collapsable={false} style={[styles.overlay, !visible && styles.inactive,
       // Blur only the origin; the wallet remains a crisp sibling. Android's
       // compositor handles this without capturing a bitmap of the GL surface.
       visible && Boolean(selectedTrip) && supportsBackgroundBlur && styles.tripBackground]}

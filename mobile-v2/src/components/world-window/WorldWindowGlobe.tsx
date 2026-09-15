@@ -18,7 +18,7 @@ import {
 import { GLView } from "expo-gl";
 import * as THREE from "three";
 import { ExpoRenderer } from "../../lib/expoThree";
-import { loadGlobeBaseTextures, loadGlobeTexture } from "./globeAssets";
+import { globeFailureDetails, loadGlobeBaseTextures, loadGlobeTexture } from "./globeAssets";
 import type { FlightRoute, RoutePoint } from "../../data/demoTravel";
 import { globeDayDetailTiles } from "../../data/globeDayDetailTiles";
 import { globeNightDetailTiles } from "../../data/globeNightDetailTiles";
@@ -120,16 +120,24 @@ export function WorldWindowGlobe(props: Props) {
     pauseRendering = useRef<() => void>(() => {}),
     trimDetail = useRef<() => void>(() => {}),
     automaticRecoveries = useRef(0),
-    pendingRecovery = useRef(false);
+    pendingRecovery = useRef(false),
+    requestedContextAttempt = useRef(0),
+    acceptedContextAttempt = useRef(-1),
+    seenContexts = useRef(new WeakSet<object>());
+  const replaceContext = useCallback(() => {
+    // Reject callbacks from the old native view immediately, before React commits
+    // its replacement. Otherwise a queued onSurfaceCreate can tear down the new one.
+    requestedContextAttempt.current++;
+    setAttempt(requestedContextAttempt.current);
+  }, []);
   const retryWhenVisible = useCallback(() => {
     if (pendingRecovery.current && mounted.current && foreground.current && live.current.active) {
       pendingRecovery.current = false;
-      setAttempt(value => value + 1);
+      replaceContext();
     }
-  }, []);
-  const recover = useCallback((stage: string) => {
-    // Only stage/category information: native error messages can contain file paths.
-    console.warn(`[WorldWindowGlobe] failure stage=${stage} recovery=${automaticRecoveries.current ? 'manual' : 'automatic'}`);
+  }, [replaceContext]);
+  const recover = useCallback((stage: string, error: unknown) => {
+    console.warn(`[WorldWindowGlobe] failure stage=${stage} recovery=${automaticRecoveries.current ? 'manual' : 'automatic'} ${globeFailureDetails(error)}`);
     if (automaticRecoveries.current === 0) {
       automaticRecoveries.current++;
       pendingRecovery.current = true;
@@ -493,11 +501,22 @@ export function WorldWindowGlobe(props: Props) {
     }
   }, []);
   const create = useCallback(
-    async (gl: any) => {
+    async (gl: any, viewAttempt: number) => {
+      if (!mounted.current || viewAttempt !== requestedContextAttempt.current) return;
+      if (!gl || typeof gl !== 'object' || typeof gl.pixelStorei !== 'function' || typeof gl.getParameter !== 'function') {
+        // Expo can dispatch an old native event after unregistering its GL object.
+        // It must never release a healthy renderer or interrupt another init.
+        console.warn('[WorldWindowGlobe] ignored unavailable native surface callback');
+        if (acceptedContextAttempt.current !== viewAttempt) recover('surface', new Error('Native surface callback has no GL context'));
+        return;
+      }
+      if (seenContexts.current.has(gl)) return;
+      seenContexts.current.add(gl);
+      acceptedContextAttempt.current = viewAttempt;
       clearResources.current();
       const ownGeneration = ++generation.current;
       const abort = new AbortController(), resources: (() => void)[] = [];
-      let disposed = false, stage = 'context';
+      let disposed = false, stage = 'context-bridge';
       const isCurrent = () => mounted.current && !disposed && ownGeneration === generation.current;
       const release = () => {
         if (disposed) return;
@@ -523,12 +542,14 @@ export function WorldWindowGlobe(props: Props) {
         gl.pixelStorei = (p: number, v: number) => {
           if (!unsupported.has(p)) original(p, v);
         };
+        stage = 'renderer';
         const renderer = new ExpoRenderer({ gl, antialias: true });
         resources.push(() => renderer.dispose());
         // Expo's drawing buffer already includes device pixel density. Do not
         // replace it with layout points or multiply by PixelRatio a second time.
         let bufferWidth = gl.drawingBufferWidth,
           bufferHeight = gl.drawingBufferHeight;
+        stage = 'renderer-size';
         renderer.setSize(bufferWidth, bufferHeight, false);
         renderer.setClearColor(colors.paperSoft, 1);
         const scene = new THREE.Scene(),
@@ -536,15 +557,17 @@ export function WorldWindowGlobe(props: Props) {
           camera = new THREE.OrthographicCamera(-3, 3, 6, -6, 0.1, 100);
         scene.add(globe);
         resources.push(() => disposeObject(scene));
-        const textureError = () => {
+        const textureError = (error: unknown) => {
           if (isCurrent()) {
             release();
-            recover(stage);
+            recover(stage, error);
           }
         };
-        const quality = globeTextureQuality(
-          gl.getParameter(gl.MAX_TEXTURE_SIZE),
-        );
+        stage = 'capabilities';
+        const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+        if (!Number.isFinite(maxTextureSize) || maxTextureSize <= 0) throw new Error('Native GL context is no longer available');
+        const quality = globeTextureQuality(maxTextureSize);
+        console.info(`[WorldWindowGlobe] context-created generation=${ownGeneration} view=${viewAttempt} textureLimit=${maxTextureSize}`);
         stage = 'base-assets';
         const { day, night, index } = await loadGlobeBaseTextures({
           day: { primary: quality.baseWidth === 4096 ? DAY : SMALL_DAY, fallback: SMALL_DAY },
@@ -684,6 +707,7 @@ void main(){
         updateVisited();
         stage = 'first-frame';
         let previous = 0,
+          presented = false,
           cycleStart: number | undefined;
         const portNight = new THREE.Color("#fbd3a0"),
           portDay = new THREE.Color("#e5bc8d");
@@ -692,6 +716,8 @@ void main(){
           if (!isCurrent() || !foreground.current || !live.current.active)
             return;
           try {
+          const frameStage = presented ? 'render' : 'first-frame';
+          stage = `${frameStage}:viewport`;
           const dt = Math.min(40, previous ? time - previous : 16);
           previous = time;
           if (
@@ -703,6 +729,7 @@ void main(){
             renderer.setSize(bufferWidth, bufferHeight, false);
           }
           const p = pan.current;
+          stage = `${frameStage}:scene-state`;
           if (!p.active) {
             const decay = Math.exp(-dt / 70);
             p.vx *= decay;
@@ -743,7 +770,9 @@ void main(){
           camera.updateProjectionMatrix();
           camera.position.set(0, 0, 10);
           camera.lookAt(0, 0, 0);
+          stage = `${frameStage}:detail`;
           detail.update(zoom.current.current, time, dt);
+          stage = `${frameStage}:lighting-routes`;
           if (live.current.cycle) cycleStart ??= time;
           else cycleStart = undefined;
           const sun = sunVector(
@@ -805,8 +834,12 @@ void main(){
               daylight,
             );
           }
+          stage = `${frameStage}:draw`;
           renderer.render(scene, camera);
+          stage = `${frameStage}:present`;
           gl.endFrameEXP();
+          if (!presented) console.info(`[WorldWindowGlobe] first-frame generation=${ownGeneration}`);
+          presented = true;
           stage = 'render';
           if (
             isCurrent() &&
@@ -815,7 +848,7 @@ void main(){
             live.current.active
           )
             frame.current = requestAnimationFrame(draw);
-          } catch { textureError(); }
+          } catch (error) { textureError(error); }
         };
         pauseRendering.current = () => {
           cancelAnimationFrame(frame.current);
@@ -840,11 +873,12 @@ void main(){
       } catch (error) {
         const report = isCurrent();
         release();
-        if (report) recover(stage);
+        if (report) recover(stage, error);
       }
     },
     [refreshRoutes, updateVisited, recover],
   );
+  const onContextCreate = useCallback((gl: any) => create(gl, attempt), [create, attempt]);
   return (
     <View
       ref={host}
@@ -892,7 +926,7 @@ void main(){
               automaticRecoveries.current = 0;
               pendingRecovery.current = false;
               setError(false);
-              setAttempt((n) => n + 1);
+              replaceContext();
             }}
           >
             <Text style={styles.retry}>Try again</Text>
@@ -903,7 +937,7 @@ void main(){
           key={attempt}
           style={StyleSheet.absoluteFill}
           msaaSamples={4}
-          onContextCreate={create}
+          onContextCreate={onContextCreate}
           accessible={false}
         />
       )}
