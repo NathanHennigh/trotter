@@ -162,15 +162,15 @@ test("Home statistic actions target flights, countries and airports separately",
   assert.deepEqual(calls, ["trips", "countries", "airports"]);
 });
 
-test("Home year reaches Flights and clearing it does not silently change the globe year", () => {
+test("Home opens the complete Trips list without carrying its globe year filter", () => {
   const host = appHost(); let tree = host.render({ consumeShare: noOp });
   find(tree, "HomeGlobeScreen").props.onFilterYear("2026"); tree = host.render();
   find(tree, "HomeGlobeScreen").props.onOpenFlights("2026"); tree = host.render();
-  assert.equal(find(tree, "TripsListScreen").props.initialYear, "2026");
-  const epoch = find(tree, "TripsListScreen").props.scopeEpoch;
-  find(tree, "TripsListScreen").props.onClearYear(); tree = host.render();
   assert.equal(find(tree, "TripsListScreen").props.initialYear, undefined);
-  assert(find(tree, "TripsListScreen").props.scopeEpoch > epoch);
+  const epoch = find(tree, "TripsListScreen").props.resetEpoch;
+  find(tree, "HomeGlobeScreen").props.onChange("globe"); tree = host.render();
+  find(tree, "HomeGlobeScreen").props.onOpenFlights("2026"); tree = host.render();
+  assert(find(tree, "TripsListScreen").props.resetEpoch > epoch);
   assert.equal(find(tree, "HomeGlobeScreen").props.filterYear, "2026");
 });
 
@@ -501,7 +501,7 @@ for (const origin of ["globe", "trips", "countries", "airports"]) {
     assert.equal(find(tree, "HomeGlobeScreen").props.filterYear, "2026");
     if (origin === "countries") assert.equal(find(tree, "CountryStampCollectionScreen").props.initialYear, "2026");
     if (origin === "airports") assert.equal(find(tree, "PassportStatsScreen").props.initialCollection, "airports");
-    if (origin === "trips") assert.equal(find(tree, "TripsListScreen").props.initialYear, "2026");
+    if (origin === "trips") assert.equal(find(tree, "TripsListScreen").props.initialYear, undefined);
     assert.equal(find(tree, "HomeGlobeScreen").props.visible, origin === "globe");
     host.unmount();
   });

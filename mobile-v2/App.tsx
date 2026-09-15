@@ -226,7 +226,7 @@ function AppShell({
   currentTab.current = activeTab;
   const [visitedTabs, setVisitedTabs] = React.useState<BottomNavTab[]>(() => [getInitialTab()]);
   const [globeYear, setGlobeYear] = React.useState("All years");
-  const [tripsScope, setTripsScope] = React.useState<{ year?: string; epoch: number }>({ epoch: 0 });
+  const [tripsReset, setTripsReset] = React.useState(0);
   const scopeSequence = React.useRef(0);
   const [passportReset, setPassportReset] = React.useState(0);
   const [selectedTripId, setSelectedTripId] = React.useState<string | null>(null);
@@ -299,8 +299,8 @@ function AppShell({
     visit(tripOrigin.current);
   };
   const closeTrip = () => setTripClosing(true);
-  const openFilteredTrips = (year?: string) => {
-    setTripsScope({ year: normalizeTravelYear(year), epoch: ++scopeSequence.current });
+  const openTrips = () => {
+    setTripsReset(value => value + 1);
     changeTab("trips");
   };
   const openCountries = (code?: string, year?: string) => {
@@ -385,12 +385,11 @@ function AppShell({
           visible={mainVisible && activeTab === "globe"}
           onBackHandlerChange={registerGlobeBack}
           active={activeTab} onChange={changeTab} onOpenTrip={openTrip}
-          onOpenCountry={openCountries} onOpenCollection={openPassportCollection} onOpenFlights={openFilteredTrips} />)}
+          onOpenCountry={openCountries} onOpenCollection={openPassportCollection} onOpenFlights={openTrips} />)}
       {visitedTabs.includes("trips") && layer("trips", baseTab === "trips",
         <TripsListScreen active={activeTab} onChange={changeTab} onOpenTrip={openTrip}
           liftedTripId={selectedTrip && tripPaperOrigin?.wallet ? selectedTrip.id : undefined}
-          initialYear={tripsScope.year} scopeEpoch={tripsScope.epoch}
-          onClearYear={() => setTripsScope({ epoch: ++scopeSequence.current })} />)}
+          resetEpoch={tripsReset} />)}
       {visitedTabs.includes("passport") && layer("passport", passportVisible,
         <PassportStatsScreen visible={passportVisible && mainVisible} resetEpoch={passportReset} onBackHandlerChange={registerPassportBack}
           initialCollection={passportCollection?.kind}

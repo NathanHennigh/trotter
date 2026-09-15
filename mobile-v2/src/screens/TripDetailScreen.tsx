@@ -40,6 +40,9 @@ export function TripDetailScreen({
   backLabel = "Back to trips",
   popup = false,
   deferUpdates = false,
+  freezeUpdates = false,
+  walletHeader,
+  walletDragging = false,
 }: {
   trip: TripSummary;
   active: BottomNavTab;
@@ -49,6 +52,9 @@ export function TripDetailScreen({
   backLabel?: string;
   popup?: boolean;
   deferUpdates?: boolean;
+  freezeUpdates?: boolean;
+  walletHeader?: (heading: React.ReactNode) => React.ReactNode;
+  walletDragging?: boolean;
 }) {
   const insets = useSafeAreaInsets(),
     { loadTripDetail, trips, refresh } = useTravelTrips();
@@ -91,7 +97,7 @@ export function TripDetailScreen({
   }, [trip.id, trip.backendId, loadTripDetail, retry, deferUpdates]);
   const latest = trips.find((entry) => entry.id === trip.id || (trip.backendId != null && entry.backendId === trip.backendId)) || hydrated || trip;
   const displayed = React.useRef(latest);
-  if (!deferUpdates || displayed.current.id !== trip.id) displayed.current = latest;
+  if ((!deferUpdates && !freezeUpdates) || displayed.current.id !== trip.id) displayed.current = latest;
   const current = displayed.current,
     segments = React.useMemo(
       () => orderedSegments(current.segments),
@@ -130,6 +136,7 @@ export function TripDetailScreen({
       void refresh().finally(() => setLoading(false));
     }
   };
+  const heading = <WalletHeading trip={current} compact={popup} availableWidth={contentWidth} />;
   return (
     <View onLayout={event => setContentWidth(event.nativeEvent.layout.width)}
       style={[s.screen, popup && s.popup, { paddingTop: popup ? 0 : insets.top }]}>
@@ -149,6 +156,7 @@ export function TripDetailScreen({
         data={segments}
         keyExtractor={(segment) => segment.id}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!walletDragging}
         contentContainerStyle={{
           paddingBottom: popup ? 0 : insets.bottom + layout.bottomNavHeight + 28,
         }}
@@ -164,7 +172,7 @@ export function TripDetailScreen({
         ListHeaderComponent={
           <>
             <View style={s.wallet}>
-              <WalletHeading trip={current} compact={popup} availableWidth={contentWidth} />
+              {popup && walletHeader ? walletHeader(heading) : heading}
               <View pointerEvents="none" style={s.coverLight} />
               <View style={s.mapInsert}>
                 <View style={s.mapHeader}>

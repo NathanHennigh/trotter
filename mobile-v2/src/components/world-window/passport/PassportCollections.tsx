@@ -53,7 +53,7 @@ export function CollectionButtons({
           key={kind}
           onPress={() => onOpen(kind)}
           accessibilityRole="button"
-          accessibilityLabel={`${values[kind].collected} of ${values[kind].total} ${kind}${values[kind].outsideCatalogKeys.length ? `, ${values[kind].outsideCatalogKeys.length} other entries in your archive` : ''}`}
+          accessibilityLabel={`${values[kind].collected} of ${values[kind].total} ${kind}${values[kind].outsideCatalogKeys.length ? `, ${values[kind].outsideCatalogKeys.length} other recorded ${values[kind].outsideCatalogKeys.length === 1 ? 'entry' : 'entries'} outside this catalogue` : ''}`}
           style={[styles.collection, { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', width: cardWidth }]}
         >
           <View style={styles.mark} accessible={false}>
@@ -82,7 +82,7 @@ export function CollectionButtons({
             {kind[0].toUpperCase() + kind.slice(1)}
           </Text>
           <View style={styles.collectionTrack}><View style={[styles.collectionFill, { width: `${Math.min(100, Math.max(0, values[kind].percent))}%` }]} /></View>
-          {values[kind].outsideCatalogKeys.length > 0 && <Text style={styles.collectionExtra}>+{values[kind].outsideCatalogKeys.length} archived</Text>}
+          {values[kind].outsideCatalogKeys.length > 0 && <Text style={styles.collectionExtra}>+{values[kind].outsideCatalogKeys.length} other</Text>}
         </Pressable>
       ))}
     </ScrollView>

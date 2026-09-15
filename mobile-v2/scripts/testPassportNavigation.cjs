@@ -168,6 +168,20 @@ for (const kind of ['airports', 'airlines']) {
  assert.equal(handler(),true);tree=host.render();assert(!find(tree,'CollectionList'));assert.equal(handler(),false,'Back at the book delegates to App');
  find(tree,'CollectionButtons').props.onOpen('airlines');tree=host.render();find(tree,'BottomNav').props.onChange('dreams');tree=host.render();assert.equal(tab,'dreams');assert(!find(tree,'CollectionList'),'Explicit tab navigation clears passport overlay');host.unmount();assert.equal(handler,null);
 }
+{
+ const recorded={...archive,airlines:[{code:'UA',flights:2,miles:100,trips:[]},{code:'??',flights:1,miles:50,trips:[]}]};
+ const host=load('src/components/world-window/passport/PassportCollections.tsx','CollectionButtons',{Image:'Image',emblems:1});
+ let opened;
+ const tree=host.render({archive:recorded,onOpen:kind=>opened=kind});
+ const carrier=nodes(tree).find(node=>node.type==='Pressable'&&node.props.accessibilityLabel?.includes('airlines'));
+ const text=nodes(carrier).filter(node=>node.type==='Text').map(node=>node.props.children.join(''));
+ assert(text.includes('+1 other'),'Outside membership is not a claim that a carrier was archived or closed');
+ assert(text.every(label=>!label.includes('archived')));
+ assert(carrier.props.accessibilityLabel.includes('1 other recorded entry outside this catalogue'));
+ assert(carrier.props.accessibilityLabel.startsWith('1 of '),'Unknown recorded carrier does not inflate catalogue progress');
+ carrier.props.onPress();assert.equal(opened,'airlines','The full recorded airline collection remains reachable');
+ host.unmount();
+}
 for(const width of [320,420])for(const fontScale of [1,2]){
  const host=load('src/components/trotter/TrotterKit.tsx','BottomNav',{useWindowDimensions:()=>({width,height:800,fontScale})});
  const tree=host.render({active:'passport',onChange:noOp});
