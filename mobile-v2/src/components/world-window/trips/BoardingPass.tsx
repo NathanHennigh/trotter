@@ -1,6 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import Svg, { Circle, ClipPath, Defs, G, Line, Path, Pattern, Rect } from "react-native-svg";
+import Svg, { Circle, Defs, Line, LinearGradient, Path, Pattern, Stop } from "react-native-svg";
 import type { TripSegmentSummary } from "../../../data/trotterMock";
 import { colors, fonts } from "../../../theme/trotterTheme";
 import { AirlineLogo, airlineName } from "../AirlineLogo";
@@ -42,7 +42,8 @@ export function BoardingPass({
       : undefined;
   const dayChange = arrivalDayChange(segment.depTime, segment.arrTime);
   const seam = compact ? stubTop : paperSize.width - (narrow ? 60 : 70) - 1;
-  const outline = ticketOutline(paperSize.width, paperSize.height, seam, compact);
+  const outline = !compact || stubTop > 0 ? ticketOutline(paperSize.width, paperSize.height, seam, compact) : "";
+  const seamOffset = seam / (compact ? paperSize.height : paperSize.width);
   return (
     <View style={s.ticketWrap}>
       <View testID="boarding-pass-paper" style={[s.ticket, compact && s.compact]}
@@ -50,9 +51,20 @@ export function BoardingPass({
           const { width, height } = event.nativeEvent.layout;
           setPaperSize(previous => previous.width === width && previous.height === height ? previous : { width, height });
         }}>
-        <Svg pointerEvents="none" accessible={false} style={StyleSheet.absoluteFill} width="100%" height="100%">
+        {/* SVG gets an unpadded, explicit viewport. Android rounds percentage/fractional
+            view sizes, which otherwise cuts off the far border. Mount only a real path. */}
+        {Boolean(outline) && <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <Svg testID="boarding-pass-art" accessible={false}
+            width={Math.ceil(paperSize.width)} height={Math.ceil(paperSize.height)}
+            viewBox={`0 0 ${Math.ceil(paperSize.width)} ${Math.ceil(paperSize.height)}`}>
             <Defs>
-              <ClipPath id={`${grain}outline`}><Path d={outline} /></ClipPath>
+              <LinearGradient id={`${grain}paper`} gradientUnits="userSpaceOnUse"
+                x1={0} y1={0} x2={compact ? 0 : paperSize.width} y2={compact ? paperSize.height : 0}>
+                <Stop offset={0} stopColor={colors.paperSheet} />
+                <Stop offset={seamOffset} stopColor={colors.paperSheet} />
+                <Stop offset={seamOffset} stopColor="#e9eee7" />
+                <Stop offset={1} stopColor="#e9eee7" />
+              </LinearGradient>
               <Pattern
                 id={grain}
                 width={7}
@@ -75,18 +87,14 @@ export function BoardingPass({
                 />
               </Pattern>
             </Defs>
-            <G clipPath={`url(#${grain}outline)`}>
-              <Path d={outline} fill={colors.paperSheet} />
-              <Rect x={compact ? 0 : seam} y={compact ? seam : 0}
-                width={compact ? paperSize.width : paperSize.width - seam}
-                height={compact ? paperSize.height - seam : paperSize.height} fill="#e9eee7" />
-              <Rect width="100%" height="100%" fill={`url(#${grain})`} />
-              <Line x1={compact ? 0 : seam} y1={compact ? seam : 0}
-                x2={compact ? paperSize.width : seam} y2={compact ? seam : paperSize.height}
-                stroke="#a7bab5" strokeWidth={1} strokeDasharray="4 3" />
-            </G>
+            <Path d={outline} fill={`url(#${grain}paper)`} />
+            <Path d={outline} fill={`url(#${grain})`} />
+            <Line x1={compact ? 5.5 : seam} y1={compact ? seam : 5.5}
+              x2={compact ? paperSize.width - 5.5 : seam} y2={compact ? seam : paperSize.height - 5.5}
+              stroke="#a7bab5" strokeWidth={1} strokeDasharray="4 3" />
             <Path d={outline} fill="none" stroke={selected ? walletColors.copper : colors.paperBorder} strokeWidth={1} />
-        </Svg>
+          </Svg>
+        </View>}
         <View style={[s.main, (narrow || compact) && s.narrowMain]}>
           <View style={s.airline}>
             <AirlineLogo code={segment.airline || ""} size={26} />

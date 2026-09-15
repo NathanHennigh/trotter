@@ -406,21 +406,41 @@ test('flight paper has true transparent semicircle cutouts in both stub orientat
 test('paper, stub color, grain and perforation share one silhouette at large text and selected state', () => {
   const h = host('components/world-window/trips/BoardingPass.tsx', 'BoardingPass', { width: 320, fontScale: 2 });
   let tree = h.render({ segment: earlier, availableWidth: 280, selected: true });
+  assert(!nodes(tree).some(n => n.props?.testID === 'boarding-pass-art'), 'No empty path or clip definition mounts before native layout');
+  assert(nodes(tree).filter(n => n.type === 'View').every(n => !n.props.children?.flat(Infinity).some(child => typeof child === 'string')), 'An unmeasured outline must not leave an empty text node inside a native View');
   const paper = nodes(tree).find(n => n.props?.testID === 'boarding-pass-paper');
   paper.props.onLayout({ nativeEvent: { layout: { width: 240, height: 650 } } });
   nodes(tree).find(n => n.props?.testID === 'boarding-pass-stub').props.onLayout({ nativeEvent: { layout: { y: 495 } } });
   tree = h.render();
-  const clip = find(tree, 'ClipPath'), fill = find(tree, 'G');
-  assert(clip); assert(fill); assert.equal(fill.props.clipPath, `url(#${clip.props.id})`);
-  assert.equal(nodes(fill).filter(n => n.type === 'Rect').length, 2, 'Both stub tint and grain are clipped to the paper');
-  assert(find(fill, 'Line'), 'Perforation also stops at the transparent notch');
-  const d = find(clip, 'Path').props.d;
+  assert(!find(tree, 'ClipPath'), 'Measured updates must not depend on Android clip cache invalidation');
+  const art = nodes(tree).find(n => n.props?.testID === 'boarding-pass-art');
+  const fills = nodes(art).filter(n => n.type === 'Path');
+  assert.equal(fills.length, 3); const d = fills[0].props.d;
+  assert(fills.every(n => n.props.d === d), 'Paper, grain and outline all have exactly the same transparent cuts');
+  const gradient = find(art, 'LinearGradient'), stops = nodes(gradient).filter(n => n.type === 'Stop');
+  assert.equal(stops[1].props.offset, 495 / 650); assert.equal(stops[2].props.offset, stops[1].props.offset);
+  assert.equal(find(art, 'Line').props.x1, 5.5); assert.equal(find(art, 'Line').props.x2, 234.5);
   assert(d.includes('A5 5 0 0 0 239.5 500')); assert(d.includes('A5 5 0 0 0 0.5 490'));
   for (const n of nodes(tree).filter(n => n.type === 'View')) {
     const style = Object.assign({}, ...(Array.isArray(n.props.style) ? n.props.style : [n.props.style]).flat().filter(Boolean));
     assert.equal(style.backgroundColor, undefined, 'Native rectangles cannot fill the SVG cutouts');
     assert.equal(style.borderWidth, undefined, 'Native borders cannot draw lines across the cutouts');
   }
+  h.dispose();
+});
+
+test('native ticket art gets an unpadded explicit viewport with room for fractional far borders', () => {
+  const h = host('components/world-window/trips/BoardingPass.tsx', 'BoardingPass', { width: 420 });
+  let tree = h.render({ segment: earlier });
+  const paper = nodes(tree).find(n => n.props?.testID === 'boarding-pass-paper');
+  paper.props.onLayout({ nativeEvent: { layout: { width: 370.33, height: 309.67 } } }); tree = h.render();
+  const art = nodes(tree).find(n => n.props?.testID === 'boarding-pass-art');
+  assert.equal(art.props.width, 371); assert.equal(art.props.height, 310);
+  assert.equal(art.props.viewBox, '0 0 371 310'); assert.equal(art.props.style, undefined, 'Native SVG cannot inherit absolute-fill positioning into its internal G');
+  const wrapper = nodes(tree).find(n => n.type === 'View' && n.props.children?.includes(art));
+  assert(wrapper); assert.equal(wrapper.props.pointerEvents, 'none');
+  const d = nodes(art).find(n => n.type === 'Path').props.d;
+  assert(d.includes('369.83')); assert(d.includes('309.17'), 'Far outline remains within the native viewport');
   h.dispose();
 });
 
