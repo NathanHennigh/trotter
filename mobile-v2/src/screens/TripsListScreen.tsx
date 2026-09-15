@@ -31,6 +31,7 @@ export function TripsListScreen({
   initialYear,
   scopeEpoch = 0,
   onClearYear,
+  liftedTripId,
 }: {
   active: BottomNavTab;
   onChange: (tab: BottomNavTab) => void;
@@ -38,6 +39,7 @@ export function TripsListScreen({
   initialYear?: string;
   scopeEpoch?: number;
   onClearYear?: () => void;
+  liftedTripId?: string;
 }) {
   const insets = useSafeAreaInsets(),
     { trips, status, error, refresh } = useTravelTrips();
@@ -150,12 +152,14 @@ export function TripsListScreen({
                 <View style={s.yearRule} />
               </View>
             )}
+            <View style={liftedTripId === item.id ? { opacity: 0 } : undefined}>
             <WalletCover
               trip={item}
               scopeYear={selectedYear}
               totalFlightCount={originals.get(item.id)?.flightCount}
               onPress={(origin) => { const original = originals.get(item.id); if (original) onOpenTrip?.(original, undefined, origin); }}
             />
+            </View>
           </View>
         )}
         ListEmptyComponent={

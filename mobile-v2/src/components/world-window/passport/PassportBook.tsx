@@ -7,10 +7,11 @@ import React, {
 } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
+import { SvgXml } from "react-native-svg";
 import { colors, fonts } from "../../../theme/trotterTheme";
-import { WWEmblem } from "../WorldWindowUI";
 import { passportDocument, scriptJSON } from "./passport-document";
 import { passportClosedCoverFrame, passportPose, passportViewportHeight } from "./passport-cover";
+import { passportCoverFace } from "./passport-cover-face";
 import { preparePassportPayload, type BookPayload } from "./passport-payload";
 import type { PassportArchive } from "./passport-model";
 import { selectionHaptic } from "../../../utils/experiencePreferences";
@@ -35,6 +36,7 @@ export function PassportBook({
   const drawingWidth = Number.isFinite(width) ? Math.max(1, width) : 1;
   const viewportHeight = useMemo(() => passportViewportHeight(drawingWidth), [drawingWidth]);
   const coverFrame = useMemo(() => passportClosedCoverFrame(drawingWidth), [drawingWidth]);
+  const coverArtwork = useMemo(() => passportCoverFace(drawingWidth), [drawingWidth]);
   const closedHeight = useMemo(() => {
     const pose = passportPose(0, drawingWidth);
     return Math.ceil(drawingWidth * pose.height / pose.width);
@@ -248,12 +250,10 @@ export function PassportBook({
           }}
           style={[
             styles.loadingCover,
-            { left: coverFrame.left, top: coverFrame.top, width: coverFrame.width, height: coverFrame.height, gap: 24 * coverFrame.scale, borderLeftWidth: 5 * coverFrame.scale, padding: 15 * coverFrame.scale },
+            { left: coverFrame.left, top: coverFrame.top, width: coverFrame.width, height: coverFrame.height },
           ]}
         >
-          <View pointerEvents="none" style={[styles.coverInset, { inset: 10 * coverFrame.scale }]} />
-          <WWEmblem size={48 * coverFrame.scale} color="#d5e2e8" />
-          <Text allowFontScaling={false} style={[styles.coverTitle, { fontSize: 26 * coverFrame.scale, lineHeight: 31 * coverFrame.scale }]}>Passport</Text>
+          <SvgXml xml={coverArtwork} width={coverFrame.width} height={coverFrame.height} pointerEvents="none" accessible={false} />
         </Pressable>
       )}
       {error ? (
@@ -273,20 +273,6 @@ const styles = StyleSheet.create({
   webview: { position: "absolute", left: 0, top: 0, flex: 0, flexGrow: 0, flexShrink: 0, backgroundColor: "transparent" },
   loadingCover: {
     position: "absolute",
-    borderWidth: 1,
-    borderColor: "#17384d",
-    borderLeftWidth: 5,
-    borderRadius: 5,
-    backgroundColor: "#294e65",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  coverInset: { position: "absolute", borderWidth: 1, borderColor: "#d5e2e84d" },
-  coverTitle: {
-    fontFamily: fonts.display,
-    letterSpacing: 0.6,
-    includeFontPadding: false,
-    color: "#d5e2e8",
   },
   retry: { padding: 12 },
   overlayRetry: {

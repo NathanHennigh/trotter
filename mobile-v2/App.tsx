@@ -374,6 +374,7 @@ function AppShell({
           onOpenCountry={openCountries} onOpenCollection={openPassportCollection} onOpenFlights={openFilteredTrips} />)}
       {visitedTabs.includes("trips") && layer("trips", baseTab === "trips",
         <TripsListScreen active={activeTab} onChange={changeTab} onOpenTrip={openTrip}
+          liftedTripId={selectedTrip && tripPaperOrigin?.wallet ? selectedTrip.id : undefined}
           initialYear={tripsScope.year} scopeEpoch={tripsScope.epoch}
           onClearYear={() => setTripsScope({ epoch: ++scopeSequence.current })} />)}
       {visitedTabs.includes("passport") && layer("passport", passportVisible,
@@ -401,9 +402,10 @@ function AppShell({
         <ProfileScreen active={activeTab} onChange={changeTab} onOpenStamps={() => openCountries()}
           onOpenAirport={code => openPassportCollection("airports", undefined, code)} />)}
       {selectedTrip && <TripNavigationSurface key={selectedTrip.id} trip={selectedTrip} flightId={selectedFlightId}
-        origin={tripPaperOrigin} closing={tripClosing} onClosed={finishCloseTrip}>
+        origin={tripPaperOrigin} closing={tripClosing} onClosed={finishCloseTrip} onRequestClose={closeTrip}
+        closeLabel={tripOrigin.current === "passport" ? "Back to collection" : `Back to ${label(tripOrigin.current).toLowerCase()}`}>
         <TripDetailScreen key={selectedTrip.id} trip={selectedTrip} selectedFlightId={selectedFlightId}
-          active="trips" onBack={closeTrip} onChange={changeTab}
+          active="trips" onBack={closeTrip} onChange={changeTab} popup
           backLabel={tripOrigin.current === "passport" ? "Back to collection" : `Back to ${label(tripOrigin.current).toLowerCase()}`} />
       </TripNavigationSurface>}
     </View>

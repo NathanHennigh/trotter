@@ -38,6 +38,7 @@ export function TripDetailScreen({
   onChange,
   selectedFlightId,
   backLabel = "Back to trips",
+  popup = false,
 }: {
   trip: TripSummary;
   active: BottomNavTab;
@@ -45,11 +46,13 @@ export function TripDetailScreen({
   onChange: (tab: BottomNavTab) => void;
   selectedFlightId?: string;
   backLabel?: string;
+  popup?: boolean;
 }) {
   const insets = useSafeAreaInsets(),
     { loadTripDetail, trips, refresh } = useTravelTrips();
   const { width, fontScale } = useWindowDimensions();
-  const stackTotals = width <= 360 && fontScale >= 1.35;
+  const [contentWidth, setContentWidth] = React.useState(popup ? width - 40 : width);
+  const stackTotals = contentWidth <= 360 && fontScale >= 1.35;
   const [hydrated, setHydrated] = React.useState<TripSummary>(),
     [loading, setLoading] = React.useState(false),
     [error, setError] = React.useState<string>(),
@@ -121,8 +124,9 @@ export function TripDetailScreen({
     }
   };
   return (
-    <View style={[s.screen, { paddingTop: insets.top }]}>
-      <View style={s.detailBar}>
+    <View onLayout={event => setContentWidth(event.nativeEvent.layout.width)}
+      style={[s.screen, popup && s.popup, { paddingTop: popup ? 0 : insets.top }]}>
+      {!popup && <View style={s.detailBar}>
         <PressFeedback accessibilityRole="button" accessibilityLabel={backLabel} onPress={onBack} style={s.backButton}>
           <WWIcon name="back" size={19} />
           <Text numberOfLines={1} style={s.backLabel}>{backLabel.replace(/^Back to /i, "")}</Text>
@@ -132,14 +136,14 @@ export function TripDetailScreen({
             style={[s.detailLoading, { opacity: loading ? 1 : 0 }]} />
           <Text style={s.detailLabel}>Itinerary</Text>
         </View>
-      </View>
+      </View>}
       <FlatList
         ref={list}
         data={segments}
         keyExtractor={(segment) => segment.id}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
-          paddingBottom: insets.bottom + layout.bottomNavHeight + 28,
+          paddingBottom: popup ? 0 : insets.bottom + layout.bottomNavHeight + 28,
         }}
         onContentSizeChange={focus}
         onScrollToIndexFailed={(info) => {
@@ -153,12 +157,16 @@ export function TripDetailScreen({
         ListHeaderComponent={
           <>
             <View style={s.wallet}>
-              <WalletHeading trip={current} />
+              <WalletHeading trip={current} compact={popup} availableWidth={contentWidth} />
               <View pointerEvents="none" style={s.coverLight} />
               <View style={s.mapInsert}>
                 <View style={s.mapHeader}>
                   <Text style={s.mapTitle}>Route map</Text>
-                  <Text style={s.mapCount}>{segments.length} {segments.length === 1 ? "flight" : "flights"}</Text>
+                  <View style={s.detailStatus}>
+                    {popup && <ActivityIndicator size="small" color={colors.blue} animating={loading}
+                      style={[s.detailLoading, { opacity: loading ? 1 : 0 }]} />}
+                    <Text style={s.mapCount}>{segments.length} {segments.length === 1 ? "flight" : "flights"}</Text>
+                  </View>
                 </View>
                 {map.points.length > 0 ? (
                   <TripAtlas
@@ -238,6 +246,7 @@ export function TripDetailScreen({
                 <BoardingPass
                   segment={item}
                   selected={selectedFlightId === item.id}
+                  availableWidth={contentWidth}
                 />
               </View>
             </View>
@@ -280,12 +289,13 @@ export function TripDetailScreen({
           ) : null
         }
       />
-      <BottomNav active={active} onChange={onChange} />
+      {!popup && <BottomNav active={active} onChange={onChange} />}
     </View>
   );
 }
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.paperSoft },
+  popup: { backgroundColor: walletColors.blue },
   wallet: {
     marginHorizontal: 0,
     backgroundColor: walletColors.blue,

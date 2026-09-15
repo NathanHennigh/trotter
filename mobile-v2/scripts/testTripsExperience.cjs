@@ -28,7 +28,7 @@ function host(file, name, options = {}) {
     useEffect(fn, deps) { const i = cursor++; if (!slots[i] || !same(slots[i].deps, deps)) { slots[i]?.cleanup?.(); slots[i] = { deps }; effects.push(() => { slots[i].cleanup = fn(); }); } },
   };
   const tags = 'FlatList RefreshControl View Text Pressable TextInput ActivityIndicator'.split(' ');
-  const native = { ...Object.fromEntries(tags.map(tag => [tag, tag])), StyleSheet: { create: x => x }, useWindowDimensions: () => ({ width: options.width ?? 410, height: 880, fontScale: options.fontScale ?? 1 }) };
+  const native = { ...Object.fromEntries(tags.map(tag => [tag, tag])), Animated: { View: 'AnimatedView' }, StyleSheet: { create: x => x }, useWindowDimensions: () => ({ width: options.width ?? 410, height: 880, fontScale: options.fontScale ?? 1 }) };
   const ui = Object.fromEntries('WWHeader WWButton WWEmpty WWIcon WWEmblem'.split(' ').map(tag => [tag, tag]));
   const wallet = { WalletCover: 'WalletCover', WalletHeading: 'WalletHeading', walletColors: palette };
   const motion = { PressFeedback: 'Pressable', useReducedMotion: () => options.reducedMotion !== false };
@@ -47,7 +47,7 @@ function host(file, name, options = {}) {
     '../utils/travelScope': scope,
     '../services/travelTrips': { useTravelTrips: () => ({ trips: [], status: 'idle', refresh: async () => {}, loadTripDetail: async () => undefined, ...options.service }) },
     '../theme/trotterTheme': theme, '../../../theme/trotterTheme': theme,
-    '../displayTextFit': { fitDisplayFont: (_, size) => size },
+    '../displayTextFit': { fitDisplayFont: (...args) => { options.fitArgs?.push(args); return args[1]; } },
     '../../../utils/mobileLayout': { getMobileVisualWidth: width => width },
     '../AirlineLogo': { AirlineLogo: 'AirlineLogo', airlineName: code => code },
   };
@@ -69,16 +69,104 @@ const earlier = segment('old', '2025-12-31T23:30:00-06:00', '2026-01-01T09:00:00
 const later = segment('new', '2026-01-08T11:00:00+00:00', '2026-01-08T17:00:00-06:00', 'LHR', 'IAH');
 const trip = { id: 'trip-1', title: 'London', city: 'London', country: 'United Kingdom', airportCode: 'LHR', startDate: '2025-12-31', endDate: '2026-01-08', routeLabel: 'IAH to LHR', flightCount: 2, miles: 200, airlineCount: 1, airports: ['IAH', 'LHR'], airlines: ['UA'], segments: [earlier, later] };
 
-test('all wallet targets open the overview immediately without a layout callback or flight ID', () => {
-  const opened = [];
+
+test('all wallet targets capture the whole stable wallet before release and open synchronously', () => {
+  const opened = [], callbacks = [], bounds = [20, 310, 370, 260];
   const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
   const tree = h.render({ trip, onPress: (...args) => opened.push(args) });
+  tree.props.ref.current = { measureInWindow: callback => callbacks.push(callback) };
+  assert.equal(tree.props.collapsable, false);
   const targets = nodes(tree).filter(node => node.type === 'Pressable');
   assert(targets.length >= 3);
-  targets.forEach(node => node.props.onPress());
-  assert.deepEqual(opened, targets.map(() => []));
-  assert.equal(tree.props.ref, undefined);
-  h.dispose();
+  targets.forEach((node, index) => {
+    node.props.onPressIn({ nativeEvent: { pageX: 100, pageY: 400 } });
+    callbacks[index](...bounds);
+    node.props.onPress();
+    assert.equal(opened.length, index + 1);
+  });
+  assert.deepEqual(opened, targets.map(() => [{ x: 20, y: 310, width: 370, height: 260,
+    wallet: { trip, scopeYear: undefined, totalFlightCount: undefined } }]));
+  h.dispose(); targets[0].props.onPress(); assert.equal(opened.length, targets.length);
+});
+
+test('a fast press uses a fresh layout fallback but never waits for or navigates from a measurement callback', () => {
+  const opened = [], callbacks = [];
+  const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
+  const tree = h.render({ trip, onPress: origin => opened.push(origin) });
+  tree.props.ref.current = { measureInWindow: callback => callbacks.push(callback) };
+  const target = nodes(tree).find(node => node.type === 'Pressable');
+  tree.props.onLayout(); callbacks.shift()(20, 310, 370, 260);
+  target.props.onPressIn(); target.props.onPress();
+  assert.equal(opened.length, 1); assert.equal(opened[0].y, 310);
+  callbacks.shift()(20, 99, 370, 260); assert.equal(opened.length, 1);
+  target.props.onPressIn(); target.props.onPress();
+  assert.equal(opened.length, 2); assert.equal(opened[1], undefined);
+  callbacks.shift()(20, 120, 370, 260); assert.equal(opened.length, 2); h.dispose();
+});
+
+test('source callbacks reject zero/nonfinite/expired bounds and an unmounted wallet', () => {
+  const originalNow = Date.now; let now = 1000; Date.now = () => now;
+  try {
+    const opened = [], callbacks = [];
+    const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
+    const tree = h.render({ trip, onPress: origin => opened.push(origin) });
+    tree.props.ref.current = { measureInWindow: callback => callbacks.push(callback) };
+    const target = nodes(tree).find(node => node.type === 'Pressable');
+    for (const bounds of [[20, 310, 0, 260], [NaN, 310, 370, 260], [20, 310, 370, -10]]) {
+      target.props.onPressIn(); callbacks.shift()(...bounds); target.props.onPress();
+      assert.equal(opened.at(-1), undefined);
+    }
+    target.props.onPressIn(); callbacks.shift()(20, 310, 370, 260); now += 251;
+    target.props.onPress(); assert.equal(opened.at(-1), undefined);
+    target.props.onPressIn(); now += 251; callbacks.shift()(20, 310, 370, 260);
+    target.props.onPress(); assert.equal(opened.at(-1), undefined);
+    target.props.onPressIn(); h.dispose(); callbacks.shift()(20, 310, 370, 260);
+    const count = opened.length; target.props.onPress(); assert.equal(opened.length, count);
+  } finally { Date.now = originalNow; }
+});
+
+test('scroll movement and newer presses invalidate stale source positions without reacting to tap jitter', () => {
+  const opened = [], callbacks = [];
+  const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
+  const tree = h.render({ trip, onPress: origin => opened.push(origin) });
+  tree.props.ref.current = { measureInWindow: callback => callbacks.push(callback) };
+  const target = nodes(tree).find(node => node.type === 'Pressable');
+  target.props.onPressIn({ nativeEvent: { pageX: 100, pageY: 400 } });
+  callbacks.shift()(20, 310, 370, 260);
+  tree.props.onTouchMove({ nativeEvent: { pageX: 102, pageY: 402 } });
+  target.props.onPress(); assert.equal(opened.at(-1).y, 310);
+  target.props.onPressIn({ nativeEvent: { pageX: 100, pageY: 400 } });
+  tree.props.onTouchMove({ nativeEvent: { pageX: 100, pageY: 440 } });
+  callbacks.shift()(20, 310, 370, 260); target.props.onPress(); assert.equal(opened.at(-1), undefined);
+  target.props.onPressIn(); target.props.onPressIn();
+  callbacks[1](20, 140, 370, 260); callbacks[0](20, 300, 370, 260);
+  target.props.onPress(); assert.equal(opened.at(-1).y, 140); h.dispose();
+});
+
+test('source capture preserves the current scoped wallet and ignores callbacks for replaced trip content', () => {
+  const opened = [], callbacks = [];
+  const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
+  const onPress = origin => opened.push(origin);
+  let tree = h.render({ trip, onPress });
+  tree.props.ref.current = { measureInWindow: callback => callbacks.push(callback) };
+  nodes(tree).find(node => node.type === 'Pressable').props.onPressIn();
+  const scoped = scope.scopeTripsToYear([trip], '2026')[0];
+  tree = h.render({ trip: scoped, scopeYear: '2026', totalFlightCount: 2, onPress });
+  callbacks.shift()(20, 310, 370, 260);
+  const target = nodes(tree).find(node => node.type === 'Pressable');
+  target.props.onPress(); assert.equal(opened.at(-1), undefined);
+  target.props.onPressIn(); callbacks.shift()(20, 310, 370, 260); target.props.onPress();
+  assert.strictEqual(opened.at(-1).wallet.trip, scoped);
+  assert.equal(opened.at(-1).wallet.scopeYear, '2026'); assert.equal(opened.at(-1).wallet.totalFlightCount, 2);
+  assert.deepEqual(trip.segments, [earlier, later]); h.dispose();
+});
+
+test('popup wallet heading fits to its inset width rather than the screen width', () => {
+  const fitArgs = [], h = host('components/world-window/trips/WalletCover.tsx', 'WalletHeading', { width: 420, fitArgs });
+  h.render({ trip, compact: true, availableWidth: 376 });
+  assert.equal(fitArgs.at(-1)[2], 298);
+  h.render({ trip, availableWidth: 376 }); assert.equal(fitArgs.at(-1)[2], 292);
+  h.render({ trip }); assert.equal(fitArgs.at(-1)[2], 336); h.dispose();
 });
 
 test('year scope counts departure-year legs but opens the preserved complete trip', () => {
@@ -198,4 +286,25 @@ test('narrow large text stacks counts, full airport endpoints, group headings an
   assert(nodes(list.props.renderItem({ item: earlier, index: 0 })).some(isColumn)); detailHost.dispose();
   const passHost = host('components/world-window/trips/BoardingPass.tsx', 'BoardingPass', options);
   assert(nodes(passHost.render({ segment: earlier })).filter(isColumn).length >= 3); passHost.dispose();
+});
+
+test('wallet popup keeps all flights in one scroll area with no nested screen navigation', () => {
+  const h = host('screens/TripDetailScreen.tsx', 'TripDetailScreen', { width: 420 });
+  let tree = h.render({ trip, active: 'trips', onBack: noop, onChange: noop, popup: true });
+  assert(!find(tree, 'BottomNav'));
+  assert(!button(tree, 'Back to trips'), 'Dismissal belongs to the popup, outside its scrolling paper');
+  let list = find(tree, 'FlatList');
+  assert.equal(list.props.contentContainerStyle.paddingBottom, 0);
+  assert.equal(find(list.props.ListHeaderComponent, 'WalletHeading').props.compact, true);
+  assert.equal(find(list.props.ListHeaderComponent, 'WalletHeading').props.availableWidth, 380);
+  assert.equal(list.props.data.length, 2);
+  list.props.data.forEach((item, index) => {
+    const pass = find(list.props.renderItem({ item, index }), 'BoardingPass');
+    assert.equal(pass.props.segment.id, item.id); assert.equal(pass.props.availableWidth, 380);
+  });
+  tree.props.onLayout({ nativeEvent: { layout: { width: 280 } } }); tree = h.render();
+  list = find(tree, 'FlatList');
+  assert.equal(find(list.props.ListHeaderComponent, 'WalletHeading').props.availableWidth, 280);
+  assert.equal(find(list.props.renderItem({ item: earlier, index: 0 }), 'BoardingPass').props.availableWidth, 280);
+  h.dispose();
 });

@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Animated, StyleSheet, Text, useWindowDimensions, View, type GestureResponderEvent } from "react-native";
 import Svg, { Defs, Line, LinearGradient, Rect, Stop } from "react-native-svg";
 import type { TripSummary } from "../../../data/trotterMock";
 import { fitDisplayFont } from "../displayTextFit";
@@ -22,14 +22,16 @@ export const walletColors = {
 export function WalletHeading({
   trip,
   compact = false,
+  availableWidth,
 }: {
   trip: TripSummary;
   compact?: boolean;
+  availableWidth?: number;
 }) {
   const gradient = React.useId();
   const { width, fontScale } = useWindowDimensions();
   const baseSize = compact ? 27 : 33;
-  const titleSize = fitDisplayFont(trip.city || trip.title, baseSize, getMobileVisualWidth(width) - (compact ? 78 : 84), fontScale);
+  const titleSize = fitDisplayFont(trip.city || trip.title, baseSize, (availableWidth ?? getMobileVisualWidth(width)) - (compact ? 78 : 84), fontScale);
   return (
     <View style={[s.heading, compact && s.headingCompact]}>
       <Svg
@@ -72,22 +74,67 @@ export function WalletCover({
   scopeYear,
   totalFlightCount,
   embedded = false,
+  bodyOpacity,
 }: {
   trip: TripSummary;
   onPress: (origin?: WalletOrigin) => void;
   scopeYear?: string;
   totalFlightCount?: number;
   embedded?: boolean;
+  bodyOpacity?: Animated.AnimatedInterpolation<number>;
 }) {
   const { shown, hidden } = React.useMemo(() => walletSummary(trip), [trip]);
-  const open = () => onPress();
+  const surface = React.useRef<View>(null);
+  const alive = React.useRef(true);
+  const measurement = React.useRef(0);
+  const measured = React.useRef<{ origin: WalletOrigin; at: number } | undefined>(undefined);
+  const touchStart = React.useRef<{ x: number; y: number } | undefined>(undefined);
+  const source = React.useRef({ trip, scopeYear, totalFlightCount });
+  if (source.current.trip !== trip || source.current.scopeYear !== scopeYear || source.current.totalFlightCount !== totalFlightCount) {
+    source.current = { trip, scopeYear, totalFlightCount };
+    measured.current = undefined;
+    measurement.current += 1;
+  }
+  React.useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; measurement.current += 1; measured.current = undefined; };
+  }, []);
+  const measureSource = (event?: GestureResponderEvent) => {
+    touchStart.current = event ? { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY } : undefined;
+    if (!alive.current || embedded || !surface.current?.measureInWindow) return;
+    const request = ++measurement.current, started = Date.now(), wallet = source.current;
+    // Measure on finger-down while the native surface is still at rest. The
+    // release never waits for this callback and a late result cannot navigate.
+    surface.current.measureInWindow((x, y, width, height) => {
+      const now = Date.now(), age = now - started;
+      if (!alive.current || request !== measurement.current || age < 0 || age > 250) return;
+      measured.current = [x, y, width, height].every(Number.isFinite) && width > 0 && height > 0
+        ? { origin: { x, y, width, height, wallet }, at: now } : undefined;
+    });
+  };
+  const invalidateSource = () => { measurement.current += 1; measured.current = undefined; };
+  const open = () => {
+    if (!alive.current) return;
+    const snapshot = measured.current, age = snapshot ? Date.now() - snapshot.at : Infinity;
+    invalidateSource();
+    // A very fast/accessibility press can use a fresh layout capture, otherwise
+    // the navigation surface uses its normal fallback without delaying the tap.
+    onPress(snapshot && age >= 0 && age <= 250 ? snapshot.origin : undefined);
+  };
   const headingTrip = React.useMemo(() => {
     const legs = orderedSegments(trip.segments);
     return scopeYear && legs.length ? { ...trip, startDate: calendarDate(legs[0].depTime) ?? trip.startDate,
       endDate: calendarDate(legs[legs.length - 1].arrTime) ?? trip.endDate } : trip;
   }, [trip, scopeYear]);
   return (
-    <View style={[s.stack, embedded && { marginHorizontal: 0, marginBottom: 0 }]}>
+    <View ref={surface} collapsable={false}
+      onLayout={embedded ? undefined : () => { invalidateSource(); measureSource(); }}
+      onTouchCancel={invalidateSource}
+      onTouchMove={event => {
+        const start = touchStart.current;
+        if (start && Math.hypot(event.nativeEvent.pageX - start.x, event.nativeEvent.pageY - start.y) > 8) invalidateSource();
+      }}
+      style={[s.stack, embedded && { marginHorizontal: 0, marginBottom: 0 }]}>
       <View pointerEvents="none" style={s.paperEdgeBack} />
       <View pointerEvents="none" style={s.paperEdgeFront} />
       <View style={s.wallet}>
@@ -95,17 +142,19 @@ export function WalletCover({
           accessibilityRole="button"
           accessibilityLabel={`Open ${trip.title}, ${tripDates(headingTrip)}, ${trip.flightCount} flights`}
           onPress={open}
+          onPressIn={measureSource}
           paper
         >
           <WalletHeading trip={headingTrip} compact />
         </PressFeedback>
-        <View style={s.insert}>
+        <Animated.View style={[s.insert, bodyOpacity != null && { opacity: bodyOpacity }]}>
           {scopeYear ? <Text style={s.scopeNote}>{trip.flightCount} {trip.flightCount === 1 ? "flight" : "flights"} in {scopeYear}{totalFlightCount != null && totalFlightCount !== trip.flightCount ? ` \u00b7 ${totalFlightCount} in full itinerary` : ""}</Text> : null}
           {shown.map((group) => (
             <PressFeedback
               accessibilityRole="button"
               accessibilityLabel={`${group.first.depAirport} to ${group.last.arrAirport}, ${group.dates}`}
               onPress={open}
+              onPressIn={measureSource}
               style={s.coupon} paper
               key={group.id}
             >
@@ -146,6 +195,7 @@ export function WalletCover({
           <PressFeedback
             accessibilityRole="button"
             onPress={open}
+            onPressIn={measureSource}
             style={s.open}
           >
             <Text style={s.openText}>
@@ -161,7 +211,7 @@ export function WalletCover({
               <WWIcon name="arrow" size={15} color={walletColors.ink} />
             </View>
           </PressFeedback>
-        </View>
+        </Animated.View>
         <View pointerEvents="none" style={s.spine} />
         <View pointerEvents="none" style={s.topLight} />
       </View>

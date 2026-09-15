@@ -12,12 +12,14 @@ import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 export function BoardingPass({
   segment,
   selected = false,
+  availableWidth,
 }: {
   segment: TripSegmentSummary;
   selected?: boolean;
+  availableWidth?: number;
 }) {
   const { width: windowWidth, fontScale } = useWindowDimensions();
-  const width = getMobileVisualWidth(windowWidth) || 410;
+  const width = availableWidth ?? (getMobileVisualWidth(windowWidth) || 410);
   const grain = React.useId().replace(/:/g, "");
   const flight = segment.flightNumber
     ? segment.flightNumber
@@ -93,7 +95,7 @@ export function BoardingPass({
               >
                 {segment.depAirport || "—"}
               </Text>
-              <Text style={s.city}>
+              <Text style={[s.city, stackEndpoints && s.largeCity]}>
                 {segment.depPoint?.city || "Departure"}
               </Text>
             </View>
@@ -112,7 +114,7 @@ export function BoardingPass({
               >
                 {segment.arrAirport || "—"}
               </Text>
-              <Text style={[s.city, s.right]}>
+              <Text style={[s.city, s.right, stackEndpoints && s.largeCity]}>
                 {segment.arrPoint?.city || "Arrival"}
               </Text>
             </View>
@@ -163,7 +165,7 @@ export function BoardingPass({
             </View>
           )}
         </View>
-        <View style={[s.stub, narrow && s.narrowStub, compact && s.stubBottom]}>
+        <View style={[s.stub, narrow && s.narrowStub, compact && s.stubBottom, stackEndpoints && s.stackedStub]}>
           <Svg
             pointerEvents="none"
             style={StyleSheet.absoluteFill}
@@ -221,6 +223,8 @@ export function BoardingPass({
 }
 const s = StyleSheet.create({
   stackedEndpoints: { flexDirection: "column", alignItems: "stretch", gap: 14 },
+  stackedStub: { flexDirection: "column", alignItems: "flex-start", gap: 16 },
+  largeCity: { fontSize: 11, lineHeight: 17 },
   ticketWrap: { position: "relative" },
   paperEdge: {
     position: "absolute",

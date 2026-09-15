@@ -42,6 +42,7 @@ const { nativeStampTemplate } = component('passport-native-template.ts');
 const { passportDocument } = component('passport-document.ts');
 const { PAGE_WIDTH, PAGE_HEIGHT, BOOK_MARGIN } = component('passport-paper.ts');
 const { passportClosedCoverFrame, passportPose, passportViewportHeight } = component('passport-cover.ts');
+const { passportCoverFace } = component('passport-cover-face.ts');
 const stageWidth = PAGE_WIDTH * 2 + BOOK_MARGIN * 2;
 const shapes = {
   archedCountryCanonical: 'arched_country_canonical', archedCountryBanner: 'arched_country_banner',
@@ -289,6 +290,18 @@ async function earnedStampOnce(page,width,entry) {
         entry.loadingHandoff = { fallback, actual: initial.face };
         for (const dimension of ['left', 'top', 'width', 'height'])
           record(Math.abs(initial.face[dimension] - fallback[dimension]) < 1, 'Native loading cover changes silhouette at first painted handoff', { width, dimension, fallback: fallback[dimension], actual: initial.face[dimension] });
+        entry.artworkHandoff = await page.evaluate(({ frame, svg }) => {
+          const preview = document.createElement('div');
+          Object.assign(preview.style, { position: 'absolute', left: frame.left + 'px', top: frame.top + 'px', width: frame.width + 'px', height: frame.height + 'px', visibility: 'hidden' });
+          // Isolate SVG fragment IDs just as the native renderer does.
+          const root = preview.attachShadow({ mode: 'open' }); root.innerHTML = svg;
+          document.body.append(preview);
+          const bounds = node => { const r = node.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; };
+          const pairs = Object.fromEntries(['cover-emblem', 'cover-lettering'].map(id => [id, { loading: bounds(root.getElementById(id)), loaded: bounds(document.getElementById(id)) }]));
+          preview.remove(); return pairs;
+        }, { frame: fallback, svg: passportCoverFace(width) });
+        for (const [art, pair] of Object.entries(entry.artworkHandoff)) for (const dimension of ['left', 'top', 'width', 'height'])
+          record(Math.abs(pair.loading[dimension] - pair.loaded[dimension]) < 1, 'Passport emblem or lettering changes size/position on first load', { width, art, dimension, loading: pair.loading[dimension], loaded: pair.loaded[dimension] });
         entry.initialReady = await page.evaluate(() => window.__readyFrames[0]);
         record(entry.initialReady.frame >= 2 && entry.initialReady.fonts.length === 4 && entry.initialReady.fonts.every(status => status === 'loaded') && entry.initialReady.paperWidth > 300 && entry.initialReady.backWidth > 300 && entry.initialReady.coverTransform === 'rotateY(0deg)', 'Readiness arrives before the full passport has painted', {width, ready: entry.initialReady});
         entry.images.push(await capture(page, width, 'closed'));

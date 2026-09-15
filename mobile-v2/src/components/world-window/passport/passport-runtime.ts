@@ -19,7 +19,7 @@ import {
 } from "./passport-paper";
 import { makeTextures } from "./passport-textures";
 import { stampFootprint } from "./passport-footprint";
-import { coverEmblem } from "./passport-cover-art";
+import { passportCoverFace } from "./passport-cover-face";
 import type { BookPayload } from "./passport-payload";
 import { passportPageDescription } from "./passport-accessibility";
 import {
@@ -49,7 +49,8 @@ const targets = document.getElementById("targets")!,
   loading = document.getElementById("loading")!,
   status = document.getElementById("status")!;
 const description = document.getElementById("page-description")!;
-document.getElementById("emblem")!.innerHTML = coverEmblem;
+const face = document.getElementById("cover-face")!;
+let faceWidth = 0;
 const pagesFor = (data: BookPayload) =>
   passportPages(
     chronologicalStamps(data.stamps).map((s) => s.code),
@@ -193,6 +194,10 @@ function paint() {
   if (disposed) return;
   const width = host.getBoundingClientRect().width;
   if (!width) return;
+  if (width !== faceWidth) {
+    faceWidth = width;
+    face.innerHTML = passportCoverFace(width);
+  }
   if (
     stampSettle &&
     (pointer ||
