@@ -1,5 +1,6 @@
 import { Asset } from 'expo-asset';
 import { Image, Platform } from 'react-native';
+import { getInfoAsync } from 'expo-file-system/legacy';
 import * as THREE from 'three';
 
 type RendererOptions = THREE.WebGLRendererParameters & {
@@ -11,6 +12,7 @@ type RendererOptions = THREE.WebGLRendererParameters & {
 };
 
 type AssetReference = number | string | Asset | { uri: string };
+const resolvingAssets = new WeakMap<Asset, Promise<Asset>>();
 
 async function resolveAsset(reference: AssetReference) {
   let asset: Asset;
@@ -27,22 +29,30 @@ async function resolveAsset(reference: AssetReference) {
     throw new Error(`Cannot resolve asset automatically: ${String(reference)}`);
   }
 
-  const needsNativeFile = Platform.OS !== 'web' && !asset.localUri?.startsWith('file://');
-  if (!asset.localUri || needsNativeFile) {
-    // Android image requires resolve to resource identifiers. Expo GL can only
-    // decode a file URI, so force expo-asset to copy the resource into cache.
-    if (needsNativeFile) {
-      asset.localUri = null;
-      asset.downloaded = false;
+  const pending = resolvingAssets.get(asset);
+  if (pending) return pending;
+  const resolving = (async () => {
+    const native = Platform.OS !== 'web';
+    const cachedFileExists = native && asset.localUri?.startsWith('file://')
+      ? (await getInfoAsync(asset.localUri)).exists : false;
+    const needsNativeFile = native && !cachedFileExists;
+    if (!asset.localUri || needsNativeFile) {
+      // Android image requires may name a drawable instead of a file. Also,
+      // Expo's downloaded flag survives an OS-cleared cache within this process.
+      if (needsNativeFile) {
+        asset.localUri = null;
+        asset.downloaded = false;
+      }
+      await asset.downloadAsync();
     }
-    await asset.downloadAsync();
-  }
-
-  if (Platform.OS !== 'web' && !asset.localUri?.startsWith('file://')) {
-    throw new Error(`Texture asset did not resolve to a local file: ${asset.uri}`);
-  }
-
-  return asset;
+    if (native && !asset.localUri?.startsWith('file://')) {
+      throw new Error(`Texture asset did not resolve to a local file: ${asset.uri}`);
+    }
+    return asset;
+  })();
+  resolvingAssets.set(asset, resolving);
+  try { return await resolving; }
+  finally { if (resolvingAssets.get(asset) === resolving) resolvingAssets.delete(asset); }
 }
 
 export class ExpoRenderer extends THREE.WebGLRenderer {
@@ -103,6 +113,8 @@ export class ExpoTextureLoader extends THREE.TextureLoader {
           });
           width = size.width;
           height = size.height;
+          asset.width = width;
+          asset.height = height;
         }
 
         Object.assign(texture, { isDataTexture: true });

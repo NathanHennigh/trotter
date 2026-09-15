@@ -76,6 +76,24 @@ test('single-point and empty archives remain finite and do not invent markers', 
   assert.deepEqual(geometry.tripAtlasGeometry([], null), { landPath: '', paths: [], ports: [] });
 });
 
+test('bounded atlas cache reuses equivalent flight snapshots but invalidates changed routes, labels and coastlines', () => {
+  const cached = geometry.createTripAtlasGeometryCache(2);
+  const legs = [flight(point('LHR', 51.47, -.45), point('SIN', 1.36, 103.99))];
+  const first = cached(legs, null, 'SIN');
+  assert.strictEqual(cached(JSON.parse(JSON.stringify(legs)), null, 'SIN'), first, 'Provider hydration with the same map reuses the projected coastline');
+  assert.strictEqual(cached([{ ...legs[0], flightNumber: 'Changed metadata', depTime: '2026-02-01' }], null, 'SIN'), first);
+  const updated = [{ ...legs[0], arrPoint: { ...legs[0].arrPoint, lon: 104.01 } }];
+  assert.notStrictEqual(cached(updated, null, 'SIN'), first);
+  assert.strictEqual(cached(legs, null, 'SIN'), first, 'Recent maps stay hot');
+  const limited = cached(legs, null, 'SIN', { maxLabels: 1 });
+  assert.notStrictEqual(limited, first); assert.equal(limited.ports.filter(port => port.label).length, 1);
+  assert.notStrictEqual(cached(updated, null, 'SIN'), first);
+  const recreated = cached(legs, null, 'SIN');
+  assert.notStrictEqual(recreated, first, 'Least recent map is evicted at the configured bound');
+  assert.deepEqual(recreated, first, 'Eviction changes no rendered geometry');
+  assert.notStrictEqual(cached(legs, { features: [] }, 'SIN'), recreated, 'Replacing the land source invalidates cached projections');
+});
+
 test('Profile limits labels by importance while retaining all routes and markers', () => {
   const ports = [point('DFW', 33, -97), point('SIN', 1, 104), point('LHR', 51, 0), point('SFO', 38, -122), point('SYD', -34, 151)];
   const flights = ports.slice(1).map(port => flight(ports[0], port));

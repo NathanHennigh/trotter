@@ -33,6 +33,7 @@ import { colors, fonts, layout } from "../theme/trotterTheme";
 
 type Props = {
   active: BottomNavTab;
+  visible?: boolean;
   onChange: (tab: BottomNavTab) => void;
   onOpenTrip?: (trip: TripSummary, flightId?: string, origin?: TripOpenOrigin) => void;
   onOpenCountry?: (code: string) => void;
@@ -44,6 +45,7 @@ type Props = {
 };
 export function HomeGlobeScreen({
   active,
+  visible = active === "globe",
   onChange,
   onOpenTrip,
   onOpenCountry,
@@ -142,7 +144,7 @@ export function HomeGlobeScreen({
     <View style={styles.screen}>
       <WorldWindowGlobe
         routes={routes}
-        active={active === "globe"}
+        active={visible && active === "globe"}
         mapStyle={mapStyle}
         cycle={false}
         visited={visited}

@@ -216,3 +216,23 @@ export function tripAtlasGeometry(
   });
   return { landPath, paths: coordinates.map(path), ports };
 }
+
+/** Reopening a wallet should reuse its coastline projection, including across
+    equivalent provider snapshots. Keep only a bounded set of recent maps. */
+export function createTripAtlasGeometryCache(limit = 24) {
+  const maps = new Map<string, ReturnType<typeof tripAtlasGeometry>>();
+  let lastLand: MapLand | null | undefined;
+  return (segments: TripSegmentSummary[], land: MapLand | null, destination?: string,
+    options: { maxLabels?: number; prioritizeByFrequency?: boolean } = {}) => {
+    if (land !== lastLand) { maps.clear(); lastLand = land; }
+    const pointKey = (point: TripSegmentSummary["depPoint"]) => point ? [point.code, point.lat, point.lon] : null;
+    const key = JSON.stringify([destination, options.maxLabels, Boolean(options.prioritizeByFrequency),
+      segments.map(segment => [segment.depAirport, segment.arrAirport, pointKey(segment.depPoint), pointKey(segment.arrPoint)])]);
+    const cached = maps.get(key);
+    if (cached) { maps.delete(key); maps.set(key, cached); return cached; }
+    const result = tripAtlasGeometry(segments, land, destination, options);
+    maps.set(key, result);
+    if (maps.size > Math.max(1, limit)) maps.delete(maps.keys().next().value!);
+    return result;
+  };
+}

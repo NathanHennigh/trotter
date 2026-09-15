@@ -39,6 +39,7 @@ export function TripDetailScreen({
   selectedFlightId,
   backLabel = "Back to trips",
   popup = false,
+  deferUpdates = false,
 }: {
   trip: TripSummary;
   active: BottomNavTab;
@@ -47,6 +48,7 @@ export function TripDetailScreen({
   selectedFlightId?: string;
   backLabel?: string;
   popup?: boolean;
+  deferUpdates?: boolean;
 }) {
   const insets = useSafeAreaInsets(),
     { loadTripDetail, trips, refresh } = useTravelTrips();
@@ -60,6 +62,8 @@ export function TripDetailScreen({
   const list = React.useRef<FlatList<TripSegmentSummary>>(null),
     focused = React.useRef<string>("");
   React.useEffect(() => {
+    // Keep network responses and the map's refreshed SVG tree out of the wallet motion.
+    if (deferUpdates) return;
     let live = true;
     setHydrated(undefined);
     setError(undefined);
@@ -84,8 +88,11 @@ export function TripDetailScreen({
     return () => {
       live = false;
     };
-  }, [trip.id, trip.backendId, loadTripDetail, retry]);
-  const current = trips.find((entry) => entry.id === trip.id || (trip.backendId != null && entry.backendId === trip.backendId)) || hydrated || trip,
+  }, [trip.id, trip.backendId, loadTripDetail, retry, deferUpdates]);
+  const latest = trips.find((entry) => entry.id === trip.id || (trip.backendId != null && entry.backendId === trip.backendId)) || hydrated || trip;
+  const displayed = React.useRef(latest);
+  if (!deferUpdates || displayed.current.id !== trip.id) displayed.current = latest;
+  const current = displayed.current,
     segments = React.useMemo(
       () => orderedSegments(current.segments),
       [current.segments],

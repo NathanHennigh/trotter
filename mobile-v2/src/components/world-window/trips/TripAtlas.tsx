@@ -4,7 +4,9 @@ import Svg, { Circle, G, Path, Rect, Text } from "react-native-svg";
 import world from "../../../data/worldCountries.json";
 import type { TripSegmentSummary } from "../../../data/trotterMock";
 import { fonts } from "../../../theme/trotterTheme";
-import { tripAtlasGeometry } from "./tripAtlasGeometry";
+import { createTripAtlasGeometryCache } from "./tripAtlasGeometry";
+
+const cachedGeometry = createTripAtlasGeometryCache();
 
 export function TripAtlas({
   segments,
@@ -21,7 +23,7 @@ export function TripAtlas({
 }) {
   const profile = variant === "profile";
   const map = React.useMemo(
-    () => tripAtlasGeometry(segments, world, destination, profile ? { maxLabels: 7, prioritizeByFrequency: true } : {}),
+    () => cachedGeometry(segments, world, destination, profile ? { maxLabels: 7, prioritizeByFrequency: true } : {}),
     [segments, destination, profile],
   );
   return (

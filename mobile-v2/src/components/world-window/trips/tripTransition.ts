@@ -5,3 +5,22 @@ export type TripOpenOrigin = {
   x: number; y: number; width: number; height: number;
   wallet?: { trip: TripSummary; scopeYear?: string; totalFlightCount?: number };
 };
+
+const unit = (value: number) => Math.max(0, Math.min(1, value));
+const smooth = (value: number) => {
+  const t = unit(value);
+  return t * t * (3 - 2 * t);
+};
+
+/** One continuous path; sampled once for native interpolation, never on JS frames. */
+export function walletMotionFrame(progress: number, anchored = true) {
+  const p = unit(progress);
+  const travel = anchored ? smooth((p - .025) / .975) : 1 - Math.pow(1 - p, 3);
+  const expansion = anchored ? smooth((p - .09) / .91) : travel;
+  const lift = anchored && p < .65 ? 22 * Math.pow(Math.sin(Math.PI * p / .65), 2) : 0;
+  const reveal = anchored ? smooth((p - .34) / .22) : 1;
+  return { travel, expansion, lift, reveal, cover: 1 - reveal,
+    summary: 1 - smooth((p - .19) / .15) };
+}
+
+export const walletMotionSamples = Array.from({ length: 101 }, (_, index) => index / 100);

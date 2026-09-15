@@ -92,8 +92,9 @@ function load(file, name, overrides = {}) {
   const declaration = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === name);
   assert(declaration, `Load actual ${name}`);
   const styles = ast.statements.find(n => ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ["styles", "s"].includes(d.name.getText(ast))));
+  const blurCapability = ast.statements.find(n => ts.isVariableStatement(n) && n.declarationList.declarations.some(d => d.name.getText(ast) === "supportsBackgroundBlur"));
   const text = declaration.getText(ast);
-  const compiled = ts.transpileModule(`${text.startsWith("export") ? text : "export " + text}\n${styles?.getText(ast) ?? ""}`, {
+  const compiled = ts.transpileModule(`${blurCapability?.getText(ast) ?? ""}\n${text.startsWith("export") ? text : "export " + text}\n${styles?.getText(ast) ?? ""}`, {
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   const tags = "View Text Pressable FlatList BoardingPass TripAtlas WalletHeading WWEmpty ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionScope CollectionList TransportCollectionIndex AirportLuggageLabel CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen PaperReveal PaperPresence TripNavigationSurface".split(" ");
@@ -109,7 +110,7 @@ function load(file, name, overrides = {}) {
     ...pure("src/components/world-window/collections/transportCollectionModel.ts"),
     scopedPassportArchive: () => archive,
     passportScope: () => ({ arrivals: archive.arrivals, lifetimeArrivals: archive.arrivals, trips: [trip], scopedTrips: [trip] }),
-    ...pure("src/components/world-window/trips/tripPresentation.ts"), walletColors: {}, Platform: { OS: "android" }, colors: {}, fonts: {}, layout: { bottomNavHeight: 62 },
+    ...pure("src/components/world-window/trips/tripPresentation.ts"), walletColors: {}, Platform: { OS: "android", Version: 35 }, colors: {}, fonts: {}, layout: { bottomNavHeight: 62 },
     useSafeAreaInsets: () => ({ top: 24, bottom: 20 }), useWindowDimensions: () => ({ width: 390, height: 844 }), getMobileVisualWidth: x => x,
     useTravelTrips: () => ({ trips: [trip], profile: {}, status: "ready", refresh: noOp, syncFromGmail: noOp }),
     useDreams: () => ({ shareInstagramLink: noOp }), getInitialTab: () => "globe",
@@ -414,4 +415,97 @@ test("Explicit navigation from a trip clears its retained passport overlay; ordi
   find(book,'CollectionList').props.onOpenTrip(trip); tree=host.render();
   find(tree,'TripDetailScreen').props.onChange('profile'); tree=host.render();
   book=passport.render(find(tree,'PassportStatsScreen').props); assert.equal(find(book,'CollectionList'),undefined);
+});
+
+const flattenStyle = value => Array.isArray(value) ? Object.assign({}, ...value.map(flattenStyle)) : value || {};
+const screenLayers = tree => nodes(tree).filter(n => /^screen-layer-/.test(n.props?.testID ?? ""));
+
+for (const platform of [{ OS: "android", Version: 31 }, { OS: "android", Version: 35 }, { OS: "android", Version: 30 }, { OS: "ios", Version: "18.0" }, { OS: "web" }]) {
+  test(`Background blur capability and crisp modal separation: ${platform.OS} ${platform.Version ?? ""}`, () => {
+    const host = appHost({ Platform: platform });
+    let tree = host.render({ consumeShare: noOp });
+    assert(screenLayers(tree).every(layer => !flattenStyle(layer.props.style).filter), "No blur without a modal");
+    find(tree, "HomeGlobeScreen").props.onChange("profile"); tree = host.render();
+    find(tree, "ProfileScreen").props.onChange("globe"); tree = host.render();
+    find(tree, "HomeGlobeScreen").props.onOpenTrip(trip, "flight-one"); tree = host.render();
+    const layers = screenLayers(tree), filtered = layers.filter(layer => flattenStyle(layer.props.style).filter);
+    const supported = platform.OS === "web" || platform.OS === "android" && platform.Version >= 31;
+    assert.deepEqual(filtered.map(layer => layer.props.testID), supported ? ["screen-layer-globe"] : []);
+    if (supported) assert.equal(flattenStyle(filtered[0].props.style).filter, "blur(4px)");
+    assert(layers.every(layer => !find(layer, "TripNavigationSurface")), "The wallet is not a descendant of a filtered source layer");
+    assert(tree.props.children.flat(Infinity).includes(find(tree, "TripNavigationSurface")), "Modal remains a direct sibling of source screens");
+    assert.equal(flattenStyle(tree.props.style).filter, undefined, "Shell never blurs the entire app");
+    assert.equal(find(tree, "TripDetailScreen").props.selectedFlightId, "flight-one", "Route focus survives opening");
+    assert(layers.every(layer => layer.props.pointerEvents === "none"), "Blurred and retained backgrounds cannot intercept input");
+    assert.equal(find(tree, "HomeGlobeScreen").props.visible, false, "Covered globe is explicitly suspended");
+    host.unmount();
+  });
+}
+
+for (const origin of ["globe", "trips", "countries", "airports"]) {
+  test(`Blur persists throughout close and restores ${origin} origin and scope`, () => {
+    const host = appHost(); let tree = host.render({ consumeShare: noOp });
+    find(tree, "HomeGlobeScreen").props.onFilterYear("2026"); tree = host.render();
+    if (origin === "trips") {
+      find(tree, "HomeGlobeScreen").props.onOpenFlights("2026"); tree = host.render();
+      find(tree, "TripsListScreen").props.onOpenTrip(trip);
+    } else if (origin === "countries" || origin === "airports") {
+      find(tree, "HomeGlobeScreen").props.onOpenCollection(origin, "2026"); tree = host.render();
+      find(tree, origin === "countries" ? "CountryStampCollectionScreen" : "PassportStatsScreen").props.onOpenTrip(trip);
+    } else find(tree, "HomeGlobeScreen").props.onOpenTrip(trip);
+    tree = host.render();
+    const source = origin === "airports" ? "passport" : origin;
+    const blurredKeys = () => screenLayers(tree).filter(layer => flattenStyle(layer.props.style).filter).map(layer => layer.props.testID);
+    assert.deepEqual(blurredKeys(), [`screen-layer-${source}`]);
+    assert.equal(find(tree, "TripDetailScreen").props.deferUpdates, true, "Hydration waits while opening");
+    find(tree, "TripNavigationSurface").props.onEntered(); tree = host.render();
+    assert.equal(find(tree, "TripDetailScreen").props.deferUpdates, false, "Hydration resumes only after entry completes");
+    find(tree, "TripNavigationSurface").props.onRequestClose(); tree = host.render();
+    assert.equal(find(tree, "TripNavigationSurface").props.closing, true);
+    assert.equal(find(tree, "TripDetailScreen").props.deferUpdates, true, "Closing freezes detail presentation again");
+    assert.deepEqual(blurredKeys(), [`screen-layer-${source}`], "Close request does not snap the background sharp");
+    assert.equal(find(tree, "HomeGlobeScreen").props.visible, false);
+    tree = finishTripTransition(host);
+    assert.equal(find(tree, "TripNavigationSurface"), undefined);
+    assert.deepEqual(blurredKeys(), [], "Blur clears when the wallet has actually left");
+    assert.equal(find(tree, "HomeGlobeScreen").props.filterYear, "2026");
+    if (origin === "countries") assert.equal(find(tree, "CountryStampCollectionScreen").props.initialYear, "2026");
+    if (origin === "airports") assert.equal(find(tree, "PassportStatsScreen").props.initialCollection, "airports");
+    if (origin === "trips") assert.equal(find(tree, "TripsListScreen").props.initialYear, "2026");
+    assert.equal(find(tree, "HomeGlobeScreen").props.visible, origin === "globe");
+    host.unmount();
+  });
+}
+
+test("Closing during entry never releases deferred updates; a later open gets a fresh entry gate", () => {
+  const host = appHost(); let tree = host.render({ consumeShare: noOp });
+  find(tree, "HomeGlobeScreen").props.onOpenTrip(trip); tree = host.render();
+  find(tree, "TripDetailScreen").props.onBack(); tree = host.render();
+  assert.equal(find(tree, "TripDetailScreen").props.deferUpdates, true);
+  // Even an already queued completion cannot unlock presentation while closing.
+  find(tree, "TripNavigationSurface").props.onEntered(); tree = host.render();
+  assert.equal(find(tree, "TripDetailScreen").props.deferUpdates, true);
+  tree = finishTripTransition(host);
+  find(tree, "HomeGlobeScreen").props.onOpenTrip(trip); tree = host.render();
+  assert.equal(find(tree, "TripDetailScreen").props.deferUpdates, true, "Previous trip's settled state is reset");
+  find(tree, "TripNavigationSurface").props.onEntered(); tree = host.render();
+  assert.equal(find(tree, "TripDetailScreen").props.deferUpdates, false);
+  host.unmount();
+});
+
+test("Home globe rendering respects explicit overlay visibility without forgetting the texture or year", () => {
+  const host = load("src/screens/HomeGlobeScreen.tsx", "HomeGlobeScreen");
+  const props = { active: "globe", visible: true, filterYear: "2026", onChange: noOp };
+  let tree = host.render(props);
+  assert.equal(find(tree, "WorldWindowGlobe").props.active, true);
+  button(tree, "Switch to NASA imagery").props.onPress(); tree = host.render();
+  tree = host.render({ ...props, visible: false });
+  assert.equal(find(tree, "WorldWindowGlobe").props.active, false);
+  assert.equal(find(tree, "WorldWindowGlobe").props.mapStyle, "nasa");
+  tree = host.render(props);
+  assert.equal(find(tree, "WorldWindowGlobe").props.active, true);
+  assert.equal(find(tree, "WorldWindowGlobe").props.mapStyle, "nasa");
+  tree = host.render({ ...props, active: "trips", visible: true });
+  assert.equal(find(tree, "WorldWindowGlobe").props.active, false, "Visibility cannot activate an inactive tab");
+  host.unmount();
 });

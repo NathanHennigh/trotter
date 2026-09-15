@@ -17,6 +17,7 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
     useRef(value) { const c = current, i = c.cursor++; return c.slots[i] ?? (c.slots[i] = { current: value }); },
     useState(initial) { const c = current, i = c.cursor++; if (!(i in c.slots)) c.slots[i] = typeof initial === 'function' ? initial() : initial; return [c.slots[i], value => { c.slots[i] = typeof value === 'function' ? value(c.slots[i]) : value; }]; },
     useReducer(reducer, initial) { const [value, setValue] = React.useState(initial); return [value, action => setValue(previous => reducer(previous, action))]; },
+    useMemo(fn, deps) { const c = current, i = c.cursor++; if (!c.slots[i] || !same(c.slots[i].deps, deps)) c.slots[i] = { value: fn(), deps }; return c.slots[i].value; },
     useEffect(fn, deps) { const c = current, i = c.cursor++; if (!c.slots[i] || !same(c.slots[i].deps, deps)) { c.slots[i]?.cleanup?.(); c.slots[i] = { deps }; c.effects.push(() => { c.slots[i].cleanup = fn(); }); } },
   };
   class Value {
@@ -27,7 +28,7 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
   const native = {
     View: 'View', Text: 'Text', Pressable: 'Pressable', Platform: { OS: os },
     StyleSheet: { create: x => x, flatten, absoluteFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } },
-    useWindowDimensions: () => ({ width, height }), Easing: { bezier: () => 'paperEase' },
+    useWindowDimensions: () => ({ width, height }), Easing: { bezier: () => 'paperEase', linear: x => x },
     AccessibilityInfo: {
       isReduceMotionEnabled: async () => reduced,
       addEventListener: (_, callback) => { reducedListeners.add(callback); return { remove: () => reducedListeners.delete(callback) }; },
@@ -42,6 +43,7 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
         }; return animation;
       },
       divide: (left, right) => ({ operator: 'divide', left, right }),
+      multiply: (left, right) => ({ operator: 'multiply', left, right }),
       subtract: (left, right) => ({ operator: 'subtract', left, right }),
       sequence(children) {
         let active, cancelled = false, done = false, callback;
@@ -72,6 +74,7 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
     new Function('module', 'exports', 'require', 'setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', code)(module, module.exports, name => {
       if (name === '../motion') return load('components/world-window/motion.tsx');
       if (name === './walletPopupGeometry') return load('components/world-window/trips/walletPopupGeometry.ts');
+      if (name === './tripTransition') return load('components/world-window/trips/tripTransition.ts');
       assert(name in mocks, `Unexpected dependency: ${name}`); return mocks[name];
     }, callback => { const id = nextTimer++; timers.set(id, callback); return id; }, id => timers.delete(id), callback => { const id = nextTimer++; frames.set(id, callback); return id; }, id => frames.delete(id));
     cache.set(file, module.exports); return module.exports;
@@ -105,6 +108,7 @@ const ghost = tree => byId(tree, 'wallet-source-cover');
 function sampled(value, progress) {
   if (typeof value === 'number') return value;
   if (value.operator === 'divide') return sampled(value.left, progress) / sampled(value.right, progress);
+  if (value.operator === 'multiply') return sampled(value.left, progress) * sampled(value.right, progress);
   if (value.operator === 'subtract') return sampled(value.left, progress) - sampled(value.right, progress);
   if (value.inputRange) {
     const amount = sampled(value.parent, progress), input = value.inputRange, output = value.outputRange;
@@ -149,7 +153,7 @@ const paintEntry = (h, env, tree = h.render()) => {
   movingSurface(tree).props.onLayout(); h.render(); env.advanceFrame(); env.advanceFrame(); return h.render();
 };
 
-test('wallet entry waits for native layout and two painted frames, then lifts before opening', async () => {
+test('wallet entry paints first, then runs one native lift-and-open timeline without a JS handoff', async () => {
   const env = environment(); await env.ready(); const h = env.mount(surface(env));
   const tree = h.render(props());
   assert.equal(env.animations.length, 0); assert.equal(env.frames.size, 0);
@@ -158,42 +162,42 @@ test('wallet entry waits for native layout and two painted frames, then lifts be
   env.advanceFrame(); assert.equal(env.animations.length, 0);
   env.advanceFrame();
   assert.equal(env.animations.length, 1); assert.equal(env.timers.size, 0);
-  const lift = env.animations[0]; assert.equal(lift.config.toValue, .22); assert.equal(lift.config.duration, 85);
+  const lift = env.animations[0]; assert.equal(lift.config.toValue, 1); assert.equal(lift.config.duration, 300);
   assert.equal(lift.config.useNativeDriver, true);
-  const panel = movingSurface(tree), style = flatten(panel.props.style);
+  assert.equal(lift.config.easing(.5), .5, 'Native sampled curves own the easing, with no second timed stage');
+  const style = flatten(byId(tree, 'wallet-popup-paper').props.style);
   assert.equal(style.backgroundColor, '#427494'); assert.equal(style.transformOrigin, 'top left');
-  assert.deepEqual(byId(tree, 'wallet-popup-content').props.children, ['Real itinerary']);
+  assert.equal(byId(tree, 'wallet-popup-content').props.children[0], 'Real itinerary');
   assert.equal(flatten(tree.props.style).overflow, 'hidden');
   assert.equal(ghost(tree).props.pointerEvents, 'none');
   assert.equal(ghost(tree).props.importantForAccessibility, 'no-hide-descendants');
   assert.equal(sampled(flatten(ghost(tree).props.style).opacity, .22), 1);
   assert.equal(sampled(flatten(byId(tree, 'wallet-popup-content').props.style).opacity, .22), 1);
   assert.equal(sampled(flatten(byId(tree, 'wallet-reveal-curtain').props.style).opacity, .22), 1);
-  lift.finish(); assert.equal(env.animations.length, 2);
-  const opening = env.animations[1]; assert.equal(opening.config.toValue, 1); assert.equal(opening.config.duration, 245);
-  assert.equal(opening.config.useNativeDriver, true); assert.equal(opening.value.value, .22);
-  opening.finish(); assert.equal(sampled(flatten(ghost(tree).props.style).opacity), 0);
+  lift.finish(); assert.equal(env.animations.length, 1, 'Completion never queues another animation through JS');
+  assert.equal(sampled(flatten(ghost(tree).props.style).opacity), 0);
   assert.equal(sampled(flatten(byId(tree, 'wallet-popup-content').props.style).opacity), 1);
   assert.equal(sampled(flatten(byId(tree, 'wallet-reveal-curtain').props.style).opacity), 0);
   h.dispose();
 });
 
-test('opaque sibling curtain allows first paint while preserving the blue-paper reveal composition', async () => {
+test('opaque curtain allows first paint while preserving the blue-paper reveal composition', async () => {
   const env = environment(); await env.ready(); const h = env.mount(surface(env));
   const tree = h.render(props()), content = byId(tree, 'wallet-popup-content'), curtain = byId(tree, 'wallet-reveal-curtain');
-  const clip = nodes(tree).find(node => node.props?.children?.includes(content));
-  assert(clip.props.children.indexOf(content) < clip.props.children.indexOf(curtain), 'Curtain paints after the itinerary as a sibling');
+  assert.equal(content.props.children[0], 'Real itinerary');
+  assert.equal(content.props.children[1], curtain, 'Curtain paints after the itinerary in the same translated content space');
   assert.equal(flatten(content.props.style).opacity, 1, 'Native SVGs must be eligible to draw from the first paint');
   assert.equal(curtain.props.pointerEvents, 'none'); assert.equal(curtain.props.accessible, false);
   assert.equal(curtain.props.importantForAccessibility, 'no-hide-descendants');
   const curtainStyle = flatten(curtain.props.style);
-  assert.equal(curtainStyle.backgroundColor, flatten(movingSurface(tree).props.style).backgroundColor);
+  assert.equal(curtainStyle.backgroundColor, flatten(byId(tree, 'wallet-popup-paper').props.style).backgroundColor);
   for (const edge of ['top', 'left', 'right', 'bottom']) assert.equal(curtainStyle[edge], 0);
   assert.equal(curtainStyle.position, 'absolute');
   const blue = [0x42, 0x74, 0x94];
   for (let step = 0; step <= 1000; step++) {
-    const progress = step / 1000, reveal = Math.max(0, Math.min(1, (progress - .34) / (.56 - .34)));
+    const progress = step / 1000;
     const veil = sampled(curtainStyle.opacity, progress);
+    const reveal = 1 - sampled(flatten(ghost(tree).props.style).opacity, progress);
     assert(Math.abs(veil - (1 - reveal)) < 1e-12);
     for (const pixel of [[248, 246, 237], [49, 93, 119], [0, 0, 0]]) for (let channel = 0; channel < 3; channel++) {
       const previous = pixel[channel] * reveal + blue[channel] * (1 - reveal);
@@ -207,13 +211,13 @@ test('opaque sibling curtain allows first paint while preserving the blue-paper 
 test('hydration and late source measurements cannot retarget, replace the captured wallet, or restart entry', async () => {
   const env = environment(); await env.ready(); const h = env.mount(surface(env));
   const base = props(), initial = h.render(base); paintEntry(h, env, initial);
-  const lift = env.animations[0]; lift.finish(); env.animations[1].value.value = .4;
+  env.animations[0].value.value = .4;
   const changed = h.render(props({ trip: { ...trip, title: 'Hydrated trip' }, origin: { x: 200, y: -30, width: 20, height: 5,
     wallet: { trip: { ...trip, title: 'Other wallet' }, scopeYear: '2025' } } }));
-  assert.equal(env.animations.length, 2); assert.equal(env.animations[1].stopped, false);
+  assert.equal(env.animations.length, 1); assert.equal(env.animations[0].stopped, false);
   for (const key of ['translateX', 'translateY', 'scaleX', 'scaleY']) {
-    const before = transform(initial, 'wallet-popup-panel', key), after = transform(changed, 'wallet-popup-panel', key);
-    assert.strictEqual(before.parent, after.parent); assert.deepEqual(before.outputRange, after.outputRange);
+    const before = transform(initial, 'wallet-popup-paper', key), after = transform(changed, 'wallet-popup-paper', key);
+    assert.strictEqual(before, after, 'Hydration must reuse the exact native interpolation graph');
     assert.equal(after.parent.value, .4);
   }
   assert.strictEqual(ghost(changed).props.children[0].props.trip, base.origin.wallet.trip);
@@ -223,7 +227,7 @@ test('hydration and late source measurements cannot retarget, replace the captur
 test('Back reverses the current position, blocks fall-through touches, and closes once with the latest callback', async () => {
   const env = environment(); await env.ready(); let oldCloses = 0, closes = 0;
   const h = env.mount(surface(env)); h.render(props({ onClosed: () => oldCloses++ })); paintEntry(h, env);
-  env.animations[0].finish(); const entering = env.animations[1]; entering.value.value = .42;
+  const entering = env.animations[0]; entering.value.value = .42;
   let tree = h.render(props({ closing: true, onClosed: () => oldCloses++ }));
   assert.equal(entering.stopped, true); assert.equal(oldCloses, 0);
   assert.notEqual(tree.props.pointerEvents, 'none', 'The closing overlay must intercept source-list taps');
@@ -234,11 +238,11 @@ test('Back reverses the current position, blocks fall-through touches, and close
   assert(closing.config.duration > 0 && closing.config.duration <= 300);
   assert.equal(closing.value.value, .42, 'Reversal retains its current position');
   h.render(props({ closing: true, onClosed: () => closes++ }));
-  assert.equal(env.animations.length, 3); closing.finish(); closing.finish();
+  assert.equal(env.animations.length, 2); closing.finish(); closing.finish();
   assert.equal(closes, 1); assert.equal(oldCloses, 0); h.dispose();
 });
 
-test('Back during lift cancels the pending second stage without opening the itinerary later', async () => {
+test('Back during the first lift reverses immediately without a pending expansion callback', async () => {
   const env = environment(); await env.ready(); let closes = 0;
   const h = env.mount(surface(env)), base = props({ onClosed: () => closes++ });
   h.render(base); paintEntry(h, env); const lift = env.animations[0]; lift.value.value = .11;
@@ -247,6 +251,31 @@ test('Back during lift cancels the pending second stage without opening the itin
   const exit = env.animations[1]; assert.equal(exit.config.toValue, 0); assert.equal(exit.value.value, .11);
   lift.finish(); assert.equal(env.animations.length, 2); assert.equal(closes, 0);
   exit.finish(); assert.equal(closes, 1); h.dispose();
+});
+
+test('motion curves have no velocity discontinuity where lift, expansion or reveal hand off', async () => {
+  const env = environment();
+  const frame = env.load('components/world-window/trips/tripTransition.ts').walletMotionFrame;
+  const epsilon = 1e-5;
+  for (const point of [.025, .09, .19, .34, .56, .65]) for (const key of ['travel', 'expansion', 'lift', 'reveal', 'summary']) {
+    const left = (frame(point)[key] - frame(point - epsilon)[key]) / epsilon;
+    const right = (frame(point + epsilon)[key] - frame(point)[key]) / epsilon;
+    assert(Math.abs(left - right) < .1, `${key} must not stop/restart at ${point}`);
+  }
+  assert.equal(frame(0).travel, 0); assert.equal(frame(0).expansion, 0);
+  assert.equal(frame(1).travel, 1); assert.equal(frame(1).expansion, 1);
+});
+
+test('only a completed entry releases deferred detail updates; interrupted entries never do', async () => {
+  const env = environment(); await env.ready(); let releases = 0;
+  const h = env.mount(surface(env)), base = props({ onEntered: () => releases++ });
+  h.render(base); paintEntry(h, env);
+  const abandonedEntry = env.animations[0];
+  h.render({ ...base, closing: true }); abandonedEntry.finish();
+  assert.equal(releases, 0);
+  h.render(base); const resumed = env.animations.at(-1);
+  resumed.finish(); assert.equal(releases, 1);
+  h.dispose(); resumed.finish(); assert.equal(releases, 1);
 });
 
 test('interrupting a close or unmounting cannot finish an abandoned navigation', async () => {
@@ -308,7 +337,7 @@ for (const dimensions of [
   { os: 'android', width: 410, height: 880, visualWidth: 410, expectedWidth: 410 },
   { os: 'android', width: 800, height: 1024, visualWidth: 430, expectedWidth: 800 },
   { os: 'web', width: 1000, height: 880, visualWidth: 430, expectedWidth: 430 },
-]) test(`popup stays inset and its growing clip never vertically distorts content: ${dimensions.os} ${dimensions.width}`, async () => {
+]) test(`popup stays inset and translated clips never scale its content: ${dimensions.os} ${dimensions.width}`, async () => {
   const env = environment(dimensions); await env.ready(); const h = env.mount(surface(env));
   const origin = { x: 20, y: 160, width: Math.min(dimensions.expectedWidth - 40, 540), height: 220, wallet: { trip } };
   const geometry = env.load('components/world-window/trips/walletPopupGeometry.ts').walletPopupGeometry;
@@ -320,13 +349,23 @@ for (const dimensions of [
   assert(target.x >= 20 && target.x + target.width <= dimensions.expectedWidth - 20);
   assert(target.y >= 24 + 44 && target.y + target.height <= dimensions.height - 20);
   assert(target.width <= 560);
-  const scaleY = transform(tree, 'wallet-popup-panel', 'scaleY');
-  const inverseY = transform(tree, 'wallet-popup-content', 'scaleY');
+  const scaleY = transform(tree, 'wallet-popup-paper', 'scaleY');
+  const cropStyle = flatten(byId(tree, 'wallet-popup-crop').props.style);
+  for (const id of ['wallet-popup-panel', 'wallet-popup-crop', 'wallet-popup-content']) {
+    assert(flatten(byId(tree, id).props.style).transform.every(value => Object.keys(value).every(key => key.startsWith('translate'))), 'Paper and map must never sit beneath a scaled layer');
+  }
   for (let step = 0; step <= 1000; step++) {
     const progress = step / 1000;
-    for (const key of ['translateX', 'translateY', 'scaleX', 'scaleY']) assert(Number.isFinite(sampled(transform(tree, 'wallet-popup-panel', key), progress)));
+    for (const key of ['translateX', 'translateY', 'scaleX', 'scaleY']) assert(Number.isFinite(sampled(transform(tree, 'wallet-popup-paper', key), progress)));
     const sy = sampled(scaleY, progress); assert(sy > 0);
-    assert(Math.abs(sy * sampled(inverseY, progress) - 1) < 1e-12, 'Native type/map height must remain unscaled');
+    for (const [key, dimension, size] of [['translateX', 'width', target.width], ['translateY', 'height', target.height]]) {
+      const clipShift = sampled(transform(tree, 'wallet-popup-crop', key), progress);
+      const contentShift = sampled(transform(tree, 'wallet-popup-content', key), progress);
+      assert(Math.abs(clipShift + contentShift) < 1e-12, 'Opposing translations retain exact text and map position');
+      const visible = cropStyle[dimension] + clipShift;
+      const scale = sampled(transform(tree, 'wallet-popup-paper', dimension === 'width' ? 'scaleX' : 'scaleY'), progress);
+      assert(Math.abs(visible - size * scale) < 1e-9, 'Clip intersection matches the backing paper through every frame');
+    }
     assert.equal(sampled(flatten(byId(tree, 'wallet-popup-content').props.style).opacity, progress), 1);
     const contentAlpha = 1 - sampled(flatten(byId(tree, 'wallet-reveal-curtain').props.style).opacity, progress);
     const coverAlpha = sampled(flatten(ghost(tree).props.style).opacity, progress);
@@ -335,7 +374,9 @@ for (const dimensions of [
     assert(contentAlpha >= 0 && contentAlpha <= 1 && coverAlpha >= 0 && coverAlpha <= 1);
     assert(contentAlpha + coverAlpha > .99, 'There must always be visible paper through the reveal');
   }
-  assert.equal(sampled(transform(tree, 'wallet-popup-panel', 'translateY'), .22), origin.y - target.y - 22);
+  const earlyY = sampled(transform(tree, 'wallet-popup-panel', 'translateY'), .15);
+  assert(earlyY < origin.y - target.y, 'The selected wallet lifts before its content reveal');
+  assert(sampled(flatten(byId(tree, 'wallet-reveal-curtain').props.style).opacity, .15) === 1);
   assert.equal(sampled(scaleY, 0) * target.height, origin.height);
   assert.equal(sampled(scaleY, 1), 1);
   assert.equal(sampled(transform(tree, 'wallet-popup-panel', 'translateX'), 1), 0);
@@ -391,7 +432,7 @@ test('cold preference resolution cannot collapse an already exposed itinerary ba
   const tree = h.render(props()); assert.deepEqual(flatten(movingSurface(tree).props.style).transform, []);
   assert.equal(env.animations[0].value.value, 1);
   await flush(); const normal = h.render();
-  assert.equal(sampled(transform(normal, 'wallet-popup-panel', 'scaleY')), 1);
+  assert.equal(sampled(transform(normal, 'wallet-popup-paper', 'scaleY')), 1);
   assert.equal(sampled(transform(normal, 'wallet-popup-panel', 'translateY')), 0);
   assert.equal(sampled(flatten(ghost(normal).props.style).opacity), 0);
   assert.equal(env.animations.at(-1).config.toValue, 1); h.dispose();

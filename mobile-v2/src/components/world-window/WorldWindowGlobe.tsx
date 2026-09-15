@@ -17,7 +17,8 @@ import {
 } from "react-native";
 import { GLView } from "expo-gl";
 import * as THREE from "three";
-import { ExpoRenderer, ExpoTextureLoader } from "../../lib/expoThree";
+import { ExpoRenderer } from "../../lib/expoThree";
+import { loadGlobeBaseTextures, loadGlobeTexture } from "./globeAssets";
 import type { FlightRoute, RoutePoint } from "../../data/demoTravel";
 import { globeDayDetailTiles } from "../../data/globeDayDetailTiles";
 import { globeNightDetailTiles } from "../../data/globeNightDetailTiles";
@@ -116,14 +117,34 @@ export function WorldWindowGlobe(props: Props) {
   const clearResources = useRef<() => void>(() => {}),
     generation = useRef(0),
     resumeRendering = useRef<() => void>(() => {}),
-    pauseRendering = useRef<() => void>(() => {});
+    pauseRendering = useRef<() => void>(() => {}),
+    trimDetail = useRef<() => void>(() => {}),
+    automaticRecoveries = useRef(0),
+    pendingRecovery = useRef(false);
+  const retryWhenVisible = useCallback(() => {
+    if (pendingRecovery.current && mounted.current && foreground.current && live.current.active) {
+      pendingRecovery.current = false;
+      setAttempt(value => value + 1);
+    }
+  }, []);
+  const recover = useCallback((stage: string) => {
+    // Only stage/category information: native error messages can contain file paths.
+    console.warn(`[WorldWindowGlobe] failure stage=${stage} recovery=${automaticRecoveries.current ? 'manual' : 'automatic'}`);
+    if (automaticRecoveries.current === 0) {
+      automaticRecoveries.current++;
+      pendingRecovery.current = true;
+      retryWhenVisible();
+    } else setError(true);
+  }, [retryWhenVisible]);
   useEffect(() => {
     mounted.current = true;
     const app = AppState.addEventListener("change", (s) => {
       foreground.current = s === "active";
+      retryWhenVisible();
       if (foreground.current && live.current.active) resumeRendering.current();
       else pauseRendering.current();
     });
+    const memory = AppState.addEventListener("memoryWarning", () => trimDetail.current());
     AccessibilityInfo.isReduceMotionEnabled().then((v) => {
       reduced.current = v;
     });
@@ -138,13 +159,15 @@ export function WorldWindowGlobe(props: Props) {
       cancelAnimationFrame(frame.current);
       clearResources.current();
       app.remove();
+      memory.remove();
       motion.remove();
     };
-  }, []);
+  }, [retryWhenVisible]);
   useEffect(() => {
+    retryWhenVisible();
     if (props.active && foreground.current) resumeRendering.current();
     else pauseRendering.current();
-  }, [props.active]);
+  }, [props.active, retryWhenVisible]);
   const refreshRoutes = useCallback(() => {
     const ctx = context.current;
     if (!ctx) return;
@@ -471,9 +494,26 @@ export function WorldWindowGlobe(props: Props) {
   }, []);
   const create = useCallback(
     async (gl: any) => {
+      clearResources.current();
       const ownGeneration = ++generation.current;
+      const abort = new AbortController(), resources: (() => void)[] = [];
+      let disposed = false, stage = 'context';
+      const isCurrent = () => mounted.current && !disposed && ownGeneration === generation.current;
+      const release = () => {
+        if (disposed) return;
+        disposed = true;
+        abort.abort();
+        if (ownGeneration === generation.current) {
+          cancelAnimationFrame(frame.current);
+          frame.current = 0;
+          resumeRendering.current = pauseRendering.current = trimDetail.current = () => {};
+          context.current = null;
+        }
+        for (const dispose of resources.reverse()) { try { dispose(); } catch { /* Context loss can already have released native resources. */ } }
+        resources.length = 0;
+      };
+      clearResources.current = release;
       try {
-        clearResources.current();
         const original = gl.pixelStorei.bind(gl);
         const unsupported = new Set([
           gl.UNPACK_FLIP_Y_WEBGL,
@@ -484,6 +524,7 @@ export function WorldWindowGlobe(props: Props) {
           if (!unsupported.has(p)) original(p, v);
         };
         const renderer = new ExpoRenderer({ gl, antialias: true });
+        resources.push(() => renderer.dispose());
         // Expo's drawing buffer already includes device pixel density. Do not
         // replace it with layout points or multiply by PixelRatio a second time.
         let bufferWidth = gl.drawingBufferWidth,
@@ -494,34 +535,25 @@ export function WorldWindowGlobe(props: Props) {
           globe = new THREE.Group(),
           camera = new THREE.OrthographicCamera(-3, 3, 6, -6, 0.1, 100);
         scene.add(globe);
+        resources.push(() => disposeObject(scene));
         const textureError = () => {
-          if (mounted.current && ownGeneration === generation.current) {
-            clearResources.current();
-            setError(true);
+          if (isCurrent()) {
+            release();
+            recover(stage);
           }
         };
         const quality = globeTextureQuality(
           gl.getParameter(gl.MAX_TEXTURE_SIZE),
         );
-        const loader = new ExpoTextureLoader(),
-          day = loader.load(
-            quality.baseWidth === 4096 ? DAY : SMALL_DAY,
-            undefined,
-            undefined,
-            textureError,
-          ),
-          night = loader.load(
-            quality.baseWidth === 4096 ? NIGHT : SMALL_NIGHT,
-            undefined,
-            undefined,
-            textureError,
-          ),
-          index = loader.load(
-            quality.baseWidth === 4096 ? INDEX : SMALL_INDEX,
-            undefined,
-            undefined,
-            textureError,
-          );
+        stage = 'base-assets';
+        const { day, night, index } = await loadGlobeBaseTextures({
+          day: { primary: quality.baseWidth === 4096 ? DAY : SMALL_DAY, fallback: SMALL_DAY },
+          night: { primary: quality.baseWidth === 4096 ? NIGHT : SMALL_NIGHT, fallback: SMALL_NIGHT },
+          index: { primary: quality.baseWidth === 4096 ? INDEX : SMALL_INDEX, fallback: SMALL_INDEX },
+        }, abort.signal);
+        if (!isCurrent()) { [day, night, index].forEach(texture => texture.dispose()); return; }
+        resources.push(() => [day, night, index].forEach(texture => texture.dispose()));
+        stage = 'scene';
         for (const t of [day, night]) configureGlobeTexture(t, false, renderer);
         configureGlobeTexture(index, true, renderer);
         index.minFilter = index.magFilter = THREE.NearestFilter;
@@ -533,6 +565,7 @@ export function WorldWindowGlobe(props: Props) {
           1,
           THREE.RGBAFormat,
         );
+        resources.push(() => lookup.dispose());
         lookup.minFilter = lookup.magFilter = THREE.NearestFilter;
         lookup.needsUpdate = true;
         const material = new THREE.ShaderMaterial({
@@ -543,8 +576,8 @@ export function WorldWindowGlobe(props: Props) {
             visitedMap: { value: lookup },
             indexSize: {
               value: new THREE.Vector2(
-                quality.baseWidth,
-                quality.baseWidth / 2,
+                index.image.width,
+                index.image.height,
               ),
             },
             dayBounds: { value: new THREE.Vector4(0, 0, 1, 1) },
@@ -633,6 +666,8 @@ void main(){
           renderer,
           quality.detailTiles,
         );
+        resources.push(() => detail.dispose());
+        trimDetail.current = () => detail.trim();
         context.current = {
           scene,
           globe,
@@ -644,26 +679,19 @@ void main(){
           lookup,
           renderer,
         };
+        stage = 'routes';
         refreshRoutes();
         updateVisited();
-        clearResources.current = () => {
-          cancelAnimationFrame(frame.current);
-          frame.current = 0;
-          resumeRendering.current = pauseRendering.current = () => {};
-          detail.dispose();
-          disposeObject(scene);
-          for (const t of [day, night, index, lookup]) t.dispose();
-          renderer.dispose();
-          context.current = null;
-        };
+        stage = 'first-frame';
         let previous = 0,
           cycleStart: number | undefined;
         const portNight = new THREE.Color("#fbd3a0"),
           portDay = new THREE.Color("#e5bc8d");
         const draw = (time: number) => {
           frame.current = 0;
-          if (!mounted.current || !foreground.current || !live.current.active)
+          if (!isCurrent() || !foreground.current || !live.current.active)
             return;
+          try {
           const dt = Math.min(40, previous ? time - previous : 16);
           previous = time;
           if (
@@ -777,19 +805,17 @@ void main(){
               daylight,
             );
           }
-          try {
-            renderer.render(scene, camera);
-            gl.endFrameEXP();
-          } catch {
-            textureError();
-          }
+          renderer.render(scene, camera);
+          gl.endFrameEXP();
+          stage = 'render';
           if (
-            mounted.current &&
+            isCurrent() &&
             context.current?.renderer === renderer &&
             foreground.current &&
             live.current.active
           )
             frame.current = requestAnimationFrame(draw);
+          } catch { textureError(); }
         };
         pauseRendering.current = () => {
           cancelAnimationFrame(frame.current);
@@ -811,14 +837,13 @@ void main(){
           }
         };
         resumeRendering.current();
-      } catch {
-        if (mounted.current && ownGeneration === generation.current) {
-          clearResources.current();
-          setError(true);
-        }
+      } catch (error) {
+        const report = isCurrent();
+        release();
+        if (report) recover(stage);
       }
     },
-    [refreshRoutes, updateVisited],
+    [refreshRoutes, updateVisited, recover],
   );
   return (
     <View
@@ -864,6 +889,8 @@ void main(){
           <Pressable
             accessibilityRole="button"
             onPress={() => {
+              automaticRecoveries.current = 0;
+              pendingRecovery.current = false;
               setError(false);
               setAttempt((n) => n + 1);
             }}
@@ -990,30 +1017,23 @@ function createGlobeDetail(
       index: THREE.Texture;
     }
   >();
-  const failed = new Set<number>();
+  const failed = new Map<number, number>();
   let disposed = false,
+    suspended = false,
     busy = false,
     desired: number[] = [],
     lastSelection = -Infinity,
-    currentZoom = 1;
+    currentZoom = 1,
+    currentTime = 0,
+    residentLimit = limit;
+  const abort = new AbortController();
   const load =
     loadOverride ??
-    ((asset: number, labels: boolean) =>
-      new Promise<THREE.Texture>((resolve, reject) => {
-        let texture: THREE.Texture | undefined;
-        texture = new ExpoTextureLoader().load(
-          asset,
-          (value) => {
-            configureGlobeTexture(value, labels, renderer);
-            resolve(value);
-          },
-          undefined,
-          (error) => {
-            texture?.dispose();
-            reject(error);
-          },
-        );
-      }));
+    (async (asset: number, labels: boolean) => {
+      const texture = await loadGlobeTexture(asset, abort.signal);
+      configureGlobeTexture(texture, labels, renderer);
+      return texture;
+    });
   const remove = (key: number) => {
     const entry = loaded.get(key);
     if (!entry) return;
@@ -1026,11 +1046,11 @@ function createGlobeDetail(
     loaded.delete(key);
   };
   const pump = async () => {
-    if (busy || disposed) return;
+    if (busy || disposed || suspended) return;
     busy = true;
     try {
-      while (!disposed) {
-        const key = desired.find((key) => !loaded.has(key) && !failed.has(key));
+      while (!disposed && !suspended) {
+        const key = desired.find((key) => !loaded.has(key) && (failed.get(key) ?? 0) <= currentTime);
         if (key === undefined) break;
         const tile = detailTiles[key];
         let day: THREE.Texture | undefined,
@@ -1112,12 +1132,13 @@ function createGlobeDetail(
           // Opaque earth first, then detail, then borders/flight routes/airports.
           mesh.renderOrder = -1;
           loaded.set(key, { mesh, day, night, index });
+          failed.delete(key);
           globe.add(mesh);
         } catch {
           day?.dispose();
           index?.dispose();
           night?.dispose();
-          failed.add(key);
+          failed.set(key, currentTime + 15000);
         }
       }
     } finally {
@@ -1127,10 +1148,12 @@ function createGlobeDetail(
   return {
     update(zoom: number, time: number, dt: number) {
       if (disposed) return;
+      suspended = false;
       currentZoom = zoom;
+      currentTime = time;
       if (time - lastSelection >= 250 || zoom < 1.6) {
         lastSelection = time;
-        desired = zoom < 1.6 ? [] : selectGlobeTiles(globe.quaternion, limit);
+        desired = zoom < 1.6 ? [] : selectGlobeTiles(globe.quaternion, residentLimit);
         for (const key of loaded.keys())
           if (!desired.includes(key)) remove(key);
         void pump();
@@ -1144,15 +1167,24 @@ function createGlobeDetail(
     },
     dispose() {
       disposed = true;
+      abort.abort();
       desired = [];
       for (const key of [...loaded.keys()]) remove(key);
       // The one outstanding decode is disposed by pump when its callback resolves.
     },
     suspend() {
+      suspended = true;
+      lastSelection = -Infinity;
+      // Retain only the already-bounded visible tile set. Returning Home reuses
+      // these meshes/textures instead of decoding and uploading them again.
+    },
+    trim() {
+      // Memory pressure is different from ordinary navigation: release detail,
+      // then use at most one visible tile for the remainder of this context.
+      residentLimit = Math.min(1, limit);
       desired = [];
       lastSelection = -Infinity;
       for (const key of [...loaded.keys()]) remove(key);
-      // Preserve base textures and camera state; late detail decodes are released.
     },
     stats: () => ({
       resident: loaded.size,

@@ -288,6 +288,41 @@ test('background refresh never inserts or removes space inside an already popula
   assert.equal(find(loaded, 'FlatList').props.data.length, 2); h.dispose();
 });
 
+test('source-only backing paper, frame and body fade together without changing ordinary wallets', () => {
+  const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
+  const opacity = { sourceFade: true };
+  const source = h.render({ trip, onPress: noop, embedded: true, bodyOpacity: opacity });
+  const animated = nodes(source).filter(node => node.type === 'AnimatedView');
+  assert.equal(animated.filter(node => Array.isArray(node.props.style) && node.props.style.some(style => style?.opacity === opacity)).length, 4,
+    'Both paper edges, whole backing frame and coupon insert share one fade');
+  const frame = animated.find(node => node.props.testID === 'wallet-source-frame');
+  assert(frame); assert.equal(frame.props.pointerEvents, 'none');
+  const frameStyle = Object.assign({}, ...frame.props.style.filter(Boolean));
+  assert.equal(frameStyle.elevation, 0, 'Android must draw the backing before the copied heading and coupons');
+  assert.equal(frameStyle.shadowOpacity, 0, 'Only the moving popup backing casts a shadow');
+  const regular = h.render({ trip, onPress: noop });
+  assert(!nodes(regular).some(node => node.props?.testID === 'wallet-source-frame'));
+  assert(!nodes(regular).some(node => Array.isArray(node.props?.style) && node.props.style.some(style => style?.opacity === opacity)));
+  h.dispose();
+});
+
+test('wallet motion pins its initial flight snapshot and defers network work until entry settles', async () => {
+  let calls = 0;
+  const service = { trips: [{ ...trip, backendId: 1 }], loadTripDetail: async () => { calls++; return service.trips[0]; } };
+  const h = host('screens/TripDetailScreen.tsx', 'TripDetailScreen', { service });
+  const props = { trip: service.trips[0], active: 'trips', onBack: noop, onChange: noop, popup: true, deferUpdates: true };
+  let tree = h.render(props); await flush();
+  assert.equal(calls, 0, 'An opening wallet does not compete with a fresh detail request');
+  assert.deepEqual(find(tree, 'FlatList').props.data.map(segment => segment.id), ['old', 'new']);
+  service.trips = [{ ...trip, backendId: 1, segments: [...trip.segments, segment('added-return', '2026-01-09T11:00:00Z', '2026-01-09T13:00:00Z', 'IAH', 'DFW')] }];
+  tree = h.render({ ...props, trip: service.trips[0] });
+  assert.equal(find(tree, 'FlatList').props.data.length, 2, 'Provider refresh cannot redraw route geometry during motion');
+  tree = h.render({ ...props, trip: service.trips[0], deferUpdates: false }); await flush(); tree = h.render();
+  assert.equal(calls, 1);
+  assert.deepEqual(find(tree, 'FlatList').props.data.map(segment => segment.id), ['old', 'new', 'added-return'], 'No refreshed or return flight is discarded after entry');
+  h.dispose();
+});
+
 for (const reducedMotion of [true, false]) test(`overview stays at top; exact Home flight entry focuses only that flight (reduced motion ${reducedMotion})`, () => {
   const scrolls = [], h = host('screens/TripDetailScreen.tsx', 'TripDetailScreen', { reducedMotion });
   const props = { trip, active: 'trips', onBack: noop, onChange: noop };

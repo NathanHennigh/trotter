@@ -146,9 +146,12 @@ export function WalletCover({
         if (start && Math.hypot(event.nativeEvent.pageX - start.x, event.nativeEvent.pageY - start.y) > 8) invalidateSource();
       }}
       style={[s.stack, embedded && { marginHorizontal: 0, marginBottom: 0 }]}>
-      <View pointerEvents="none" style={s.paperEdgeBack} />
-      <View pointerEvents="none" style={s.paperEdgeFront} />
-      <View style={s.wallet}>
+      <Animated.View pointerEvents="none" style={[s.paperEdgeBack, bodyOpacity != null && { opacity: bodyOpacity }]} />
+      <Animated.View pointerEvents="none" style={[s.paperEdgeFront, bodyOpacity != null && { opacity: bodyOpacity }]} />
+      <View style={[s.wallet, bodyOpacity != null && s.sourceWallet]}>
+        {bodyOpacity != null && <Animated.View testID="wallet-source-frame" pointerEvents="none"
+          style={[StyleSheet.absoluteFill, s.wallet, { left: -1, top: -1, right: -1, bottom: -1,
+            elevation: 0, shadowOpacity: 0, opacity: bodyOpacity }]} />}
         <PressFeedback
           accessibilityRole="button"
           accessibilityLabel={`Open ${trip.title}, ${tripDates(headingTrip)}, ${trip.flightCount} flights`}
@@ -265,6 +268,7 @@ const s = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  sourceWallet: { backgroundColor: "transparent", borderColor: "transparent", shadowOpacity: 0, elevation: 0 },
   pressed: { transform: [{ scale: 0.991 }], opacity: 0.97 },
   heading: {
     paddingHorizontal: 15,

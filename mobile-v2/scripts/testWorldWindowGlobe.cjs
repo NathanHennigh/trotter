@@ -52,6 +52,7 @@ new Function(
   if (request === "react-native")
     return { StyleSheet: { create: (styles) => styles } };
   if (request === "expo-gl" || request.includes("expoThree")) return {};
+  if (request === "./globeAssets") return {};
   if (request.includes("trotterTheme")) return { colors: {}, fonts: {} };
   if (request === "./globe-geography") return geography;
   if (request === "./routeSelection") {
@@ -707,30 +708,32 @@ test("late night decode disposes all three textures after zoom out or unmount", 
   }
 });
 
-test("suspending a hidden globe evicts detail and resumes without replacing the base", async () => {
+test("suspending a hidden globe keeps bounded detail warm and resumes without another decode", async () => {
   const h = detailHarness(),
     baseUniforms = h.base.uniforms;
   h.controller.update(4.8, 300, 16);
   await h.settle();
   assert.equal(h.controller.stats().resident, 4);
+  const textures = [...h.all], meshes = [...h.group.children];
   h.controller.suspend();
-  assert.equal(h.controller.stats().resident, 0);
-  assert.equal(h.group.children.length, 0);
-  assert(h.all.every((texture) => texture.userData.disposals === 1));
+  assert.equal(h.controller.stats().resident, 4);
+  assert.deepEqual(h.group.children, meshes);
+  assert(h.all.every((texture) => texture.userData.disposals === 0));
   assert.equal(h.base.uniforms, baseUniforms);
   h.controller.update(4.8, 316, 16);
   await h.settle();
   assert.equal(
     h.controller.stats().resident,
     4,
-    "resume can restore detail immediately without the old 250 ms selection delay",
+    "resume reuses the resident detail immediately",
   );
+  assert.deepEqual(h.all, textures, 'Tab navigation must not decode or upload the same tiles again');
   assert.equal(h.base.uniforms, baseUniforms);
   h.controller.dispose();
   assert(h.all.every((texture) => texture.userData.disposals === 1));
 });
 
-test("backgrounding during a night decode releases all pending detail textures", async () => {
+test("pausing during a decode finishes only the current tile and retains it for return", async () => {
   const h = detailHarness(1);
   h.controller.update(4.8, 300, 16);
   h.pending.shift().resolve();
@@ -740,14 +743,42 @@ test("backgrounding during a night decode releases all pending detail textures",
   h.controller.suspend();
   h.pending.shift().resolve();
   await h.flush();
-  assert.equal(h.controller.stats().resident, 0);
+  assert.equal(h.controller.stats().resident, 1);
   assert.equal(h.pending.length, 0);
-  assert(h.all.every((texture) => texture.userData.disposals === 1));
+  assert(h.all.every((texture) => texture.userData.disposals === 0));
   h.controller.update(4.8, 320, 16);
   await h.settle();
   assert.equal(h.controller.stats().resident, 1);
+  assert.equal(h.all.length, 3, 'The completed tile is reused on resume');
   h.controller.dispose();
   assert(h.all.every((texture) => texture.userData.disposals === 1));
+});
+
+test("transient detail failures retry after a bounded cooldown instead of staying blurry until remount", async () => {
+  const h = detailHarness(1);
+  h.controller.update(4.8, 300, 16);
+  h.pending.shift().reject(new Error('Temporary file-copy failure'));
+  await h.flush();
+  h.controller.update(4.8, 600, 16);
+  assert.equal(h.pending.length, 0, 'No per-frame retry loop');
+  h.controller.update(4.8, 16000, 16);
+  assert.equal(h.pending.length, 1);
+  await h.settle();
+  assert.equal(h.controller.stats().resident, 1);
+  assert.equal(h.controller.stats().failed, 0);
+  h.controller.dispose();
+  assert(h.all.every(texture => texture.userData.disposals === 1));
+});
+
+test("memory pressure trims only detail and reduces future resident tiles while preserving the base", async () => {
+  const h = detailHarness(4), base = h.base.uniforms;
+  h.controller.update(4.8, 300, 16); await h.settle(); assert.equal(h.controller.stats().resident, 4);
+  h.controller.trim(); assert.equal(h.controller.stats().resident, 0); assert.strictEqual(h.base.uniforms, base);
+  assert(h.all.every(texture => texture.userData.disposals === 1));
+  h.controller.update(4.8, 316, 16); await h.settle(); assert.equal(h.controller.stats().resident, 1);
+  assert.equal(h.all.filter(texture => texture.userData.disposals === 0).length, 3);
+  h.controller.suspend(); h.controller.update(4.8, 400, 16); await h.settle(); assert.equal(h.controller.stats().resident, 1);
+  h.controller.dispose(); assert(h.all.every(texture => texture.userData.disposals === 1));
 });
 
 test("night detail uses real NASA resolution and matches the unfiltered source pixels", async () => {

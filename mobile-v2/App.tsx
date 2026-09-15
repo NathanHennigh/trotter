@@ -232,6 +232,7 @@ function AppShell({
   const [selectedTripId, setSelectedTripId] = React.useState<string | null>(null);
   const [selectedFlightId, setSelectedFlightId] = React.useState<string>();
   const [tripClosing, setTripClosing] = React.useState(false);
+  const [tripSettled, setTripSettled] = React.useState(false);
   const [tripPaperOrigin, setTripPaperOrigin] = React.useState<TripOpenOrigin>();
   const [countries, setCountries] = React.useState<{
     initialCountry?: string;
@@ -273,6 +274,7 @@ function AppShell({
     setSelectedTripId(null);
     setSelectedFlightId(undefined);
     setTripClosing(false);
+    setTripSettled(false);
     setCountries(null);
     setPassportCollection(null);
     visit(tab);
@@ -283,6 +285,7 @@ function AppShell({
     setSelectedTripId(trip.id);
     setSelectedFlightId(flightId);
     setTripClosing(false);
+    setTripSettled(false);
     setTripPaperOrigin(paperOrigin);
     // Keep the origin mounted, including its collection selection and scroll.
     visit("trips");
@@ -291,6 +294,7 @@ function AppShell({
     setSelectedTripId(null);
     setSelectedFlightId(undefined);
     setTripClosing(false);
+    setTripSettled(false);
     setTripPaperOrigin(undefined);
     visit(tripOrigin.current);
   };
@@ -356,7 +360,10 @@ function AppShell({
 
   // Retain navigation state without exposing or accepting input on hidden screens.
   const layer = (key: string, visible: boolean, content: React.ReactNode) => (
-    <View key={key} style={[styles.overlay, !visible && styles.inactive]}
+    <View key={key} testID={`screen-layer-${key}`} style={[styles.overlay, !visible && styles.inactive,
+      // Blur only the origin; the wallet remains a crisp sibling. Android's
+      // compositor handles this without capturing a bitmap of the GL surface.
+      visible && Boolean(selectedTrip) && supportsBackgroundBlur && styles.tripBackground]}
       pointerEvents={visible && !selectedTrip ? "auto" : "none"}
       accessibilityElementsHidden={!visible || Boolean(selectedTrip)}
       aria-hidden={!visible || Boolean(selectedTrip)}
@@ -373,6 +380,7 @@ function AppShell({
     <View style={styles.shell}>
       {layer("globe", baseTab === "globe",
         <HomeGlobeScreen filterYear={globeYear} onFilterYear={setGlobeYear}
+          visible={mainVisible && activeTab === "globe"}
           onBackHandlerChange={registerGlobeBack}
           active={activeTab} onChange={changeTab} onOpenTrip={openTrip}
           onOpenCountry={openCountries} onOpenCollection={openPassportCollection} onOpenFlights={openFilteredTrips} />)}
@@ -407,14 +415,17 @@ function AppShell({
           onOpenAirport={code => openPassportCollection("airports", undefined, code)} />)}
       {selectedTrip && <TripNavigationSurface key={selectedTrip.id} trip={selectedTrip} flightId={selectedFlightId}
         origin={tripPaperOrigin} closing={tripClosing} onClosed={finishCloseTrip} onRequestClose={closeTrip}
+        onEntered={() => setTripSettled(true)}
         closeLabel={tripOrigin.current === "passport" ? "Back to collection" : `Back to ${label(tripOrigin.current).toLowerCase()}`}>
         <TripDetailScreen key={selectedTrip.id} trip={selectedTrip} selectedFlightId={selectedFlightId}
           active="trips" onBack={closeTrip} onChange={changeTab} popup
+          deferUpdates={!tripSettled || tripClosing}
           backLabel={tripOrigin.current === "passport" ? "Back to collection" : `Back to ${label(tripOrigin.current).toLowerCase()}`} />
       </TripNavigationSurface>}
     </View>
   );
 }
+const supportsBackgroundBlur = Platform.OS === "web" || (Platform.OS === "android" && Number(Platform.Version) >= 31);
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.paperSoft },
   webRoot:
@@ -429,6 +440,7 @@ const styles = StyleSheet.create({
       : {},
   shell: { flex: 1, backgroundColor: colors.paperSoft },
   inactive: { opacity: 0 },
+  tripBackground: { filter: "blur(4px)" },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.paperSoft,
