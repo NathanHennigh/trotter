@@ -128,15 +128,46 @@ test('saving details keeps the place open with explicit success, without changin
   assert.equal(closes, 0); assert(text(tree).includes('Changes saved.')); assert(action(tree, 'Edit details')); h.dispose();
 });
 
-test('Google loading replaces empty-location advice; location confirmation and detail confirmation remain distinct', async () => {
-  let chosen, patches = 0; const h = host(editor, 'DreamEditor', { live: { loading: true } });
-  const props = editorProps({ item: { ...item, needsReview: true, locationProvider: 'google_places', locationStatus: 'needs_review' }, onSave: async () => patches++, onConfirmLocation: async (id, candidate) => chosen = [id,candidate] });
+test('a resolved Google result populates the map and address without a location approval action', () => {
+  const h = host(editor, 'DreamEditor', { live: { loading: true } });
+  const props = editorProps({ item: { ...item, locationProvider: 'google_places', locationStatus: 'resolved', locationPlaceId: 'google-place-id' } });
   let tree = h.render(props); assert(text(tree).includes('Loading location details…')); assert(!text(tree).some(value => value.includes('Add a city')));
-  assert(!action(tree, 'Confirm pin')); assert(action(tree, 'Save place details'));
-  h.live({ details: { locationProvider: 'google_places', locationStatus: 'needs_review', locationCandidates: [{ id: 'google-place-id', name: 'One café', address: 'Lisbon, Portugal' }], locationAttributions: [] } });
-  tree = h.render(); action(tree, 'Confirm pin').props.onPress(); await flush(); tree = h.render();
-  assert.deepEqual(chosen, ['1','google-place-id']); assert.equal(patches, 0); assert(text(tree).includes('Pin confirmed.'));
-  action(tree, 'Save place details').props.onPress(); await flush(); tree = h.render(); assert.equal(patches, 1); assert(text(tree).includes('Place details saved.')); h.dispose();
+  assert(!action(tree, 'Confirm pin'));
+  h.live({ details: { locationProvider: 'google_places', locationStatus: 'resolved', locationPlaceId: 'google-place-id',
+    locationExpiresAt: '2099-01-01', locationAddress: 'Lisbon, Portugal',
+    locationCandidates: [{ id: 'google-place-id', name: 'One café', address: 'Lisbon, Portugal', latitude: 38.71, longitude: -9.14,
+      googleMapsUrl: 'https://maps.google.com/?q=38.71,-9.14' }], locationAttributions: [] } });
+  tree = h.render(); assert(!action(tree, 'Confirm pin')); assert(!action(tree, 'Save place details'));
+  const point = byType(tree, 'DreamPlacesMap').props.points[0];
+  assert.equal(point.id, item.id); assert.equal(point.lat, 38.71); assert.equal(point.lon, -9.14);
+  assert(text(tree).includes('Lisbon, Portugal')); assert(action(tree, 'Maps')); assert(action(tree, 'Edit details')); h.dispose();
+});
+
+test('unresolved or mismatched Google candidates are not plotted or presented as an approval queue', () => {
+  const h = host(editor, 'DreamEditor', { live: { details: { locationProvider: 'google_places', locationStatus: 'needs_review',
+    locationCandidates: [{ id: 'unselected', name: 'Wrong café', latitude: 38.71, longitude: -9.14 }], locationAttributions: [] } } });
+  let tree = h.render(editorProps({ item: { ...item, locationProvider: 'google_places', locationStatus: 'needs_review' } }));
+  assert(!byType(tree, 'DreamPlacesMap')); assert(!action(tree, 'Confirm pin')); assert(!text(tree).includes('Wrong café'));
+  h.live({ details: { locationProvider: 'google_places', locationStatus: 'resolved', locationPlaceId: 'selected', locationExpiresAt: '2099-01-01',
+    locationCandidates: [{ id: 'unselected', latitude: 38.71, longitude: -9.14 }], locationAttributions: [] } });
+  tree = h.render(); assert(!byType(tree, 'DreamPlacesMap')); h.dispose();
+});
+
+test('location lookup alone does not put a saved place into the Dreams review queue', () => {
+  const h = host(screen, 'DreamsScreen', { items: [{ ...item, locationStatus: 'needs_review' }] });
+  const tree = h.render({ active: 'dreams', onChange: noop });
+  assert(!text(tree).some(value => /^Review \d/.test(value))); h.dispose();
+});
+
+test('fresh Google identity and coordinates replace the list pin together without reviving old coordinates', () => {
+  const h = host(editor, 'DreamEditor', { live: { details: { locationProvider: 'google_places', locationStatus: 'resolved',
+    locationPlaceId: 'new-match', locationExpiresAt: '2099-01-01', locationAddress: 'New address',
+    locationCandidates: [{ id: 'new-match', latitude: 41.15, longitude: -8.61 }], locationAttributions: [] } } });
+  let tree = h.render(editorProps({ item: { ...item, locationProvider: 'google_places', locationStatus: 'resolved',
+    locationPlaceId: 'old-match', locationExpiresAt: '2099-01-01', latitude: 38.7, longitude: -9.1 } }));
+  assert.equal(byType(tree, 'DreamPlacesMap').props.points[0].lat, 41.15);
+  h.live({ details: { locationProvider: 'google_places', locationStatus: 'not_found', locationCandidates: [], locationAttributions: [] } });
+  tree=h.render(); assert(!byType(tree, 'DreamPlacesMap')); h.dispose();
 });
 
 test('country Search focuses above the map; first resolution keeps map height and pin Details opens directly', () => {

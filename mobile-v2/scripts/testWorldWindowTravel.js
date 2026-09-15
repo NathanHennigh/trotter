@@ -110,16 +110,31 @@ test('location queue polls until resolved and automatically creates a real attri
   assert.equal(env.clock.pending().filter(ms=>ms===5000).length,0); env.dispose();
 });
 
-test('ambiguous candidates stay unpinned until confirmation, and malformed coordinates are excluded', async () => {
+test('legacy candidates wait for automatic resolution, while malformed coordinates are excluded', async () => {
   const env=serviceEnvironment();
   const candidate={id:'one',name:'Cafe One',address:'1 Synthetic Road',latitude:38.7,longitude:-9.1,google_maps_url:'https://www.google.com/maps/search/?api=1&query=38.7,-9.1'};
   env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1,{location_status:'needs_review',location_candidates:[candidate,{...candidate,id:'bad',latitude:null}]})]:[]));
   env.render(); await flush(); let state=env.render();
   assert.equal(state.items[0].locationCandidates.length,1); assert.equal(dreams.exactMapPoint(state.items[0]),undefined);
-  assert.equal(locations.canFindLocation(state.items[0]),false); assert.equal(locations.locationNote(state.items[0]),'Check location');
-  env.fetcher(async()=>response(200,apiItem(1,{location_status:'manual',google_maps_url:candidate.google_maps_url,latitude:38.7,longitude:-9.1})));
-  await state.confirmLocation('1','one'); assert.deepEqual(JSON.parse(env.calls.at(-1).init.body),{candidate_id:'one'});
+  assert.equal(locations.canFindLocation(state.items[0]),true); assert.equal(locations.locationNote(state.items[0]),'Finding location…');
+  env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1,{location_status:'resolved',location_provider:'google_places',
+    location_place_id:'one',location_expires_at:'2099-01-01',location_user_confirmed:false,latitude:38.7,longitude:-9.1})]:[]));
+  await state.refresh();
+  assert(!env.calls.some(call=>call.url.endsWith('/location-confirm')));
   state=env.render(); assert.equal(dreams.exactMapPoint(state.items[0]).lat,38.7); assert.equal(locations.canFindLocation(state.items[0]),false); env.dispose();
+});
+
+test('waiting Google matches keep polling until the scheduler automatically resolves them', async () => {
+  const env=serviceEnvironment();
+  env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1,{location_status:'needs_review',location_provider:'google_places'})]:[]));
+  env.render(); await flush(); let state=env.render();
+  assert.equal(state.locatingItems.length,1); assert(locations.isFindingLocation(state.items[0]));
+  assert.equal(locations.canFindLocation(state.items[0]),false);
+  env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1,{location_status:'resolved',location_provider:'google_places',
+    location_place_id:'automatic',location_expires_at:'2099-01-01',location_user_confirmed:false,latitude:38.7,longitude:-9.1})]:[]));
+  await env.clock.advance(5000); await flush(); state=env.render();
+  assert.equal(state.locatingItems.length,0); assert.equal(dreams.exactMapPoint(state.items[0]).lat,38.7);
+  assert(!env.calls.some(call=>call.init?.method==='POST')); env.dispose();
 });
 
 test('location failures retain all saves and duplicate queue/edit writes are guarded', async () => {

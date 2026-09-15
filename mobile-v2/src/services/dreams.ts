@@ -203,7 +203,8 @@ function useDreamsState() {
   const dreams = React.useMemo(() => mergeDreams(liveDreams, itemDreams), [liveDreams, itemDreams]);
   const needsReviewItems = React.useMemo(() => items.filter((item) => item.needsReview), [items]);
   const processingItems = React.useMemo(() => items.filter((item) => item.status === 'processing' || item.status === 'created'), [items]);
-  const locatingItems = React.useMemo(() => items.filter((item) => item.locationStatus === 'queued' || item.locationStatus === 'running'), [items]);
+  const locatingItems = React.useMemo(() => items.filter((item) => item.locationStatus === 'queued' || item.locationStatus === 'running'
+    || (item.locationProvider === 'google_places' && item.locationStatus === 'needs_review')), [items]);
 
   React.useEffect(() => {
     itemsRef.current = items;

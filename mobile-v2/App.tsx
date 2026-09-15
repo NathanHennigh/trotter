@@ -233,7 +233,6 @@ function AppShell({
   const [selectedFlightId, setSelectedFlightId] = React.useState<string>();
   const [tripClosing, setTripClosing] = React.useState(false);
   const [tripPaperOrigin, setTripPaperOrigin] = React.useState<TripOpenOrigin>();
-  const [tripPaperTarget, setTripPaperTarget] = React.useState<TripOpenOrigin>();
   const [countries, setCountries] = React.useState<{
     initialCountry?: string;
     returnTab: BottomNavTab;
@@ -285,7 +284,6 @@ function AppShell({
     setSelectedFlightId(flightId);
     setTripClosing(false);
     setTripPaperOrigin(paperOrigin);
-    setTripPaperTarget(undefined);
     // Keep the origin mounted, including its collection selection and scroll.
     visit("trips");
   };
@@ -294,7 +292,6 @@ function AppShell({
     setSelectedFlightId(undefined);
     setTripClosing(false);
     setTripPaperOrigin(undefined);
-    setTripPaperTarget(undefined);
     visit(tripOrigin.current);
   };
   const closeTrip = () => setTripClosing(true);
@@ -404,9 +401,8 @@ function AppShell({
         <ProfileScreen active={activeTab} onChange={changeTab} onOpenStamps={() => openCountries()}
           onOpenAirport={code => openPassportCollection("airports", undefined, code)} />)}
       {selectedTrip && <TripNavigationSurface key={selectedTrip.id} trip={selectedTrip} flightId={selectedFlightId}
-        origin={tripPaperOrigin} target={tripPaperTarget} closing={tripClosing} onClosed={finishCloseTrip}>
+        origin={tripPaperOrigin} closing={tripClosing} onClosed={finishCloseTrip}>
         <TripDetailScreen key={selectedTrip.id} trip={selectedTrip} selectedFlightId={selectedFlightId}
-          onWalletLayout={setTripPaperTarget}
           active="trips" onBack={closeTrip} onChange={changeTab}
           backLabel={tripOrigin.current === "passport" ? "Back to collection" : `Back to ${label(tripOrigin.current).toLowerCase()}`} />
       </TripNavigationSurface>}

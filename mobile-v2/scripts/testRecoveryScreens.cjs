@@ -105,14 +105,13 @@ test('editing notes does not silently turn an automatically found location into 
   assert(patch); assert(!Object.hasOwn(patch,'googleMapsUrl'),'An unchanged provider-derived Maps URL stays provider-derived'); host.dispose();
 });
 
-test('location lookup remains open and candidate confirmation sends only the chosen candidate',async()=>{
-  let closes=0,lookups=0,confirmed;
+test('retrying location remains open, then a resolved result displays without confirmation',async()=>{
+  let closes=0,lookups=0;
   const host=screen('components/world-window/dreams/DreamEditor.tsx','DreamEditor');
-  const props={item:{...item,needsReview:false},points:[],onClose:()=>closes++,onSave:noop,onDelete:noop,onRetry:noop,onLocate:async()=>lookups++,onConfirmLocation:async(id,candidate)=>{confirmed=[id,candidate];}};
-  let tree=host.render(props); button(tree,'Find location').props.onPress(); await flush(); assert.equal(lookups,1); assert.equal(closes,0);
-  tree=host.render({...props,item:{...props.item,locationStatus:'needs_review',locationCandidates:[{id:'candidate-2',name:'Cafe One',address:'1 Synthetic Road',latitude:38.7,longitude:-9.1}]}});
-  assert.equal(button(tree,'Find location'),undefined); button(tree,'Confirm pin').props.onPress(); await flush();
-  assert.deepEqual(confirmed,['1','candidate-2']); assert.equal(closes,0); tree=host.render(); assert(text(tree).includes('Pin confirmed.')); host.dispose();
+  const props={item:{...item,needsReview:false},points:[],onClose:()=>closes++,onSave:noop,onDelete:noop,onRetry:noop,onLocate:async()=>lookups++};
+  let tree=host.render(props); button(tree,'Retry location').props.onPress(); await flush(); assert.equal(lookups,1); assert.equal(closes,0);
+  tree=host.render({...props,item:{...props.item,locationStatus:'resolved',latitude:38.7,longitude:-9.1,locationAddress:'1 Synthetic Road'}});
+  assert.equal(button(tree,'Confirm pin'),undefined); assert.equal(closes,0); assert(text(tree).includes('1 Synthetic Road')); host.dispose();
 });
 
 test('entering Edit uses the latest parsed place, then polling preserves an active draft',()=>{

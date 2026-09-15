@@ -10,7 +10,7 @@ import { WebView } from "react-native-webview";
 import { colors, fonts } from "../../../theme/trotterTheme";
 import { WWEmblem } from "../WorldWindowUI";
 import { passportDocument, scriptJSON } from "./passport-document";
-import { passportPose, passportViewportHeight } from "./passport-cover";
+import { passportClosedCoverFrame, passportPose, passportViewportHeight } from "./passport-cover";
 import { preparePassportPayload, type BookPayload } from "./passport-payload";
 import type { PassportArchive } from "./passport-model";
 import { selectionHaptic } from "../../../utils/experiencePreferences";
@@ -34,19 +34,22 @@ export function PassportBook({
 }: Props) {
   const drawingWidth = Number.isFinite(width) ? Math.max(1, width) : 1;
   const viewportHeight = useMemo(() => passportViewportHeight(drawingWidth), [drawingWidth]);
+  const coverFrame = useMemo(() => passportClosedCoverFrame(drawingWidth), [drawingWidth]);
   const closedHeight = useMemo(() => {
     const pose = passportPose(0, drawingWidth);
     return Math.ceil(drawingWidth * pose.height / pose.width);
   }, [drawingWidth]);
   const [html, setHtml] = useState<string | null>(null),
     [height, setHeight] = useState(closedHeight),
+    [renderReady, setRenderReady] = useState(false),
     [error, setError] = useState(false),
     [attempt, setAttempt] = useState(0);
   const webview = useRef<WebView>(null),
     iframe = useRef<HTMLIFrameElement>(null),
     payload = useRef<BookPayload | null>(null),
     sentPayload = useRef<BookPayload | null>(null),
-    loaded = useRef(false);
+    loaded = useRef(false),
+    openWhenReady = useRef(false);
   const state = useRef<BookState>({ spread: 0, closed: true }),
     initial = useRef<string | null>(null),
     mounted = useRef(true);
@@ -77,6 +80,16 @@ export function PassportBook({
       );
     sentPayload.current = payload.current;
   }, []);
+  const openCover = useCallback(() => {
+    if (Platform.OS === "web")
+      iframe.current?.contentWindow?.postMessage({ type: "passport-open" }, "*");
+    else webview.current?.injectJavaScript("window.openPassport&&window.openPassport();true;");
+  }, []);
+  useEffect(() => {
+    if (!renderReady || !openWhenReady.current) return;
+    openWhenReady.current = false;
+    openCover();
+  }, [renderReady, openCover]);
   useEffect(() => {
     let cancelled = false;
     preparePassportPayload(archive)
@@ -129,7 +142,11 @@ export function PassportBook({
       )
     )
       latest.current.onCountry(value.code);
-    if (value.type === "ready") setError(false);
+    if (value.type === "error") setError(true);
+    if (value.type === "ready") {
+      setError(false);
+      setRenderReady(true);
+    }
   }, []);
   useEffect(() => {
     if (Platform.OS !== "web") return;
@@ -152,54 +169,15 @@ export function PassportBook({
     initial.current = null;
     sentPayload.current = null;
     setHtml(null);
+    setRenderReady(false);
     setError(false);
     setAttempt((value) => value + 1);
   };
-  if (!html)
-    return (
-      <View
-        style={{
-          width: drawingWidth,
-          minHeight: closedHeight,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            error ? "Retry loading passport" : "Open passport when ready"
-          }
-          onPress={() => {
-            if (error) retry();
-            else state.current = { ...state.current, closed: false };
-          }}
-          style={[
-            styles.loadingCover,
-            { width: width * 0.77, height: width * 1.02 },
-          ]}
-        >
-          <WWEmblem size={88} color="#d5e2e8" />
-          <Text style={styles.coverTitle}>Passport</Text>
-        </Pressable>
-        {error ? (
-          <Pressable
-            onPress={retry}
-            accessibilityRole="button"
-            style={styles.retry}
-          >
-            <Text style={styles.error}>
-              Couldn’t load the passport. Tap to try again.
-            </Text>
-          </Pressable>
-        ) : null}
-      </View>
-    );
   return (
     // Native/WebView layout crosses threads. Keep its drawing surface large
     // enough for every pose; size messages adjust only the surrounding flow.
-    <View style={{ width: drawingWidth, height, overflow: "visible" }}>
-      {Platform.OS === "web" ? (
+    <View style={{ width: drawingWidth, height: renderReady ? height : closedHeight, overflow: "visible" }}>
+      {html && (Platform.OS === "web" ? (
         React.createElement("iframe", {
           ref: iframe,
           title: "Interactive travel passport",
@@ -214,6 +192,7 @@ export function PassportBook({
             flex: "none",
             border: 0,
             background: "transparent",
+            opacity: renderReady ? 1 : 0,
             width: drawingWidth,
             height: viewportHeight,
           },
@@ -252,11 +231,30 @@ export function PassportBook({
           setSupportMultipleWindows={false}
           showsVerticalScrollIndicator={false}
           androidLayerType="hardware"
-          style={[styles.webview, { width: drawingWidth, height: viewportHeight }]}
-          containerStyle={[styles.webview, { width: drawingWidth, height: viewportHeight }]}
+          style={[styles.webview, { width: drawingWidth, height: viewportHeight, opacity: renderReady ? 1 : 0 }]}
+          containerStyle={[styles.webview, { width: drawingWidth, height: viewportHeight, opacity: renderReady ? 1 : 0 }]}
           onTouchEnd={() => latest.current.onInteractionChange?.(false)}
           onTouchCancel={() => latest.current.onInteractionChange?.(false)}
         />
+      ))}
+      {!renderReady && (
+        <Pressable
+          testID="passport-loading-cover"
+          accessibilityRole="button"
+          accessibilityLabel={error ? "Retry loading passport" : "Open passport when ready"}
+          onPress={() => {
+            if (error) retry();
+            else openWhenReady.current = true;
+          }}
+          style={[
+            styles.loadingCover,
+            { left: coverFrame.left, top: coverFrame.top, width: coverFrame.width, height: coverFrame.height, gap: 24 * coverFrame.scale, borderLeftWidth: 5 * coverFrame.scale, padding: 15 * coverFrame.scale },
+          ]}
+        >
+          <View pointerEvents="none" style={[styles.coverInset, { inset: 10 * coverFrame.scale }]} />
+          <WWEmblem size={48 * coverFrame.scale} color="#d5e2e8" />
+          <Text allowFontScaling={false} style={[styles.coverTitle, { fontSize: 26 * coverFrame.scale, lineHeight: 31 * coverFrame.scale }]}>Passport</Text>
+        </Pressable>
       )}
       {error ? (
         <Pressable
@@ -274,8 +272,7 @@ const styles = StyleSheet.create({
   // Override react-native-webview's internal flex:1 on both native layers.
   webview: { position: "absolute", left: 0, top: 0, flex: 0, flexGrow: 0, flexShrink: 0, backgroundColor: "transparent" },
   loadingCover: {
-    maxWidth: 340,
-    maxHeight: 454,
+    position: "absolute",
     borderWidth: 1,
     borderColor: "#17384d",
     borderLeftWidth: 5,
@@ -283,12 +280,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#294e65",
     alignItems: "center",
     justifyContent: "center",
-    gap: 38,
   },
+  coverInset: { position: "absolute", borderWidth: 1, borderColor: "#d5e2e84d" },
   coverTitle: {
     fontFamily: fonts.display,
-    fontSize: 41,
     letterSpacing: 0.6,
+    includeFontPadding: false,
     color: "#d5e2e8",
   },
   retry: { padding: 12 },

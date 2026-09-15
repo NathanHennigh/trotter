@@ -31,6 +31,7 @@ type NativeWindow = Window & {
   ReactNativeWebView?: { postMessage: (data: string) => void };
   __PASSPORT__: BookPayload;
   updatePassport?: (payload: BookPayload) => void;
+  openPassport?: () => void;
 };
 const bridge = window as unknown as NativeWindow;
 const post = (type: string, data: Record<string, unknown> = {}) => {
@@ -65,6 +66,8 @@ let model = new PassportController(
   ),
   cover = new PassportCoverController(payload.state?.closed ?? true);
 let ready = false,
+  readyPending = false,
+  readyFrame = 0,
   disposed = false,
   generation = 0,
   lastBack: HTMLCanvasElement | undefined,
@@ -288,6 +291,20 @@ function paint() {
     lastHeightAt = now;
     post("size", { height });
   }
+  if (readyPending) {
+    readyPending = false;
+    const paintedGeneration = generation;
+    cancelAnimationFrame(readyFrame);
+    // A prepared document is not a painted WebView. Wait for the fonts, page
+    // textures and cover layout to survive a frame before the native cover is
+    // removed. The second frame also lets Chromium composite the rigid board.
+    readyFrame = requestAnimationFrame(() => {
+      readyFrame = requestAnimationFrame(() => {
+        readyFrame = 0;
+        if (!disposed && paintedGeneration === generation) post("ready");
+      });
+    });
+  }
 }
 function flushUpdate() {
   if (!pendingUpdate || pointer || model.fold || cover.busy) return;
@@ -315,9 +332,9 @@ function flushUpdate() {
   textures = next.textures;
   payload = next.payload;
   ready = true;
+  readyPending = true;
   lastTargets = "";
   lastBack = undefined;
-  post("ready");
 }
 const visibleEarned = () =>
   payload.visible !== false &&
@@ -533,9 +550,17 @@ async function update(next: BookPayload) {
 bridge.updatePassport = (next) => {
   void update(next);
 };
+bridge.openPassport = () => {
+  if (!ready || cover.progress !== 0) return;
+  feedbackOrigin = `${model.spread}-${cover.settled}`;
+  cover.go(1, reduced());
+  wake();
+};
 window.addEventListener("message", (event) => {
   if (event.source === window.parent && event.data?.type === "passport-update")
     void update(event.data.payload);
+  if (event.source === window.parent && event.data?.type === "passport-open")
+    bridge.openPassport?.();
 });
 const resize = new ResizeObserver(paint);
 resize.observe(host);
@@ -557,6 +582,7 @@ window.addEventListener("pagehide", () => {
   disposed = true;
   generation++;
   cancelAnimationFrame(frame);
+  cancelAnimationFrame(readyFrame);
   resize.disconnect();
 });
 paint();

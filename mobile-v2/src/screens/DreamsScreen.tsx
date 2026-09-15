@@ -105,7 +105,7 @@ export function DreamsScreen({
   const reviews = React.useMemo(
     () =>
       store.items.filter(
-        (item) => item.needsReview || item.status === "failed" || item.locationStatus === "needs_review",
+        (item) => item.needsReview || item.status === "failed",
       ),
     [store.items],
   );
@@ -261,7 +261,6 @@ export function DreamsScreen({
           onSave={store.updateItem}
           onDelete={store.deleteItem}
           onLocate={store.locateItem}
-          onConfirmLocation={store.confirmLocation}
           onRetry={() =>
             store.shareInstagramLink(selected.sourceUrl, selected.caption)
           }
@@ -550,7 +549,7 @@ function CountryPlaces({
           <View style={s.placeActions}>
             <Pressable accessibilityRole="button" onPress={onShowMap} style={s.placeAction}>
               <Text style={s.actionText}>
-                {exactMapPoint(item) ? "Show on map" : item.locationStatus === "needs_review" ? "Check location" : "Location details"}
+                {exactMapPoint(item) ? "Show on map" : "Location details"}
               </Text>
             </Pressable>
             {safeWebUrl(item.sourceUrl) && (

@@ -41,7 +41,7 @@ const { countryIconAssets, stampShapeAssets } = load(path.join(root, 'src/assets
 const { nativeStampTemplate } = component('passport-native-template.ts');
 const { passportDocument } = component('passport-document.ts');
 const { PAGE_WIDTH, PAGE_HEIGHT, BOOK_MARGIN } = component('passport-paper.ts');
-const { passportPose, passportViewportHeight } = component('passport-cover.ts');
+const { passportClosedCoverFrame, passportPose, passportViewportHeight } = component('passport-cover.ts');
 const stageWidth = PAGE_WIDTH * 2 + BOOK_MARGIN * 2;
 const shapes = {
   archedCountryCanonical: 'arched_country_canonical', archedCountryBanner: 'arched_country_banner',
@@ -268,10 +268,11 @@ async function earnedStampOnce(page,width,entry) {
       page.on('pageerror', error => entry.errors.push(error.message));
       await page.route('**/*', route => { entry.requests.push(route.request().url()); route.abort(); });
       const html = passportDocument(payload).replace('<body>', `<body><script>
-        window.__messages=[];window.__sizeReports=[];window.__heightLag=[];
-        window.ReactNativeWebView={postMessage:s=>{const message=JSON.parse(s);window.__messages.push(message);if(message.type==='size')window.__sizeReports.push({time:performance.now(),height:message.height});}};
+        window.__messages=[];window.__sizeReports=[];window.__heightLag=[];window.__readyFrames=[];window.__observedFrames=0;
+        window.ReactNativeWebView={postMessage:s=>{const message=JSON.parse(s);window.__messages.push(message);if(message.type==='size')window.__sizeReports.push({time:performance.now(),height:message.height});
+          if(message.type==='ready'){const canvas=document.getElementById('paper'),back=document.getElementById('cover-back');window.__readyFrames.push({frame:window.__observedFrames,fonts:Array.from(document.fonts).map(f=>f.status),paperWidth:canvas.width,paperHeight:canvas.height,backWidth:back.width,coverTransform:document.getElementById('cover-board').style.transform});}}};
         // Observes bridge timing only. Does not alter the runtime, animation, or DOM.
-        function observeHeight(){const scene=document.getElementById('cover-scene'),board=document.getElementById('cover-board');
+        function observeHeight(){window.__observedFrames++;const scene=document.getElementById('cover-scene'),board=document.getElementById('cover-board');
           if(scene&&board&&getComputedStyle(scene).display!=='none'){
             const angle=Number(board.style.transform.match(/rotateY\\(([-\\d.]+)deg\\)/)?.[1]||0);
             const face=document.querySelector(angle> -90?'.cover-front':'.cover-back').getBoundingClientRect(),now=performance.now();
@@ -282,7 +283,14 @@ async function earnedStampOnce(page,width,entry) {
       try {
         await page.setContent(html);
         await page.waitForFunction(() => window.__messages.some(m => m.type === 'ready'), null, { timeout: 15000 });
-        entry.samples.push(await sample(page, 'initial-closed', 0));
+        const initial = await sample(page, 'initial-closed', 0);
+        entry.samples.push(initial);
+        const fallback = passportClosedCoverFrame(width);
+        entry.loadingHandoff = { fallback, actual: initial.face };
+        for (const dimension of ['left', 'top', 'width', 'height'])
+          record(Math.abs(initial.face[dimension] - fallback[dimension]) < 1, 'Native loading cover changes silhouette at first painted handoff', { width, dimension, fallback: fallback[dimension], actual: initial.face[dimension] });
+        entry.initialReady = await page.evaluate(() => window.__readyFrames[0]);
+        record(entry.initialReady.frame >= 2 && entry.initialReady.fonts.length === 4 && entry.initialReady.fonts.every(status => status === 'loaded') && entry.initialReady.paperWidth > 300 && entry.initialReady.backWidth > 300 && entry.initialReady.coverTransform === 'rotateY(0deg)', 'Readiness arrives before the full passport has painted', {width, ready: entry.initialReady});
         entry.images.push(await capture(page, width, 'closed'));
         await coverDrag(page, width, true, entry);
         entry.images.push(await capture(page, width, 'open'));

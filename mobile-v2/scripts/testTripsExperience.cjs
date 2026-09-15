@@ -64,22 +64,21 @@ function nodes(value, seen = new Set()) {
 const find = (tree, type) => nodes(tree).find(node => node.type === type);
 const button = (tree, label) => nodes(tree).find(node => node.props?.label === label || node.props?.accessibilityLabel === label);
 const texts = tree => nodes(tree).filter(node => node.type === 'Text').map(node => node.props.children.flat().filter(value => typeof value !== 'object').join(''));
-const segment = (id, depTime, arrTime, depAirport, arrAirport) => ({ id, depTime, arrTime, depAirport, arrAirport, airline: 'UA', flightNumber: '10', distanceMiles: 100, depPoint: { code: depAirport, city: depAirport, lat: 20, lng: 10 }, arrPoint: { code: arrAirport, city: arrAirport, lat: 30, lng: 20 } });
+const segment = (id, depTime, arrTime, depAirport, arrAirport) => ({ id, depTime, arrTime, depAirport, arrAirport, airline: 'UA', flightNumber: '10', distanceMiles: 100, depPoint: { code: depAirport, city: depAirport, lat: 20, lon: 10 }, arrPoint: { code: arrAirport, city: arrAirport, lat: 30, lon: 20 } });
 const earlier = segment('old', '2025-12-31T23:30:00-06:00', '2026-01-01T09:00:00+00:00', 'IAH', 'LHR');
 const later = segment('new', '2026-01-08T11:00:00+00:00', '2026-01-08T17:00:00-06:00', 'LHR', 'IAH');
 const trip = { id: 'trip-1', title: 'London', city: 'London', country: 'United Kingdom', airportCode: 'LHR', startDate: '2025-12-31', endDate: '2026-01-08', routeLabel: 'IAH to LHR', flightCount: 2, miles: 200, airlineCount: 1, airports: ['IAH', 'LHR'], airlines: ['UA'], segments: [earlier, later] };
 
-test('all wallet targets open overview with the same measured bounds, never a flight ID', () => {
-  const opened = [], bounds = { x: 20, y: 310, width: 370, height: 260 };
+test('all wallet targets open the overview immediately without a layout callback or flight ID', () => {
+  const opened = [];
   const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
   const tree = h.render({ trip, onPress: (...args) => opened.push(args) });
-  tree.props.ref.current = { measureInWindow: callback => callback(...Object.values(bounds)) };
   const targets = nodes(tree).filter(node => node.type === 'Pressable');
   assert(targets.length >= 3);
   targets.forEach(node => node.props.onPress());
-  assert.deepEqual(opened, targets.map(() => [{ ...bounds, wallet: { trip, scopeYear: undefined, totalFlightCount: undefined } }]));
+  assert.deepEqual(opened, targets.map(() => []));
+  assert.equal(tree.props.ref, undefined);
   h.dispose();
-  targets[0].props.onPress(); assert.equal(opened.length, targets.length, 'Late measurement after unmount is ignored');
 });
 
 test('year scope counts departure-year legs but opens the preserved complete trip', () => {
@@ -132,15 +131,25 @@ test('Trip Back stays outside scrolling content and empty details have a working
   assert.equal(calls, 2); h.dispose();
 });
 
-test('wallet target is measured once per trip, below the Back bar, without scroll-dependent updates', () => {
-  const captured = [], h = host('screens/TripDetailScreen.tsx', 'TripDetailScreen');
-  const props = { trip, active: 'trips', onChange: noop, onBack: noop, onWalletLayout: bounds => captured.push(bounds) };
-  let tree = h.render(props); const surface = nodes(tree).find(node => node.type === 'View' && node.props.onLayout);
-  surface.props.ref.current = { measureInWindow: callback => callback(0, 76, 410, 400) };
-  surface.props.onLayout(); surface.props.onLayout();
-  assert.deepEqual(captured, [{ x: 0, y: 76, width: 410, height: 400 }]);
-  tree = h.render(); nodes(tree).find(node => node.type === 'View' && node.props.onLayout).props.onLayout();
-  assert.equal(captured.length, 1); h.dispose();
+
+test('background refresh never inserts or removes space inside an already populated itinerary', async () => {
+  let resolve;
+  const pending = new Promise(done => { resolve = done; });
+  const h = host('screens/TripDetailScreen.tsx', 'TripDetailScreen', { service: { loadTripDetail: () => pending } });
+  const full = { ...trip, backendId: 1 };
+  const props = { trip: full, active: 'trips', onBack: noop, onChange: noop, selectedFlightId: 'new' };
+  h.render(props); const loading = h.render();
+  const header = find(loading, 'FlatList').props.ListHeaderComponent;
+  assert(!find(header, 'ActivityIndicator'), 'Loading must not shift the map or flight rows');
+  const indicator = find(loading, 'ActivityIndicator'); assert.equal(indicator.props.animating, true);
+  const scrolls = [], list = find(loading, 'FlatList');
+  list.props.ref.current = { scrollToIndex: value => scrolls.push(value) };
+  list.props.onContentSizeChange();
+  assert.equal(scrolls[0].index, 1); assert.equal(scrolls[0].animated, false, 'Cached selected flight does not wait for a network refresh');
+  resolve(full); await flush(); const loaded = h.render();
+  assert.equal(JSON.stringify(find(loaded, 'FlatList').props.ListHeaderComponent), JSON.stringify(header));
+  assert.equal(find(loaded, 'ActivityIndicator').props.animating, false);
+  assert.equal(find(loaded, 'FlatList').props.data.length, 2); h.dispose();
 });
 
 for (const reducedMotion of [true, false]) test(`overview stays at top; exact Home flight entry focuses only that flight (reduced motion ${reducedMotion})`, () => {
@@ -150,7 +159,7 @@ for (const reducedMotion of [true, false]) test(`overview stays at top; exact Ho
   list.props.ref.current = { scrollToIndex: value => scrolls.push(value) };
   list.props.onContentSizeChange(); assert.equal(scrolls.length, 0);
   tree = h.render({ ...props, selectedFlightId: 'new' }); list = find(tree, 'FlatList'); list.props.onContentSizeChange(); list.props.onContentSizeChange();
-  assert.equal(scrolls.length, 1); assert.equal(scrolls[0].index, 1); assert.equal(scrolls[0].animated, !reducedMotion);
+  assert.equal(scrolls.length, 1); assert.equal(scrolls[0].index, 1); assert.equal(scrolls[0].animated, false);
   assert.equal(list.props.data.length, 2);
   list.props.data.forEach((item, index) => assert(find(list.props.renderItem({ item, index }), 'BoardingPass')));
   h.dispose();

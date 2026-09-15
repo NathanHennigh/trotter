@@ -76,6 +76,12 @@ export function passportViewportHeight(renderedWidth:number){
  }
  return Math.ceil(height+24);
 }
+// The native loading cover occupies the same silhouette as the rendered rigid
+// cover. Keeping these dimensions tied to the book avoids a resize on handoff.
+export function passportClosedCoverFrame(renderedWidth:number){
+ const pose=passportPose(0,renderedWidth),scale=renderedWidth*pose.scale/pose.width;
+ return {left:renderedWidth/2+(pose.offset-4)*scale,top:renderedWidth*pose.top/pose.width-4*scale,width:(W+8)*scale,height:(H+8)*scale,scale};
+}
 export function passportPoint(x:number,y:number,progress:number,renderedWidth=410){
  const pose=passportPose(progress,renderedWidth);return {x:(x-pose.width/2)/pose.scale+W-pose.offset,y:(y-pose.top)/pose.scale};
 }

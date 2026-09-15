@@ -50,7 +50,6 @@ export function DreamEditor({
   onDelete,
   onRetry,
   onLocate,
-  onConfirmLocation,
   initialMode = "view",
   visible = true,
   onCloseRequestChange,
@@ -62,7 +61,6 @@ export function DreamEditor({
   onDelete: (id: string) => Promise<void>;
   onRetry: () => void;
   onLocate?: (id: string) => Promise<void>;
-  onConfirmLocation?: (id: string, candidateId: string) => Promise<void>;
   initialMode?: "view" | "edit";
   visible?: boolean;
   onCloseRequestChange?: (handler: (() => void) | null) => void;
@@ -129,9 +127,11 @@ export function DreamEditor({
       : {}),
   });
   const liveCandidate = liveLocation.details && ["resolved", "manual"].includes(liveLocation.details.locationStatus ?? "")
-    ? liveLocation.details.locationCandidates.find(candidate => candidate.id === liveLocation.details?.locationPlaceId) ?? liveLocation.details.locationCandidates[0] : undefined;
-  const shownPoint = point ?? (liveCandidate ? exactMapPoint({ ...item, latitude: liveCandidate.latitude, longitude: liveCandidate.longitude,
-    locationExpiresAt: liveLocation.details?.locationExpiresAt }) : undefined);
+    ? liveLocation.details.locationCandidates.find(candidate => candidate.id === liveLocation.details?.locationPlaceId) : undefined;
+  const shownPoint = editing ? point : liveLocation.details && locationItem.locationProvider === "google_places"
+    ? (liveCandidate ? exactMapPoint({ ...locationItem, latitude: liveCandidate.latitude, longitude: liveCandidate.longitude }) : undefined)
+    : point;
+  const mapsUrl = liveCandidate?.googleMapsUrl || item.googleMapsUrl;
   const mapPoints = React.useMemo(
     () => [
       ...points.filter((p) => p.id !== item.id),
@@ -259,22 +259,9 @@ export function DreamEditor({
                   {shownPoint ? <DreamPlacesMap points={[shownPoint]} fitKey={`location-${item.id}`} height={248} /> : !liveLocation.loading && !liveLocation.error ? (
                     <>
                       <Text accessibilityLiveRegion="polite" style={s.locationHint}>{locationExplanation(locationItem)}</Text>
-                      {(locationItem.locationCandidates ?? []).map(candidate => (
-                        <View key={candidate.id} style={s.candidate}>
-                          <Text style={s.candidateName}>{candidate.name}</Text>
-                          <Text selectable style={s.locationHint}>{candidate.address}</Text>
-                          <View style={[s.actions, fontScale > 1.25 && s.actionsStack]}>
-                            {onConfirmLocation && <WWButton label="Confirm pin" disabled={busy}
-                              onPress={() => void run(() => onConfirmLocation(item.id, candidate.id), false, () => savedFeedback("Pin confirmed."))} />}
-                            {safeWebUrl(candidate.googleMapsUrl) && <WWButton label="View map ↗" secondary
-                              onPress={() => void open(candidate.googleMapsUrl)} />}
-                          </View>
-                          {locationItem.locationProvider === "google_places" && <GoogleAttribution values={candidate.attributions ?? []} onOpen={open} />}
-                        </View>
-                      ))}
-                      {onLocate && !isFindingLocation(item) && Boolean(item.placeName) && item.locationStatus !== "needs_review" &&
+                      {onLocate && !isFindingLocation(locationItem) && Boolean(item.placeName) &&
                         <View style={s.actions}><WWButton
-                          label={item.locationStatus === "failed" || item.locationStatus === "not_found" || item.locationStatus === "blocked" ? "Retry location" : "Find location"}
+                          label="Retry location"
                           secondary disabled={busy} onPress={() => void run(() => onLocate(item.id), false)} /></View>}
                     </>
                   ) : null}
@@ -297,11 +284,11 @@ export function DreamEditor({
                   secondary
                   onPress={() => void open(item.sourceUrl)}
                 />
-                {safeWebUrl(item.googleMapsUrl) && (
+                {safeWebUrl(mapsUrl) && (
                   <WWButton
                     label="Maps"
                     secondary
-                    onPress={() => void open(item.googleMapsUrl)}
+                    onPress={() => void open(mapsUrl)}
                   />
                 )}
               </View>
@@ -564,7 +551,6 @@ const s = StyleSheet.create({
   locationLabel: { fontFamily: fonts.sans, fontSize: 14, color: colors.ink },
   locationAddress: { fontFamily: fonts.sansRegular, fontSize: 14, lineHeight: 21, color: colors.ink },
   locationHint: { fontFamily: fonts.sansRegular, fontSize: 13, lineHeight: 20, color: colors.mutedInk },
-  candidate: { borderTopWidth: 1, borderColor: colors.paperBorder, paddingVertical: 14, gap: 5 },
   candidateName: { fontFamily: fonts.sans, fontSize: 16, color: colors.ink },
   attribution: { minHeight: 44, justifyContent: "center" },
   attributionLinks: { flexDirection: "row", flexWrap: "wrap", gap: 16 },

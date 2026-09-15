@@ -80,22 +80,14 @@ export function WalletCover({
   embedded?: boolean;
 }) {
   const { shown, hidden } = React.useMemo(() => walletSummary(trip), [trip]);
-  const surface = React.useRef<View>(null);
-  const alive = React.useRef(true);
-  React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const open = () => {
-    if (!surface.current?.measureInWindow) { onPress(); return; }
-    surface.current.measureInWindow((x, y, width, height) => {
-      if (alive.current) onPress([x, y, width, height].every(Number.isFinite) && width > 0 && height > 0 ? { x, y, width, height, wallet: { trip, scopeYear, totalFlightCount } } : undefined);
-    });
-  };
+  const open = () => onPress();
   const headingTrip = React.useMemo(() => {
     const legs = orderedSegments(trip.segments);
     return scopeYear && legs.length ? { ...trip, startDate: calendarDate(legs[0].depTime) ?? trip.startDate,
       endDate: calendarDate(legs[legs.length - 1].arrTime) ?? trip.endDate } : trip;
   }, [trip, scopeYear]);
   return (
-    <View ref={surface} collapsable={false} style={[s.stack, embedded && { marginHorizontal: 0, marginBottom: 0 }]}>
+    <View style={[s.stack, embedded && { marginHorizontal: 0, marginBottom: 0 }]}>
       <View pointerEvents="none" style={s.paperEdgeBack} />
       <View pointerEvents="none" style={s.paperEdgeFront} />
       <View style={s.wallet}>

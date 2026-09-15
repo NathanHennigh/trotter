@@ -10,10 +10,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomNav } from "../components/trotter/TrotterKit";
 import { WWButton, WWEmpty, WWIcon } from "../components/world-window/WorldWindowUI";
-import { PressFeedback, useReducedMotion } from "../components/world-window/motion";
+import { PressFeedback } from "../components/world-window/motion";
 import { BoardingPass } from "../components/world-window/trips/BoardingPass";
 import { TripAtlas } from "../components/world-window/trips/TripAtlas";
-import type { TripOpenOrigin } from "../components/world-window/trips/tripTransition";
 import {
   WalletHeading,
   walletColors,
@@ -39,7 +38,6 @@ export function TripDetailScreen({
   onChange,
   selectedFlightId,
   backLabel = "Back to trips",
-  onWalletLayout,
 }: {
   trip: TripSummary;
   active: BottomNavTab;
@@ -47,11 +45,9 @@ export function TripDetailScreen({
   onChange: (tab: BottomNavTab) => void;
   selectedFlightId?: string;
   backLabel?: string;
-  onWalletLayout?: (bounds: TripOpenOrigin) => void;
 }) {
   const insets = useSafeAreaInsets(),
     { loadTripDetail, trips, refresh } = useTravelTrips();
-  const reducedMotion = useReducedMotion();
   const { width, fontScale } = useWindowDimensions();
   const stackTotals = width <= 360 && fontScale >= 1.35;
   const [hydrated, setHydrated] = React.useState<TripSummary>(),
@@ -60,21 +56,6 @@ export function TripDetailScreen({
     [retry, setRetry] = React.useState(0);
   const list = React.useRef<FlatList<TripSegmentSummary>>(null),
     focused = React.useRef<string>("");
-  const wallet = React.useRef<View>(null);
-  const walletLive = React.useRef(true);
-  React.useEffect(() => { walletLive.current = true; return () => { walletLive.current = false; }; }, []);
-  const walletMeasurement = React.useRef({ tripId: trip.id, done: false });
-  if (walletMeasurement.current.tripId !== trip.id) walletMeasurement.current = { tripId: trip.id, done: false };
-  const measureWallet = () => {
-    const measurement = walletMeasurement.current;
-    if (measurement.done || !onWalletLayout || !wallet.current) return;
-    measurement.done = true;
-    wallet.current.measureInWindow((x, y, width, height) => {
-      if (!walletLive.current || walletMeasurement.current !== measurement) return;
-      if ([x, y, width, height].every(Number.isFinite) && width > 0 && height > 0) onWalletLayout({ x, y, width, height });
-      else measurement.done = false;
-    });
-  };
   React.useEffect(() => {
     let live = true;
     setHydrated(undefined);
@@ -115,7 +96,7 @@ export function TripDetailScreen({
     ),
   );
   const focus = () => {
-    if (loading || !selectedFlightId || focused.current === selectedFlightId)
+    if (!selectedFlightId || focused.current === selectedFlightId)
       return;
     const index = segments.findIndex(
       (segment) => segment.id === selectedFlightId,
@@ -124,7 +105,8 @@ export function TripDetailScreen({
       focused.current = selectedFlightId;
       list.current?.scrollToIndex({
         index,
-        animated: !reducedMotion,
+        // Position the requested flight before entry, without a second moving axis.
+        animated: false,
         viewPosition: 0,
         viewOffset: 12,
       });
@@ -145,7 +127,11 @@ export function TripDetailScreen({
           <WWIcon name="back" size={19} />
           <Text numberOfLines={1} style={s.backLabel}>{backLabel.replace(/^Back to /i, "")}</Text>
         </PressFeedback>
-        <Text style={s.detailLabel}>Itinerary</Text>
+        <View style={s.detailStatus}>
+          <ActivityIndicator size="small" color={colors.blue} animating={loading}
+            style={[s.detailLoading, { opacity: loading ? 1 : 0 }]} />
+          <Text style={s.detailLabel}>Itinerary</Text>
+        </View>
       </View>
       <FlatList
         ref={list}
@@ -159,14 +145,14 @@ export function TripDetailScreen({
         onScrollToIndexFailed={(info) => {
           list.current?.scrollToOffset({
             offset: info.averageItemLength * info.index,
-            animated: !reducedMotion,
+            animated: false,
           });
           focused.current = "";
         }}
         initialNumToRender={5}
         ListHeaderComponent={
           <>
-            <View ref={wallet} collapsable={false} onLayout={measureWallet} style={s.wallet}>
+            <View style={s.wallet}>
               <WalletHeading trip={current} />
               <View pointerEvents="none" style={s.coverLight} />
               <View style={s.mapInsert}>
@@ -180,7 +166,7 @@ export function TripDetailScreen({
                     destination={current.airportCode}
                   />
                 ) : (
-                  !loading && (
+                  (!loading || segments.length > 0) && (
                     <Text style={s.note}>
                       A route map will appear when airport coordinates are
                       available.
@@ -200,9 +186,6 @@ export function TripDetailScreen({
                   )}
               </View>
               <Text style={s.scheduleNote}>Dates and times as recorded for each airport.</Text>
-              {loading && (
-                <ActivityIndicator color={colors.blue} style={s.loading} />
-              )}
               {error && segments.length > 0 && (
                 <PressFeedback
                   accessibilityRole="button"
@@ -342,7 +325,8 @@ const s = StyleSheet.create({
     color: colors.mutedInk,
     paddingTop: 8,
   },
-  loading: { padding: 15, backgroundColor: walletColors.paper },
+  detailStatus: { flexDirection: "row", alignItems: "center", gap: 8 },
+  detailLoading: { width: 18, height: 18 },
   error: { padding: 12, backgroundColor: walletColors.paper },
   errorText: {
     fontFamily: fonts.sansRegular,

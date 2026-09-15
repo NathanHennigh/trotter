@@ -51,7 +51,7 @@ function environment({ reduced = false, os = 'android', width = 410, visualWidth
     const mocks = {
       react: React, 'react-native': native,
       'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) },
-      '../../../theme/trotterTheme': { colors: {}, fonts: {} },
+      '../../../theme/trotterTheme': { colors: { paperSoft: '#faf8f2' }, fonts: {} },
       '../../../utils/mobileLayout': { getMobileVisualWidth: () => visualWidth },
       './WalletCover': { WalletCover: 'WalletCover' }, './tripPresentation': { flightDate: () => '1 Jan 2026' },
     };
@@ -106,29 +106,45 @@ test('paper feedback composes the caller style and interrupts a press with its r
   h.dispose(); assert.equal(env.animations.at(-1).stopped, true);
 });
 
-test('a ready destination never starts a fallback timer or restarts entry', async () => {
+
+const movingSurface = tree => tree.props.children[0];
+
+test('trip entry moves a single opaque screen immediately, without source duplication or layout timers', async () => {
   const env = environment(); await env.ready(); const h = env.mount(surface(env));
-  h.render(props()); assert.equal(env.animations.length, 1); assert.equal(env.timers.size, 0);
-  env.advanceTimers(); h.render(); assert.equal(env.animations.length, 1); h.dispose();
+  const tree = h.render(props({ target: undefined }));
+  assert.equal(env.animations.length, 1); assert.equal(env.timers.size, 0);
+  assert.equal(tree.props.children.length, 1); assert.equal(ghost(tree), undefined);
+  const screen = movingSurface(tree), style = flatten(screen.props.style);
+  assert.deepEqual(screen.props.children, ['Real itinerary']);
+  assert.equal(style.backgroundColor, '#faf8f2'); assert.equal(style.opacity, undefined);
+  assert.equal(style.transform.length, 1);
+  assert.deepEqual(style.transform[0].translateX.outputRange, [410, 0]);
+  assert.equal(env.animations[0].config.duration, 220);
+  assert.equal(env.animations[0].config.useNativeDriver, true);
+  assert.equal(flatten(tree.props.style).overflow, 'hidden'); h.dispose();
 });
 
-test('late layout cancels fallback; layout after fallback does not restart entry', async () => {
-  for (const fallbackFirst of [false, true]) {
-    const env = environment(); await env.ready(); const h = env.mount(surface(env));
-    h.render(props({ target: undefined })); assert.equal(env.animations.length, 0); assert.equal(env.timers.size, 1);
-    if (fallbackFirst) { env.advanceTimers(); h.render(); assert.equal(env.animations.length, 1); }
-    h.render(props()); assert.equal(env.animations.length, 1); assert.equal(env.timers.size, 0);
-    env.advanceTimers(); h.render(); assert.equal(env.animations.length, 1); h.dispose();
-  }
+test('source or destination measurements and late detail hydration cannot retarget or restart entry', async () => {
+  const env = environment(); await env.ready(); const h = env.mount(surface(env));
+  const initial = h.render(props({ target: undefined }));
+  env.animations[0].value.value = .4;
+  const changed = h.render(props({ trip: { ...trip, title: 'Hydrated trip' }, origin: { x: 200, y: -30, width: 20, height: 5 } }));
+  assert.equal(env.animations.length, 1); assert.equal(env.timers.size, 0);
+  assert.equal(env.animations[0].stopped, false);
+  const before = flatten(movingSurface(initial).props.style).transform[0].translateX;
+  const after = flatten(movingSurface(changed).props.style).transform[0].translateX;
+  assert.strictEqual(before.parent, after.parent); assert.deepEqual(before.outputRange, after.outputRange);
+  assert.equal(after.parent.value, .4); h.dispose();
 });
 
 test('Back interrupts entry, disables touches and closes exactly once using the current callback', async () => {
   const env = environment(); await env.ready(); let oldCloses = 0, closes = 0;
   const h = env.mount(surface(env)); h.render(props({ onClosed: () => oldCloses++ }));
-  const entering = env.animations[0];
+  const entering = env.animations[0]; entering.value.value = .42;
   let tree = h.render(props({ closing: true, onClosed: () => oldCloses++ }));
   assert.equal(entering.stopped, true); assert.equal(oldCloses, 0); assert.equal(tree.props.pointerEvents, 'none');
   const closing = env.animations.at(-1); assert.equal(closing.config.toValue, 0); assert.equal(closing.config.duration, 170);
+  assert.equal(closing.value.value, .42, 'Reversal retains its current location');
   h.render(props({ closing: true, onClosed: () => closes++ }));
   assert.equal(env.animations.length, 2); closing.finish(); closing.finish();
   assert.equal(closes, 1); assert.equal(oldCloses, 0); h.dispose();
@@ -143,23 +159,25 @@ test('interrupting a close or unmounting cannot finish an abandoned navigation',
   assert.equal(closes, 0);
 });
 
-test('reduced motion opens and closes immediately without a moving ghost or paper displacement', async () => {
+test('reduced motion exposes the real screen immediately and closes without translation', async () => {
   const env = environment({ reduced: true }); await env.ready(); let closes = 0;
   const h = env.mount(surface(env)), base = props({ target: undefined, onClosed: () => closes++ });
   let tree = h.render(base); assert.equal(ghost(tree), undefined); assert.equal(env.animations[0].config.duration, 0);
-  assert.deepEqual(flatten(tree.props.children[1].props.style).transform, []);
+  const style = flatten(movingSurface(tree).props.style);
+  assert.deepEqual(style.transform, []); assert.equal(style.opacity, undefined);
   tree = h.render({ ...base, closing: true }); assert.equal(env.animations.at(-1).config.duration, 0);
   env.animations.at(-1).finish(); assert.equal(closes, 1); h.dispose();
   const paper = env.mount(env.motion.PaperReveal); const rendered = paper.render({ children: 'Paper' });
   assert.deepEqual(flatten(rendered.props.style).transform[0].translateY.outputRange, [0, 0]); paper.dispose();
 });
 
-test('enabling reduced motion during Back interrupts the old exit and completes only the immediate one', async () => {
+test('enabling reduced motion during Back cancels the previous completion callback', async () => {
   const env = environment(); await env.ready(); let closes = 0;
   const h = env.mount(surface(env)), base = props({ onClosed: () => closes++ });
   h.render(base); h.render({ ...base, closing: true }); const movingExit = env.animations.at(-1);
   env.reduce(true); const tree = h.render();
-  assert.equal(movingExit.stopped, true); assert.equal(closes, 0); assert.equal(ghost(tree), undefined);
+  assert.equal(movingExit.stopped, true); assert.equal(closes, 0);
+  assert.deepEqual(flatten(movingSurface(tree).props.style).transform, []);
   const immediateExit = env.animations.at(-1); assert.equal(immediateExit.config.duration, 0);
   movingExit.finish(); immediateExit.finish(); assert.equal(closes, 1); h.dispose();
 });
@@ -171,42 +189,21 @@ test('a stale PaperPresence exit never removes newly opened paper', async () => 
   exiting.props.onHidden(); assert.deepEqual(h.render().props.children, ['Second paper']); h.dispose();
 });
 
-test('wallet ghost is marginless and measured screen bounds are translated into a centered web host', async () => {
-  const env = environment({ os: 'web', width: 1000, visualWidth: 410 }); await env.ready(); const h = env.mount(surface(env));
-  const origin = { x: 315, y: 300, width: 370, height: 280 }, target = { x: 295, y: 76, width: 410, height: 400 };
-  const tree = h.render(props({ origin, target })), paper = ghost(tree), style = paper.props.style;
-  assert.equal(paper.props.children[0].props.embedded, true); assert.equal(style.left, 20);
-  const scale = style.transform[2].scale.outputRange[1], dx = style.transform[0].translateX.outputRange[1], dy = style.transform[1].translateY.outputRange[1];
-  assert.equal(style.left + dx - origin.width * (scale - 1) / 2, 0);
-  assert(Math.abs(style.top + dy - origin.height * (scale - 1) / 2 - target.y) < 1e-8);
-  h.dispose();
-});
-
-test('year-scoped wallet ghost retains the exact source preview while the real detail receives the original trip', async () => {
-  const env = environment(); await env.ready(); const h = env.mount(surface(env));
-  const fullTrip = { ...trip, flightCount: 2, segments: [{ id: '2025-leg' }, { id: '2026-leg' }] };
-  const preview = { ...fullTrip, flightCount: 1, segments: [fullTrip.segments[1]] };
-  const source = { x: 20, y: 200, width: 370, height: 280, wallet: { trip: preview, scopeYear: '2026', totalFlightCount: 2 } };
-  const tree = h.render(props({ trip: fullTrip, origin: source })), paper = ghost(tree).props.children[0];
-  assert.strictEqual(paper.props.trip, preview); assert.equal(paper.props.scopeYear, '2026'); assert.equal(paper.props.totalFlightCount, 2);
-  assert.deepEqual(fullTrip.segments.map(s => s.id), ['2025-leg', '2026-leg']); h.dispose();
-});
-
-test('paper handoff never renders both moving and itinerary text at positive opacity', async () => {
-  const env = environment(); await env.ready(); const h = env.mount(surface(env));
-  const tree = h.render(props()), moving = ghost(tree).props.style.opacity;
-  const detail = flatten(tree.props.children[1].props.style).opacity;
-  const at = (interpolation, progress) => {
-    const { inputRange, outputRange } = interpolation;
-    const last = inputRange.length - 1;
-    if (progress <= inputRange[0]) return outputRange[0];
-    if (progress >= inputRange[last]) return outputRange[last];
-    const i = inputRange.findIndex((value, index) => index < last && progress >= value && progress <= inputRange[index + 1]);
-    return outputRange[i] + (outputRange[i + 1] - outputRange[i]) * (progress - inputRange[i]) / (inputRange[i + 1] - inputRange[i]);
-  };
+for (const dimensions of [
+  { os: 'web', width: 1000, visualWidth: 430, expected: 430 },
+  { os: 'android', width: 800, visualWidth: 430, expected: 800 },
+]) test('entry uses the complete ' + dimensions.os + ' surface, not a scaled wallet', async () => {
+  const env = environment(dimensions); await env.ready(); const h = env.mount(surface(env));
+  const tree = h.render(props()), style = flatten(movingSurface(tree).props.style);
+  assert.deepEqual(style.transform[0].translateX.outputRange, [dimensions.expected, 0]);
+  assert.equal(style.opacity, undefined);
+  // Across the entire motion the itinerary stays opaque. No point fades both
+  // pages out, overlays duplicate text, or scales native map/font content.
   for (let step = 0; step <= 1000; step++) {
-    const progress = step / 1000;
-    assert(!(at(moving, progress) > 1e-9 && at(detail, progress) > 1e-9), `Double text at progress ${progress}`);
+    const x = dimensions.expected * (1 - step / 1000);
+    assert(x >= 0 && x <= dimensions.expected);
+    assert.equal(tree.props.children.length, 1);
+    assert(!style.transform.some(t => 'scale' in t));
   }
-  assert.equal(at(moving, 0), 1); assert.equal(at(detail, 1), 1); h.dispose();
+  h.dispose();
 });
