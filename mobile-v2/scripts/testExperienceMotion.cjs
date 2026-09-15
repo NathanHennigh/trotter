@@ -126,7 +126,9 @@ function sampled(value, progress) {
   if (value.operator === 'multiply') return sampled(value.left, progress) * sampled(value.right, progress);
   if (value.operator === 'subtract') return sampled(value.left, progress) - sampled(value.right, progress);
   if (value.inputRange) {
-    const amount = sampled(value.parent, progress), input = value.inputRange, output = value.outputRange;
+    let amount = sampled(value.parent, progress); const input = value.inputRange, output = value.outputRange;
+    if (value.extrapolate === 'clamp' || value.extrapolateLeft === 'clamp') amount = Math.max(input[0], amount);
+    if (value.extrapolate === 'clamp' || value.extrapolateRight === 'clamp') amount = Math.min(input.at(-1), amount);
     let index = 0;
     while (index < input.length - 2 && amount > input[index + 1]) index++;
     const fraction = (amount - input[index]) / (input[index + 1] - input[index]);
@@ -251,14 +253,15 @@ test('Back during an active drag reverses from that position and a canceled clos
   const handler = headerGesture(tree); gestureState(handler, 2); gestureState(handler, 4, 2);
   handler.props.onGestureEvent({ nativeEvent: { translationY: 86 } });
   let next = h.render({ ...input, closing: true });
-  const dragExit = env.gestureAnimations.at(-1), exit = env.animations.at(-1);
+  const exit = env.animations.at(-1);
   assert.equal(sampled(transform(next, 'wallet-drag-stage', 'translateY')), 86);
-  assert.equal(dragExit.config.toValue, 0); assert.equal(dragExit.config.useNativeDriver, true);
+  assert.equal(env.gestureAnimations.length, 0, 'Closing must not race the travel timeline with an independent drag reset');
   gestureState(handler, 5, 4, 1200); assert.equal(requests, 0, 'A late native release cannot race Android Back');
-  dragExit.value.value = 42; exit.value.value = .55;
+  exit.value.value = .55;
+  const interruptedOffset = sampled(transform(next, 'wallet-drag-stage', 'translateY'));
   next = h.render({ ...input, closing: false });
-  assert.equal(exit.stopped, true); assert.equal(dragExit.stopped, true);
-  assert.equal(sampled(transform(next, 'wallet-drag-stage', 'translateY')), 42);
+  assert.equal(exit.stopped, true);
+  assert.equal(sampled(transform(next, 'wallet-drag-stage', 'translateY')), interruptedOffset, 'Reopening starts at the actual interrupted native position');
   env.gestureAnimations.at(-1).finish(); env.animations.at(-1).finish(); next = h.render();
   assert.equal(sampled(transform(next, 'wallet-drag-stage', 'translateY')), 0);
   assert.equal(headerGesture(next).props.enabled, true); assert.equal(closes, 0); h.dispose();
@@ -268,13 +271,37 @@ test('stale native distance callbacks are ignored after a newer grab or unmount'
   let closes = 0; const { h, tree } = await openedWallet({ onRequestClose: () => closes++ });
   let handler = headerGesture(tree); gestureState(handler, 2); gestureState(handler, 4, 2);
   handler.props.onGestureEvent({ nativeEvent: { translationY: 220 } });
-  const value = transform(tree, 'wallet-drag-stage', 'translateY').parent, callbacks = [];
+  const value = transform(tree, 'wallet-drag-stage', 'translateY').left.parent, callbacks = [];
   value.stopAnimation = callback => { if (callback) callbacks.push(callback); };
   gestureState(handler, 5, 4, 1000);
   handler = headerGesture(h.render()); gestureState(handler, 2); callbacks.shift()(220);
   assert.equal(closes, 0, 'Old release must not dismiss a new grab');
   gestureState(handler, 4, 2); gestureState(handler, 5, 4, 1000); h.dispose(); callbacks.shift()(220);
   assert.equal(closes, 0, 'Unmounted popup must not navigate');
+});
+
+test('released drags return continuously to lower, nearby and passed source cards without a reverse excursion', async () => {
+  for (const [sourceY, distance] of [[300, 86], [580, 280], [300, 224], [300, 310], [100, 44]]) {
+    const { env, h, input, tree } = await openedWallet({ origin: { x: 20, y: sourceY, width: 370, height: 280, wallet: { trip } } });
+    const handler = headerGesture(tree); gestureState(handler, 2); gestureState(handler, 4, 2);
+    handler.props.onGestureEvent({ nativeEvent: { translationY: distance } });
+    const position = value => flatten(byId(value, 'wallet-popup-panel').props.style).top
+      + sampled(transform(value, 'wallet-popup-panel', 'translateY'))
+      + sampled(transform(value, 'wallet-drag-stage', 'translateY'));
+    const released = position(h.render()), next = h.render({ ...input, closing: true });
+    assert.equal(position(next), released, 'The first closing frame must preserve the released finger position');
+    assert.equal(env.gestureAnimations.length, 0);
+    const timeline = env.animations.at(-1); assert.equal(timeline.config.useNativeDriver, true);
+    const direction = Math.sign(sourceY - released); let previous = released;
+    for (let step = 1; step <= 100; step++) {
+      timeline.value.setValue(1 - step / 100); const current = position(next);
+      if (direction) assert((current - previous) * direction >= -1e-7, `Source ${sourceY}, drag ${distance}: the return cannot bounce at frame ${step}`);
+      else assert(Math.abs(current - released) < 1e-7, 'A drag already at its source must close in place');
+      previous = current;
+    }
+    assert.equal(previous, sourceY); assert.equal(sampled(transform(next, 'wallet-drag-stage', 'translateY')), 0);
+    h.dispose();
+  }
 });
 
 test('reduced motion keeps direct manipulation but settles release immediately', async () => {
@@ -400,7 +427,8 @@ test('hydration and late source measurements cannot retarget, replace the captur
   for (const key of ['translateX', 'translateY', 'scaleX', 'scaleY']) {
     const before = transform(initial, 'wallet-popup-paper', key), after = transform(changed, 'wallet-popup-paper', key);
     assert.strictEqual(before, after, 'Hydration must reuse the exact native interpolation graph');
-    assert.equal(after.parent.value, .4);
+    const timelineNode = after.operator === 'subtract' ? after.left.parent : after.parent;
+    assert.strictEqual(timelineNode, env.animations[0].value); assert.equal(timelineNode.value, .4);
   }
   assert.strictEqual(ghost(changed).props.children[0].props.trip, base.origin.wallet.trip);
   assert.equal(ghost(changed).props.children[0].props.scopeYear, '2026'); h.dispose();

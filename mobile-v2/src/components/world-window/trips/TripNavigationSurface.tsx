@@ -67,7 +67,7 @@ export function TripNavigationSurface({ origin, closing, onClosed, onRequestClos
   React.useEffect(() => {
     progress.stopAnimation();
     let animation: Animated.CompositeAnimation | undefined;
-    let dragExit: Animated.CompositeAnimation | undefined;
+    let dragReturn: Animated.CompositeAnimation | undefined;
     let firstFrame: number | undefined, secondFrame: number | undefined;
     let cancelled = false;
     const timing = (toValue: number, duration: number) => Animated.timing(progress, {
@@ -85,11 +85,17 @@ export function TripNavigationSurface({ origin, closing, onClosed, onRequestClos
         gestureBegan.current = false;
         gestureGeneration.current++;
         dragSpring.current?.stop();
+        dragY.stopAnimation();
         dragY.flattenOffset();
-        dragExit = Animated.timing(dragY, {
-          toValue: 0, duration, easing: Easing.bezier(.2, .8, .2, 1), useNativeDriver: true,
-        });
-        dragExit.start();
+        // On close, hold the finger's released offset. The same travel timeline
+        // carries it into the source instead of racing a separate reset to zero.
+        if (!closing) {
+          // A canceled close can reopen from its current position, then settle.
+          dragReturn = Animated.timing(dragY, {
+            toValue: 0, duration, easing: Easing.linear, useNativeDriver: true,
+          });
+          dragReturn.start();
+        }
       }
       animation = timeline;
       if (!closing) entered.current = true;
@@ -109,15 +115,18 @@ export function TripNavigationSurface({ origin, closing, onClosed, onRequestClos
       if (firstFrame != null) cancelAnimationFrame(firstFrame);
       if (secondFrame != null) cancelAnimationFrame(secondFrame);
       animation?.stop();
-      dragExit?.stop();
+      dragReturn?.stop();
     };
   }, [closing, reduced, laidOut, progress, anchored, dragY]);
 
   const dragMotion = React.useMemo(() => ({
-    position: dragY.interpolate({ inputRange: [-200, 0, 1000], outputRange: [-24, 0, 1000], extrapolateLeft: "clamp" }),
+    position: Animated.multiply(
+      dragY.interpolate({ inputRange: [-200, 0, 1000], outputRange: [-24, 0, 1000], extrapolateLeft: "clamp" }),
+      progress.interpolate({ inputRange: walletMotionSamples,
+        outputRange: walletMotionSamples.map(value => walletMotionFrame(value, anchored).travel), extrapolate: "clamp" })),
     shade: dragY.interpolate({ inputRange: [0, 260], outputRange: [1, .5], extrapolate: "clamp" }),
     event: Animated.event([{ nativeEvent: { translationY: dragY } }], { useNativeDriver: true }),
-  }), [dragY]);
+  }), [dragY, progress, anchored]);
 
   const onHeaderGesture = (event: PanGestureHandlerStateChangeEvent) => {
     if (!alive.current || closingNow.current || !settled) return;
@@ -179,7 +188,12 @@ export function TripNavigationSurface({ origin, closing, onClosed, onRequestClos
     const cropY = tween(value => source.height + (target.height - source.height) * value.expansion - clipHeight);
     return {
       translateX: tween(value => dx * (1 - value.travel)),
-      translateY: tween(value => dy * (1 - value.travel) - value.lift),
+      // A released drag already lifted the wallet. Repeating the opening bump
+      // would overshoot its source when the finger has passed that position.
+      translateY: Animated.subtract(tween(value => dy * (1 - value.travel)),
+        Animated.multiply(tween(value => value.lift), dragY.interpolate({
+          inputRange: [0, 18], outputRange: [1, 0], extrapolate: "clamp",
+        }))),
       scaleX: tween(value => (source.width + (target.width - source.width) * value.expansion) / target.width),
       scaleY: tween(value => (source.height + (target.height - source.height) * value.expansion) / target.height),
       cropX, cropY, restoreX: Animated.multiply(cropX, -1), restoreY: Animated.multiply(cropY, -1),
@@ -189,7 +203,7 @@ export function TripNavigationSurface({ origin, closing, onClosed, onRequestClos
       tintOpacity: progress.interpolate({ inputRange: [0, 1], outputRange: [0, .22] }),
       dismissOpacity: progress.interpolate({ inputRange: [0, .35, 1], outputRange: [0, 0, 1] }),
     };
-  }, [progress, anchored, source.x, source.y, source.width, source.height, target.x, target.y, target.width, target.height, clipWidth, clipHeight]);
+  }, [progress, dragY, anchored, source.x, source.y, source.width, source.height, target.x, target.y, target.width, target.height, clipWidth, clipHeight]);
 
   return (
     <View testID="wallet-popup" style={[StyleSheet.absoluteFill, styles.clip]}
