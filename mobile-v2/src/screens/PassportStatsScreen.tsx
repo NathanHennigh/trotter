@@ -107,6 +107,7 @@ export function PassportStatsScreen({
     () => scopedPassportArchive(trips, profile, year),
     [trips, profile, year],
   );
+  const lifetimeArchive = React.useMemo(() => year ? scopedPassportArchive(trips, profile) : archive, [trips, profile, year, archive]);
   const [interacting, setInteracting] = React.useState(false),
     [collection, setCollection] = React.useState<CollectionKind | null>(
       initialAirport ? "airports" : (initialCollection ?? null),
@@ -253,6 +254,7 @@ export function PassportStatsScreen({
             key={collection}
             kind={collection}
             archive={archive}
+            lifetimeArchive={lifetimeArchive}
             onBack={close}
             onSelectCountry={setCountry}
             onOpenTrip={openTrip}

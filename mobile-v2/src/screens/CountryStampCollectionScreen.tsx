@@ -9,12 +9,13 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomNav } from "../components/trotter/TrotterKit";
 import {
-  CollectionHeading,
-  CollectionScope,
-  CountryIndex,
   CountryArrivalDetail,
 } from "../components/world-window/passport/PassportCollections";
-import { buildPassportArrivals } from "../components/world-window/passport/passport-arrivals";
+import {
+  CountryCollectionIndex as CountryIndex,
+  UnvisitedCountryRecord,
+  type CountryCatalogRecord,
+} from "../components/world-window/passport/CountryCollectionIndex";
 import type { BottomNavTab, TripSummary } from "../data/trotterMock";
 import { useTravelTrips } from "../services/travelTrips";
 import { colors, layout } from "../theme/trotterTheme";
@@ -73,6 +74,7 @@ export function CountryStampCollectionScreen({
     initialCountry ?? null,
   );
   const [query, setQuery] = React.useState("");
+  const [unvisited, setUnvisited] = React.useState<CountryCatalogRecord | null>(null);
   const detailBack = React.useRef<(() => boolean) | null>(null);
   const registerDetailBack = React.useCallback(
     (handler: (() => boolean) | null) => {
@@ -80,10 +82,10 @@ export function CountryStampCollectionScreen({
     },
     [],
   );
-  React.useEffect(
-    () => setSelectedKey(initialCountry ?? null),
-    [initialCountry, scopeEpoch],
-  );
+  React.useEffect(() => {
+    setSelectedKey(initialCountry ?? null);
+    setUnvisited(null);
+  }, [initialCountry, scopeEpoch]);
   const country = scope.lifetimeArrivals.find(
     (arrival) =>
       selectedKey &&
@@ -93,10 +95,11 @@ export function CountryStampCollectionScreen({
   );
   const handleBack = React.useCallback(() => {
     if (detailBack.current?.()) return true;
-    if (!country || initialCountry) return false;
+    if ((!country && !unvisited) || initialCountry) return false;
     setSelectedKey(null);
+    setUnvisited(null);
     return true;
-  }, [country, initialCountry]);
+  }, [country, unvisited, initialCountry]);
   React.useEffect(() => {
     onBackHandlerChange?.(visible ? handleBack : null);
     return () => onBackHandlerChange?.(null);
@@ -104,14 +107,15 @@ export function CountryStampCollectionScreen({
   const back = () => {
     if (!handleBack()) (onBack ?? (() => onChange("passport")))();
   };
+  const hasDetail = Boolean(country || unvisited);
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       <View
         style={{ flex: 1 }}
-        pointerEvents={country ? "none" : "auto"}
-        aria-hidden={Boolean(country)}
-        accessibilityElementsHidden={Boolean(country)}
-        importantForAccessibility={country ? "no-hide-descendants" : "auto"}
+        pointerEvents={hasDetail ? "none" : "auto"}
+        aria-hidden={hasDetail}
+        accessibilityElementsHidden={hasDetail}
+        importantForAccessibility={hasDetail ? "no-hide-descendants" : "auto"}
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -128,28 +132,28 @@ export function CountryStampCollectionScreen({
             paddingBottom: layout.bottomNavHeight + insets.bottom + 24,
           }}
         >
-          <CollectionHeading
-            title="Countries"
-            count={arrivals.length}
-            query={query}
-            setQuery={setQuery}
-            placeholder="Country or entry airport"
-            onBack={back}
-            backLabel={backLabel}
-          />
-          <View style={{ paddingHorizontal: 24 }}>
-            <CollectionScope year={year} onClear={clearYear} />
-          </View>
           <CountryIndex
             arrivals={arrivals}
-            onSelect={(arrival) =>
-              setSelectedKey(arrival.travelCountryKey ?? arrival.country)
-            }
+            lifetimeArrivals={scope.lifetimeArrivals}
+            onSelect={(arrival) => {
+              setUnvisited(null);
+              setSelectedKey(arrival.travelCountryKey ?? arrival.country);
+            }}
+            onSelectUnvisited={(entry) => {
+              setSelectedKey(entry.key);
+              setUnvisited(entry);
+            }}
             query={query}
+            setQuery={setQuery}
+            width={visualWidth}
+            onBack={back}
+            backLabel={backLabel}
+            year={year}
+            onClearYear={clearYear}
           />
         </ScrollView>
       </View>
-      {country && (
+      {hasDetail && (
         <View
           style={[
             styles.overlay,
@@ -160,7 +164,7 @@ export function CountryStampCollectionScreen({
             },
           ]}
         >
-          <CountryArrivalDetail
+          {country ? <CountryArrivalDetail
             key={country.travelCountryKey ?? country.country}
             arrival={country}
             trips={scope.trips}
@@ -171,7 +175,7 @@ export function CountryStampCollectionScreen({
             onBackHandlerChange={registerDetailBack}
             year={year}
             onClearYear={clearYear}
-          />
+          /> : unvisited ? <UnvisitedCountryRecord entry={unvisited} width={visualWidth} onBack={back} /> : null}
         </View>
       )}
       <BottomNav active={active} onChange={onChange} />

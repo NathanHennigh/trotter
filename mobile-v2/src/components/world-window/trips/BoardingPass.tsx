@@ -1,10 +1,9 @@
 import React from "react";
 import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import Svg, { Circle, Defs, Line, Pattern, Rect } from "react-native-svg";
+import Svg, { Circle, Defs, Line, Path, Pattern, Rect } from "react-native-svg";
 import type { TripSegmentSummary } from "../../../data/trotterMock";
 import { colors, fonts } from "../../../theme/trotterTheme";
 import { AirlineLogo, airlineName } from "../AirlineLogo";
-import { WWIcon } from "../WorldWindowUI";
 import { arrivalDayChange, calendarDate, flightDate, flightTime } from "./tripPresentation";
 import { walletColors } from "./WalletCover";
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
@@ -100,9 +99,12 @@ export function BoardingPass({
               </Text>
             </View>
             <View style={s.direction}>
-              <View style={{ transform: [{ rotate: "45deg" }] }}>
-                <WWIcon name="plane" size={15} color={walletColors.copper} />
-              </View>
+              <Svg width={18} height={18} viewBox="0 0 24 24" pointerEvents="none" accessible={false}>
+                <Path
+                  d="M22 10.8c1.6.3 1.6 2.1 0 2.4l-7.2.5-6.2 7.1H6.2l3.5-7-5.4.3-2 2.5H.8L1.6 12 .8 7.4h1.5l2 2.5 5.4.3-3.5-7h2.4l6.2 7.1z"
+                  fill={walletColors.copper}
+                />
+              </Svg>
             </View>
             <View style={[s.endpoint, s.arrival]}>
               <Text

@@ -2,6 +2,26 @@
 // Native painting and platform Back delivery are verified separately on device.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), ts = require('typescript');
+const modules = new Map();
+function pure(file) {
+  const absolute = path.resolve(__dirname, "..", file);
+  if (modules.has(absolute)) return modules.get(absolute);
+  // Carrier branding is outside navigation; all catalog/progress/filter logic remains production code.
+  if (absolute.endsWith(path.join("world-window", "AirlineLogo.tsx"))) return { airlineName: code => code };
+  if (absolute.endsWith(".json")) return JSON.parse(fs.readFileSync(absolute, "utf8"));
+  const source = fs.readFileSync(absolute, "utf8");
+  const code = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
+  const mod = { exports: {} }; modules.set(absolute, mod.exports);
+  const resolve = ref => {
+    const base=path.resolve(path.dirname(absolute), ref);
+    const found=[base,base+".ts",base+".tsx",base+".json"].find(p=>fs.existsSync(p)&&fs.statSync(p).isFile());
+    if (!found) throw Error("Missing pure module: "+ref);
+    return pure(path.relative(path.resolve(__dirname,".."),found));
+  };
+  new Function("require","module","exports",code)(resolve,mod,mod.exports);
+  modules.set(absolute,mod.exports); return mod.exports;
+}
+
 function hookHost() {
   const slots = [];
   let cursor = 0, pending = [], dirty = false, component, props, tree;
@@ -57,15 +77,15 @@ function load(file,name,overrides={}){
  const host=hookHost(),source=fs.readFileSync(path.resolve(__dirname,'../',file),'utf8');
  const ast=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
  const declaration=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text===name);
- const styles=ast.statements.find(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>d.name.getText(ast)==='styles'));
+ const styles=ast.statements.find(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>['styles','s'].includes(d.name.getText(ast))));
  assert(declaration);
  const styleText=file.endsWith('TrotterKit.tsx') ? 'const styles=StyleSheet.create({'+styles.declarationList.declarations[0].initializer.arguments[0].properties.filter(p=>/^(bottomNav|nav)/.test(p.name.getText(ast))).map(p=>p.getText(ast)).join(',')+'});' : styles?.getText(ast)||'';
  const compiled=ts.transpileModule(declaration.getText(ast)+'\n'+styleText,{compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const tags='View Text Pressable PressFeedback PaperReveal ScrollView RefreshControl BottomNav WWHeader WWButton WWIcon PassportBook ActivityChart CollectionButtons CollectionList CollectionScope CollectionBack CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CroppedPassportStamp TripRows AirportRouteFan AirlineLogo'.split(' ');
- const globals={...Object.fromEntries(tags.map(tag=>[tag,tag])),React:host.React,useState:host.React.useState,StyleSheet:{create:x=>x,absoluteFillObject:{}},useSafeAreaInsets:()=>({top:24,bottom:20}),useWindowDimensions:()=>({width:320,height:800,fontScale:1}),getMobileVisualWidth:x=>x,colors:{},fonts:{},layout:{bottomNavHeight:73},useTravelTrips:()=>({trips:[trip],profile:{},status:'idle',refresh:noOp}),buildPassportArchive:()=>archive,scopedPassportArchive:()=>archive,buildPassportArrivals:()=>[arrival],passportScope:()=>({trips:[trip],arrivals:[arrival],lifetimeArrivals:[arrival]}),scopeTripsToYear:t=>t,normalizeTravelYear:y=>/^\d{4}$/.test(y||'')?y:undefined,earnedCountries:()=>[],tripsForCountry:()=>[trip],readableDate:x=>x,airlineName:x=>x,Platform:{OS:'android'},...overrides};
+ const tags='FlatList TransportCollectionIndex AirportLuggageLabel View Text Pressable PressFeedback PaperReveal ScrollView RefreshControl BottomNav WWHeader WWButton WWIcon PassportBook ActivityChart CollectionButtons CollectionList CollectionScope CollectionBack CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CroppedPassportStamp TripRows AirportRouteFan AirlineLogo'.split(' ');
+ const globals={...Object.fromEntries(tags.map(tag=>[tag,tag])),React:host.React,useState:host.React.useState,...pure('src/data/collections/catalogs.ts'),...pure('src/components/world-window/collections/catalogProgress.ts'),...pure('src/components/world-window/collections/transportCollectionModel.ts'),StyleSheet:{create:x=>x,absoluteFillObject:{}},useSafeAreaInsets:()=>({top:24,bottom:20}),useWindowDimensions:()=>({width:320,height:800,fontScale:1}),getMobileVisualWidth:x=>x,colors:{},fonts:{},layout:{bottomNavHeight:73},useTravelTrips:()=>({trips:[trip],profile:{},status:'idle',refresh:noOp}),buildPassportArchive:()=>archive,scopedPassportArchive:()=>archive,buildPassportArrivals:()=>[arrival],passportScope:()=>({trips:[trip],arrivals:[arrival],lifetimeArrivals:[arrival]}),scopeTripsToYear:t=>t,normalizeTravelYear:y=>/^\d{4}$/.test(y||'')?y:undefined,earnedCountries:()=>[],tripsForCountry:()=>[trip],readableDate:x=>x,airlineName:x=>x,Platform:{OS:'android'},...overrides};
  const mod={exports:{}};new Function('module','exports',...Object.keys(globals),compiled)(mod,mod.exports,...Object.values(globals));host.setComponent(mod.exports[name]);return host;
 }
-function nodes(tree){if(Array.isArray(tree))return tree.flatMap(nodes);if(!tree||typeof tree!=='object')return [];return[tree,...nodes(tree.props?.children)];}
+function nodes(tree){if(Array.isArray(tree))return tree.flatMap(nodes);if(!tree||typeof tree!=='object')return [];return[tree,...nodes(tree.props?.children),...nodes(tree.props?.header),...nodes(tree.props?.ListHeaderComponent),...nodes(tree.props?.ListEmptyComponent)];}
 const find=(tree,type)=>nodes(tree).find(n=>n.type===type);
 {
  const host=load('src/screens/CountryStampCollectionScreen.tsx','CountryStampCollectionScreen');let handler=null,closed=0;
@@ -92,11 +112,41 @@ const find=(tree,type)=>nodes(tree).find(n=>n.type===type);
  const host=load('src/components/world-window/passport/PassportCollections.tsx','CollectionList'); let handler;
  let tree=host.render({kind:'airports',archive:a,onBack:noOp,onSelectCountry:noOp,onOpenTrip:noOp,onBackHandlerChange:h=>handler=h});
  find(tree,'CollectionHeading').props.setQuery('DFW');tree=host.render();
- nodes(tree).find(n=>n.type==='Pressable'&&n.props.onPress&&n.props.key==='DFW').props.onPress(); tree=host.render();
+ const index=load('src/components/world-window/collections/TransportCollectionIndex.tsx','TransportCollectionIndex');
+ const indexTree=index.render(find(tree,'TransportCollectionIndex').props),airportList=find(indexTree,'FlatList');
+ assert.deepEqual(airportList.props.data.map(entry=>entry.key),['DFW'],'Query filters the actual transport index');
+ find(airportList.props.renderItem({item:airportList.props.data[0]}),'PressFeedback').props.onPress(); tree=host.render();
  assert(find(tree,'CollectionHeading'),'Index stays mounted behind the airport detail');assert(find(tree,'AirportRouteFan'));
  assert(nodes(tree).some(n=>n.type==='View'&&n.props.importantForAccessibility==='no-hide-descendants'),'Hidden index is excluded from accessibility');
  assert.equal(handler(),true);tree=host.render();assert.equal(find(tree,'CollectionHeading').props.query,'DFW');assert(!find(tree,'AirportRouteFan'));
- tree=host.render({kind:'airports',archive:a,onBack:noOp,onSelectCountry:noOp,initialAirport:'DFW',scopeEpoch:1,backLabel:'Profile',onBackHandlerChange:h=>handler=h});assert(find(tree,'AirportRouteFan'),'Profile can open its actual airport directly');assert.equal(find(tree,'CollectionTitle').props.backLabel,'Profile');assert.equal(handler(),false,'Direct airport delegates Back to its actual Profile origin');host.unmount();
+ tree=host.render({kind:'airports',archive:a,onBack:noOp,onSelectCountry:noOp,initialAirport:'DFW',scopeEpoch:1,backLabel:'Profile',onBackHandlerChange:h=>handler=h});assert(find(tree,'AirportRouteFan'),'Profile can open its actual airport directly');assert.equal(find(tree,'CollectionTitle').props.backLabel,'Profile');assert.equal(handler(),false,'Direct airport delegates Back to its actual Profile origin');index.unmount();host.unmount();
+}
+for (const kind of ['airports', 'airlines']) {
+ const code=kind==='airports'?'DFW':'UA', first='2024-05-03T10:00:00Z';
+ const historicalTrip={...trip,segments:[{id:'historic',depAirport:'DFW',arrAirport:'SIN',depTime:first,arrTime:'2024-05-04T10:00:00Z',airline:'UA'}]};
+ const record=kind==='airports'?{code,city:'Dallas',country:'United States',flights:1,trips:[historicalTrip]}:{code,flights:1,miles:100,trips:[historicalTrip]};
+ const lifetime={...archive,[kind]:[record]}, scoped={...archive,airports:[],airlines:[]};
+ const host=load('src/components/world-window/passport/PassportCollections.tsx','CollectionList'),index=load('src/components/world-window/collections/TransportCollectionIndex.tsx','TransportCollectionIndex');
+ let handler,clears=0;
+ const props={kind,archive:scoped,lifetimeArchive:lifetime,year:'2026',onBack:noOp,onSelectCountry:noOp,onClearYear:()=>clears++,onBackHandlerChange:h=>handler=h};
+ let tree=host.render(props);find(tree,'CollectionHeading').props.setQuery(code);tree=host.render();
+ const item=find(tree,'TransportCollectionIndex').props.entries.find(entry=>entry.key===code);
+ assert.equal(item.record,undefined,'Lifetime travel must not be counted as a flight in the selected year');assert.strictEqual(item.lifetimeRecord,record);assert.equal(item.firstVisit,first);
+ let indexTree=index.render(find(tree,'TransportCollectionIndex').props);
+ assert.equal(find(indexTree,'FlatList').props.data.length,0,'Visited/Flown excludes an entry without selected-year flights');
+ const allTab=nodes(indexTree).find(node=>node.type==='PressFeedback'&&node.props.accessibilityRole==='tab'&&nodes(node).some(text=>text.type==='Text'&&text.props.children.includes('All')));
+ allTab.props.onPress();indexTree=index.render();
+ const rows=find(indexTree,'FlatList');assert(rows.props.data.some(entry=>entry.key===code),'All includes lifetime-only entries');
+ find(rows.props.renderItem({item:rows.props.data.find(entry=>entry.key===code)}),'PressFeedback').props.onPress();tree=host.render();
+ assert(find(tree,'CollectionTitle'));assert(!find(tree,'AirportRouteFan'));assert(!find(tree,'TripRows'),'No historical trips leak into a year-filtered detail');
+ const labels=nodes(tree).filter(node=>node.type==='Text').flatMap(node=>node.props.children).filter(value=>typeof value==='string');
+ assert(labels.some(value=>value.includes('No recorded flights')&&value.includes('2026')),'Detail explains that this year has no flights');
+ if(kind==='airports')assert(labels.includes(first),'Lifetime first visit remains available in a year-filtered airport detail');
+ assert.equal(handler(),true);tree=host.render();assert.equal(find(tree,'CollectionHeading').props.query,code,'Back keeps the transport search');
+ indexTree=index.render(find(tree,'TransportCollectionIndex').props);assert(find(indexTree,'FlatList').props.data.some(entry=>entry.key===code),'Retained index stays on All after closing detail');
+ find(tree,'CollectionScope').props.onClear();assert.equal(clears,1);
+ tree=host.render({...props,archive:lifetime,year:undefined});assert.strictEqual(find(tree,'TransportCollectionIndex').props.entries.find(entry=>entry.key===code).record,record,'All years restores the real lifetime record');
+ index.unmount();host.unmount();
 }
 {
  const host=load('src/screens/PassportStatsScreen.tsx','PassportStatsScreen');let cleared=0;

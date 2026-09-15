@@ -24,6 +24,11 @@ import {
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 import { AirportRouteFan } from "./AirportRouteFan";
 import { tripsForCountry } from "./passport-collection-model";
+import { countryCatalog, airportCatalog, airlineCatalog } from "../../../data/collections/catalogs";
+import { collectionProgress } from "../collections/catalogProgress";
+import { TransportCollectionIndex } from "../collections/TransportCollectionIndex";
+import { AirportLuggageLabel } from "../collections/AirportLuggageLabel";
+import { transportEntries } from "../collections/transportCollectionModel";
 export type CollectionKind = "countries" | "airports" | "airlines";
 const emblems = require("../../../../assets/world-window/passport/window-collection-emblems.png");
 
@@ -34,20 +39,22 @@ export function CollectionButtons({
   archive: PassportArchive;
   onOpen: (kind: CollectionKind) => void;
 }) {
-  const values = {
-    countries: archive.arrivals.length,
-    airports: archive.airports.length,
-    airlines: archive.airlines.length,
-  };
+  const { width, fontScale } = useWindowDimensions();
+  const cardWidth = Math.max(fontScale >= 1.35 ? 145 : 0, (getMobileVisualWidth(width) - 68) / 3);
+  const values = React.useMemo(() => ({
+    countries: collectionProgress(countryCatalog, archive.arrivals.map(arrival => arrival.travelCountryKey ?? arrival.country)),
+    airports: collectionProgress(airportCatalog, archive.airports.map(airport => airport.code)),
+    airlines: collectionProgress(airlineCatalog, archive.airlines.map(airline => airline.code)),
+  }), [archive]);
   return (
-    <View style={styles.collections}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.collections}>
       {(["countries", "airports", "airlines"] as const).map((kind, i) => (
         <Pressable
           key={kind}
           onPress={() => onOpen(kind)}
           accessibilityRole="button"
-          accessibilityLabel={`${values[kind]} ${kind}`}
-          style={styles.collection}
+          accessibilityLabel={`${values[kind].collected} of ${values[kind].total} ${kind}${values[kind].outsideCatalogKeys.length ? `, ${values[kind].outsideCatalogKeys.length} other entries in your archive` : ''}`}
+          style={[styles.collection, { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', width: cardWidth }]}
         >
           <View style={styles.mark} accessible={false}>
             <View
@@ -69,13 +76,16 @@ export function CollectionButtons({
               />
             </View>
           </View>
-          <Text style={styles.collectionValue}>{values[kind]}</Text>
+          <Text style={styles.collectionValue}>{values[kind].collected}</Text>
+          <Text style={styles.collectionTotal}>of {values[kind].total.toLocaleString()}</Text>
           <Text style={styles.collectionTitle}>
             {kind[0].toUpperCase() + kind.slice(1)}
           </Text>
+          <View style={styles.collectionTrack}><View style={[styles.collectionFill, { width: `${Math.min(100, Math.max(0, values[kind].percent))}%` }]} /></View>
+          {values[kind].outsideCatalogKeys.length > 0 && <Text style={styles.collectionExtra}>+{values[kind].outsideCatalogKeys.length} archived</Text>}
         </Pressable>
       ))}
-    </View>
+    </ScrollView>
   );
 }
 export function CollectionBack({
@@ -171,7 +181,7 @@ export function CollectionHeading({
   backLabel = "Passport",
 }: {
   title: string;
-  count: number;
+  count?: number;
   query: string;
   setQuery: (value: string) => void;
   placeholder: string;
@@ -387,6 +397,7 @@ function TripRows({
 export function CollectionList({
   kind,
   archive,
+  lifetimeArchive = archive,
   onBack,
   onSelectCountry,
   onOpenTrip,
@@ -399,6 +410,7 @@ export function CollectionList({
 }: {
   kind: CollectionKind;
   archive: PassportArchive;
+  lifetimeArchive?: PassportArchive;
   onBack: () => void;
   onSelectCountry: (arrival: CountryArrival) => void;
   onOpenTrip?: (trip: TripSummary) => void;
@@ -415,7 +427,13 @@ export function CollectionList({
     ),
     [query, setQuery] = React.useState("");
   const list = kind === "airports" ? archive.airports : archive.airlines;
-  const detail = list.find((item) => item.code === detailCode);
+  const entries = React.useMemo(() => transportEntries(kind === 'airports' ? 'airports' : 'airlines', archive, lifetimeArchive), [kind, archive, lifetimeArchive]);
+  const selectedEntry = entries.find(entry => entry.key === detailCode);
+  const detail: AirportRecord | AirlineRecord | undefined = selectedEntry
+    ? selectedEntry.record ?? (kind === 'airports'
+      ? { code: selectedEntry.key, city: selectedEntry.city || selectedEntry.name, country: selectedEntry.countryName, flights: 0, trips: [] }
+      : { code: selectedEntry.key, flights: 0, miles: 0, trips: [] })
+    : list.find((item) => item.code === detailCode);
   const directDetail = Boolean(
     initialAirport && detail?.code === initialAirport,
   );
@@ -433,14 +451,14 @@ export function CollectionList({
   }, [detail, directDetail, onBackHandlerChange]);
   const renderDetail = () => {
     if (!detail) return null;
-    const dates = detail.trips
+    const dates = (selectedEntry?.lifetimeRecord ?? detail).trips
       .flatMap((t) => t.segments ?? [])
       .flatMap((s) => [
-        s.depAirport === detail.code ? s.depTime : "",
-        s.arrAirport === detail.code ? s.arrTime : "",
+        s.depAirport?.trim().toUpperCase() === detail.code.trim().toUpperCase() ? s.depTime : "",
+        s.arrAirport?.trim().toUpperCase() === detail.code.trim().toUpperCase() ? s.arrTime : "",
       ])
-      .filter(Boolean)
-      .sort();
+      .filter(date => date && Number.isFinite(Date.parse(date)))
+      .sort((a, b) => Date.parse(a) - Date.parse(b));
     return (
       <PaperReveal
         key={`${kind}-${detail.code}`}
@@ -468,34 +486,7 @@ export function CollectionList({
             <CollectionScope year={year} onClear={onClearYear} />
             {"city" in detail ? (
               <>
-                <View
-                  style={[styles.airportPortrait, largeText && styles.stacked]}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={styles.airportCode}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                    >
-                      {detail.code}
-                    </Text>
-                    <Text style={styles.airportCity}>
-                      {detail.city || detail.code}
-                    </Text>
-                    {detail.country ? (
-                      <Text style={styles.meta}>{detail.country}</Text>
-                    ) : null}
-                  </View>
-                  <View
-                    style={[
-                      styles.countCopy,
-                      largeText && styles.portraitCountInline,
-                    ]}
-                  >
-                    <Text style={styles.portraitCount}>{detail.flights}</Text>
-                    <Text style={styles.meta}>flights</Text>
-                  </View>
-                </View>
+                {selectedEntry && <AirportLuggageLabel entry={selectedEntry} hero year={year} />}
                 {dates.length > 0 && (
                   <View
                     style={[styles.visitDates, largeText && styles.stacked]}
@@ -520,7 +511,7 @@ export function CollectionList({
                 <AirlineLogo code={detail.code} size={40} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.airportCity}>
-                    {airlineName(detail.code)}
+                    {selectedEntry?.name || airlineName(detail.code)}
                   </Text>
                   <Text style={styles.meta}>
                     {detail.flights} flights · {detail.trips.length} trips
@@ -529,7 +520,7 @@ export function CollectionList({
               </View>
             )}
             {"city" in detail ? (
-              <AirportRouteFan airport={detail} onOpenTrip={onOpenTrip} />
+              detail.trips.length ? <AirportRouteFan airport={detail} onOpenTrip={onOpenTrip} /> : <Text style={styles.empty}>{selectedEntry?.lifetimeRecord && year ? `No recorded flights through ${detail.code} in ${year}.` : 'Your first recorded visit will appear here.'}</Text>
             ) : (
               <Text style={[styles.sectionLabel, { marginTop: 24 }]}>
                 Trips
@@ -537,17 +528,12 @@ export function CollectionList({
             )}
           </View>
           {!("city" in detail) && (
-            <TripRows trips={detail.trips} onOpenTrip={onOpenTrip} />
+            detail.trips.length ? <TripRows trips={detail.trips} onOpenTrip={onOpenTrip} /> : <Text style={styles.empty}>{selectedEntry?.lifetimeRecord && year ? `No recorded flights with this airline in ${year}.` : 'Your first recorded flight with this airline will appear here.'}</Text>
           )}
         </ScrollView>
       </PaperReveal>
     );
   };
-  const filtered = list.filter((item) =>
-    `${item.code} ${"city" in item ? item.city : airlineName(item.code)} ${"country" in item ? item.country : ""}`
-      .toLowerCase()
-      .includes(query.trim().toLowerCase()),
-  );
   return (
     <View style={styles.layer}>
       <View
@@ -557,7 +543,11 @@ export function CollectionList({
         accessibilityElementsHidden={Boolean(detail)}
         importantForAccessibility={detail ? "no-hide-descendants" : "auto"}
       >
-        <ScrollView
+        {kind !== 'countries' ? <TransportCollectionIndex kind={kind} entries={entries} query={query} onSelect={setDetailCode} year={year}
+          header={<><CollectionHeading title={kind === 'airports' ? 'Airports' : 'Airlines'} query={query} setQuery={setQuery}
+            placeholder={kind === 'airports' ? 'Airport, city or country' : 'Airline name or code'} onBack={onBack} backLabel={backLabel} />
+            <View style={styles.inset}><CollectionScope year={year} onClear={onClearYear} /></View></>}
+        /> : <ScrollView
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
@@ -581,76 +571,14 @@ export function CollectionList({
           <View style={styles.inset}>
             <CollectionScope year={year} onClear={onClearYear} />
           </View>
-          {kind === "countries" ? (
+          {kind === "countries" && (
             <CountryIndex
               arrivals={archive.arrivals}
               onSelect={onSelectCountry}
               query={query}
             />
-          ) : (
-            <View style={styles.inset}>
-              {filtered.map((item) => (
-                <Pressable
-                  key={item.code}
-                  accessibilityRole="button"
-                  onPress={() => setDetailCode(item.code)}
-                  style={styles.listRow}
-                >
-                  {kind === "airlines" ? (
-                    <AirlineLogo code={item.code} size={40} />
-                  ) : (
-                    <Text
-                      style={[
-                        styles.airportTag,
-                        largeText && styles.airportTagLarge,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {item.code}
-                    </Text>
-                  )}
-                  <View style={styles.listCopy}>
-                    <Text style={styles.airlineName}>
-                      {kind === "airlines"
-                        ? airlineName(item.code)
-                        : "city" in item
-                          ? item.city || item.code
-                          : item.code}
-                    </Text>
-                    <Text style={styles.meta}>
-                      {kind === "airlines"
-                        ? item.code
-                        : "country" in item
-                          ? item.country
-                          : ""}
-                    </Text>
-                    {largeText && (
-                      <Text style={styles.meta}>
-                        {item.flights}{" "}
-                        {item.flights === 1 ? "flight" : "flights"}
-                      </Text>
-                    )}
-                  </View>
-                  {!largeText && (
-                    <View style={styles.countCopy}>
-                      <Text style={styles.flightCount}>{item.flights}</Text>
-                      <Text style={styles.meta}>
-                        {item.flights === 1 ? "flight" : "flights"}
-                      </Text>
-                    </View>
-                  )}
-                  <WWIcon name="arrow" size={16} />
-                </Pressable>
-              ))}
-              {!filtered.length && (
-                <Text style={styles.empty}>
-                  {list.length ? "No matching " : "No recorded "}
-                  {kind}.
-                </Text>
-              )}
-            </View>
           )}
-        </ScrollView>
+        </ScrollView>}
       </View>
       {renderDetail()}
     </View>
@@ -698,6 +626,10 @@ const styles = StyleSheet.create({
   },
   mark: { width: 72, height: 72, overflow: "hidden", alignItems: "center" },
   collectionValue: { fontFamily: fonts.mono, fontSize: 26, color: colors.ink },
+  collectionTotal: { fontFamily: fonts.mono, fontSize: 10, color: colors.mutedInk, marginTop: -5 },
+  collectionTrack: { height: 2, backgroundColor: colors.paperBorderSoft, alignSelf: 'stretch', marginTop: 4 },
+  collectionFill: { height: 2, backgroundColor: colors.copper },
+  collectionExtra: { fontFamily: fonts.sansRegular, fontSize: 10, color: colors.mutedInk, textAlign: 'center' },
   collectionTitle: {
     fontFamily: fonts.sans,
     fontSize: 13,

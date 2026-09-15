@@ -310,6 +310,10 @@ function AppShell({
     visit(origin);
   };
   const openPassportCollection = (kind: CollectionKind, year?: string, airport?: string) => {
+    if (kind === "countries") {
+      openCountries(undefined, year);
+      return;
+    }
     setPassportCollection({ kind, returnTab: activeTab, year: normalizeTravelYear(year), epoch: ++scopeSequence.current, airport });
     setCountries(null);
     setSelectedTripId(null);

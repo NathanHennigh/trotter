@@ -1,0 +1,26 @@
+{
+  "exclude": ["XP", "ZZ"],
+  "add": [
+    {"key":"AX","name":"Åland Islands","region":"Europe","sourceUrl":"https://www.iso.org/obp/ui/#iso:code:3166:AX"},
+    {"key":"BV","name":"Bouvet Island","region":"Antarctica","sourceUrl":"https://www.iso.org/obp/ui/#iso:code:3166:BV"},
+    {"key":"SJ","name":"Svalbard and Jan Mayen","region":"Europe","sourceUrl":"https://www.iso.org/obp/ui/#iso:code:3166:SJ"},
+    {"key":"X-SOMALILAND","name":"Somaliland","region":"Africa","sourceUrl":"https://www.wikidata.org/wiki/Q34754"}
+  ],
+  "aliases": {
+    "AE":["UAE"],"BO":["Bolivia (Plurinational State of)"],"BN":["Brunei Darussalam"],
+    "CD":["Democratic Republic of the Congo","Democratic Republic of Congo","DR Congo","Congo (Kinshasa)"],
+    "CG":["Republic of the Congo","Republic of Congo","Congo (Brazzaville)"],
+    "CI":["Côte d'Ivoire","Ivory Coast"],"CV":["Cabo Verde"],"CZ":["Czechia","Czech Republic"],
+    "FK":["Falkland Islands (Malvinas)"],"FM":["Micronesia (Federated States of)"],
+    "GB":["UK","United Kingdom of Great Britain and Northern Ireland"],"HK":["Hong Kong SAR of China"],
+    "IR":["Iran (Islamic Republic of)"],"KP":["Democratic People's Republic of Korea"],"KR":["Republic of Korea"],
+    "LA":["Lao People's Democratic Republic","Lao Peoples Democratic Republic"],"MD":["Republic of Moldova","Moldova, Republic of"],
+    "MK":["Macedonia","North Macedonia"],"MM":["Burma","Myanmar"],"MO":["Macao","Macau"],
+    "PS":["Palestine","State of Palestine","Palestinian Territory"],"RE":["Reunion","Réunion"],
+    "RU":["Russian Federation"],"ST":["Sao Tome and Principe","São Tomé and Príncipe"],
+    "SY":["Syrian Arab Republic"],"SZ":["Swaziland","Eswatini"],"TL":["East Timor","Timor-Leste"],
+    "TR":["Türkiye","Turkey"],"TW":["Taiwan, Province of China"],"TZ":["United Republic of Tanzania","Tanzania, United Republic of"],
+    "US":["USA","United States of America"],"VA":["Vatican","Holy See","Vatican City"],
+    "VE":["Venezuela (Bolivarian Republic of)"],"VN":["Viet Nam"],"X-SOMALILAND":["Somaliland"]
+  }
+}

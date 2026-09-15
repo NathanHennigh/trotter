@@ -39,20 +39,18 @@ export function WalletHeading({
   const titleSize = fitDisplayFont(trip.city || trip.title, baseSize, titleWidth, fontScale);
   return (
     <View style={[s.heading, compact && s.headingCompact]}>
-      <Svg
-        style={StyleSheet.absoluteFill}
-        width="100%"
-        height="100%"
-        pointerEvents="none"
-      >
-        <Defs>
-          <LinearGradient id={gradient} x1="0" y1="0" x2="1" y2="0.4">
-            <Stop offset="0" stopColor="#4e7f9b" />
-            <Stop offset="0.74" stopColor="#427494" />
-          </LinearGradient>
-        </Defs>
-        <Rect width="100%" height="100%" fill={`url(#${gradient})`} />
-      </Svg>
+      {/* Give native SVG an unpadded viewport so its percentage size covers the whole heading. */}
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <Svg width="100%" height="100%">
+          <Defs>
+            <LinearGradient id={gradient} x1="0" y1="0" x2="1" y2="0.4">
+              <Stop offset="0" stopColor="#4e7f9b" />
+              <Stop offset="0.74" stopColor="#427494" />
+            </LinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill={`url(#${gradient})`} />
+        </Svg>
+      </View>
       <View style={[s.top, compact && s.topCompact]}>
         <Text
           style={[s.country, compact && s.countryCompact]}

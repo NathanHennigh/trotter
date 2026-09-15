@@ -35,7 +35,7 @@ function host(file, name, options = {}) {
   const theme = { colors: palette, fonts: {}, layout: { bottomNavHeight: 68 } };
   const mocks = {
     react, 'react-native': native,
-    'react-native-svg': Object.fromEntries('default Svg Defs Line LinearGradient Rect Stop Circle Pattern'.split(' ').map(tag => [tag, tag])),
+    'react-native-svg': Object.fromEntries('default Svg Defs Line LinearGradient Rect Stop Circle Path Pattern'.split(' ').map(tag => [tag, tag])),
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) },
     '../components/trotter/TrotterKit': { BottomNav: 'BottomNav' },
     '../components/world-window/WorldWindowUI': ui, '../WorldWindowUI': ui,

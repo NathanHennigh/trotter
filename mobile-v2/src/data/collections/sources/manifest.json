@@ -1,0 +1,30 @@
+{
+  "version": "2026-09-15.1",
+  "snapshotDate": "2026-09-15",
+  "sources": [
+    {
+      "file": "countries.csv.gz",
+      "url": "https://raw.githubusercontent.com/davidmegginson/ourairports-data/8ecf53adfffef69ed56543c65859227a4ef4558a/countries.csv",
+      "sha256": "2a9dbee691125b0cdb8ceb5fe227c48c903f99c488963b8e53e2ab366521c639",
+      "license": "Public Domain",
+      "retrievedAt": "2026-09-15T15:57:27.029768+00:00",
+      "revision": "8ecf53adfffef69ed56543c65859227a4ef4558a"
+    },
+    {
+      "file": "airports.csv.gz",
+      "url": "https://raw.githubusercontent.com/davidmegginson/ourairports-data/8ecf53adfffef69ed56543c65859227a4ef4558a/airports.csv",
+      "sha256": "97042140aec38e43bbe304dac7be3bbc622e7197ff0093c5376eb586948c1d13",
+      "license": "Public Domain",
+      "retrievedAt": "2026-09-15T15:57:28.552221+00:00",
+      "revision": "8ecf53adfffef69ed56543c65859227a4ef4558a"
+    },
+    {
+      "file": "airlines.json.gz",
+      "url": "https://query.wikidata.org/sparql?query=SELECT+%3Fairline+%3FairlineLabel+%3Fiata+%3Ficao+%3Fcountry+%3FcountryLabel+%3Fiso+%3Fdissolved+%3FcodeEnd+WHERE+%7B+%3Fairline+wdt%3AP31%2Fwdt%3AP279%2A+wd%3AQ46970%3B+wdt%3AP229+%3Fiata.+OPTIONAL+%7B%3Fairline+wdt%3AP230+%3Ficao.%7D+OPTIONAL+%7B%3Fairline+wdt%3AP17+%3Fcountry.+%3Fcountry+wdt%3AP297+%3Fiso.%7D+OPTIONAL+%7B%3Fairline+wdt%3AP576+%3Fdissolved.%7D+OPTIONAL+%7B%3Fairline+p%3AP229+%3FcodeStatement.+%3FcodeStatement+ps%3AP229+%3Fiata%3B+pq%3AP582+%3FcodeEnd.%7D+SERVICE+wikibase%3Alabel+%7Bbd%3AserviceParam+wikibase%3Alanguage+%22en%22.%7D+%7D&format=json",
+      "sha256": "0ad0f399194e91ed1e30f1ec969aee03ba2e4c55fc7e938e2f7d7b15a503b173",
+      "license": "CC0-1.0",
+      "retrievedAt": "2026-09-15T15:57:33.739525+00:00"
+    }
+  ],
+  "airlineQuery": "SELECT ?airline ?airlineLabel ?iata ?icao ?country ?countryLabel ?iso ?dissolved ?codeEnd WHERE { ?airline wdt:P31/wdt:P279* wd:Q46970; wdt:P229 ?iata. OPTIONAL {?airline wdt:P230 ?icao.} OPTIONAL {?airline wdt:P17 ?country. ?country wdt:P297 ?iso.} OPTIONAL {?airline wdt:P576 ?dissolved.} OPTIONAL {?airline p:P229 ?codeStatement. ?codeStatement ps:P229 ?iata; pq:P582 ?codeEnd.} SERVICE wikibase:label {bd:serviceParam wikibase:language \"en\".} }"
+}
