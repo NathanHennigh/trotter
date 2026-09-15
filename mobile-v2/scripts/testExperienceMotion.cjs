@@ -10,7 +10,7 @@ const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve();
 const flatten = value => Array.isArray(value) ? Object.assign({}, ...value.map(flatten)) : value || {};
 function environment({ reduced = false, os = 'android', width = 410, visualWidth = 410 } = {}) {
   let current, nextTimer = 1;
-  const timers = new Map(), animations = [], reducedListeners = new Set();
+  const frames = new Map(), timers = new Map(), animations = [], reducedListeners = new Set();
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => v === b[i]);
   const React = {
     createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
@@ -55,10 +55,10 @@ function environment({ reduced = false, os = 'android', width = 410, visualWidth
       '../../../utils/mobileLayout': { getMobileVisualWidth: () => visualWidth },
       './WalletCover': { WalletCover: 'WalletCover' }, './tripPresentation': { flightDate: () => '1 Jan 2026' },
     };
-    new Function('module', 'exports', 'require', 'setTimeout', 'clearTimeout', code)(module, module.exports, name => {
+    new Function('module', 'exports', 'require', 'setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', code)(module, module.exports, name => {
       if (name === '../motion') return load('components/world-window/motion.tsx');
       assert(name in mocks, `Unexpected dependency: ${name}`); return mocks[name];
-    }, callback => { const id = nextTimer++; timers.set(id, callback); return id; }, id => timers.delete(id));
+    }, callback => { const id = nextTimer++; timers.set(id, callback); return id; }, id => timers.delete(id), callback => { const id = nextTimer++; frames.set(id, callback); return id; }, id => frames.delete(id));
     cache.set(file, module.exports); return module.exports;
   }
   function mount(Component, initialProps) {
@@ -69,8 +69,9 @@ function environment({ reduced = false, os = 'android', width = 410, visualWidth
     };
   }
   const motion = load('components/world-window/motion.tsx');
-  return { motion, load, mount, animations, timers,
+  return { motion, load, mount, animations, timers, frames,
     async ready() { const probe = mount(motion.useReducedMotion); probe.render(); await flush(); probe.render(); probe.dispose(); },
+    advanceFrame() { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); },
     advanceTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(fn => fn()); },
     reduce(value) { reduced = value; reducedListeners.forEach(fn => fn(value)); },
   };
@@ -108,10 +109,18 @@ test('paper feedback composes the caller style and interrupts a press with its r
 
 
 const movingSurface = tree => tree.props.children[0];
+const paintEntry = (h, env, tree = h.render()) => {
+  movingSurface(tree).props.onLayout(); h.render(); env.advanceFrame(); env.advanceFrame(); return h.render();
+};
 
-test('trip entry moves a single opaque screen immediately, without source duplication or layout timers', async () => {
+test('trip entry waits for native layout and two painted frames before starting its native clock', async () => {
   const env = environment(); await env.ready(); const h = env.mount(surface(env));
   const tree = h.render(props({ target: undefined }));
+  assert.equal(env.animations.length, 0); assert.equal(env.frames.size, 0);
+  movingSurface(tree).props.onLayout(); h.render();
+  assert.equal(env.animations.length, 0); assert.equal(env.frames.size, 1);
+  env.advanceFrame(); assert.equal(env.animations.length, 0);
+  env.advanceFrame();
   assert.equal(env.animations.length, 1); assert.equal(env.timers.size, 0);
   assert.equal(tree.props.children.length, 1); assert.equal(ghost(tree), undefined);
   const screen = movingSurface(tree), style = flatten(screen.props.style);
@@ -127,6 +136,7 @@ test('trip entry moves a single opaque screen immediately, without source duplic
 test('source or destination measurements and late detail hydration cannot retarget or restart entry', async () => {
   const env = environment(); await env.ready(); const h = env.mount(surface(env));
   const initial = h.render(props({ target: undefined }));
+  paintEntry(h, env, initial);
   env.animations[0].value.value = .4;
   const changed = h.render(props({ trip: { ...trip, title: 'Hydrated trip' }, origin: { x: 200, y: -30, width: 20, height: 5 } }));
   assert.equal(env.animations.length, 1); assert.equal(env.timers.size, 0);
@@ -139,7 +149,7 @@ test('source or destination measurements and late detail hydration cannot retarg
 
 test('Back interrupts entry, disables touches and closes exactly once using the current callback', async () => {
   const env = environment(); await env.ready(); let oldCloses = 0, closes = 0;
-  const h = env.mount(surface(env)); h.render(props({ onClosed: () => oldCloses++ }));
+  const h = env.mount(surface(env)); h.render(props({ onClosed: () => oldCloses++ })); paintEntry(h, env);
   const entering = env.animations[0]; entering.value.value = .42;
   let tree = h.render(props({ closing: true, onClosed: () => oldCloses++ }));
   assert.equal(entering.stopped, true); assert.equal(oldCloses, 0); assert.equal(tree.props.pointerEvents, 'none');
@@ -153,7 +163,7 @@ test('Back interrupts entry, disables touches and closes exactly once using the 
 test('interrupting a close or unmounting cannot finish an abandoned navigation', async () => {
   const env = environment(); await env.ready(); let closes = 0;
   const h = env.mount(surface(env)), base = props({ onClosed: () => closes++ });
-  h.render(base); h.render({ ...base, closing: true }); const oldClose = env.animations.at(-1);
+  h.render(base); paintEntry(h, env); h.render({ ...base, closing: true }); const oldClose = env.animations.at(-1);
   h.render(base); oldClose.finish(); assert.equal(closes, 0);
   h.render({ ...base, closing: true }); const abandoned = env.animations.at(-1); h.dispose(); abandoned.finish();
   assert.equal(closes, 0);
@@ -174,7 +184,7 @@ test('reduced motion exposes the real screen immediately and closes without tran
 test('enabling reduced motion during Back cancels the previous completion callback', async () => {
   const env = environment(); await env.ready(); let closes = 0;
   const h = env.mount(surface(env)), base = props({ onClosed: () => closes++ });
-  h.render(base); h.render({ ...base, closing: true }); const movingExit = env.animations.at(-1);
+  h.render(base); paintEntry(h, env); h.render({ ...base, closing: true }); const movingExit = env.animations.at(-1);
   env.reduce(true); const tree = h.render();
   assert.equal(movingExit.stopped, true); assert.equal(closes, 0);
   assert.deepEqual(flatten(movingSurface(tree).props.style).transform, []);
@@ -205,5 +215,36 @@ for (const dimensions of [
     assert.equal(tree.props.children.length, 1);
     assert(!style.transform.some(t => 'scale' in t));
   }
+  h.dispose();
+});
+
+
+test('Back during initial layout/paint cancels pending entry and closes without flashing the itinerary', async () => {
+  for (const framesPainted of [0, 1]) {
+    const env = environment(); await env.ready(); let closes = 0;
+    const h = env.mount(surface(env)), base = props({ onClosed: () => closes++ });
+    const tree = h.render(base); movingSurface(tree).props.onLayout(); h.render();
+    if (framesPainted) env.advanceFrame();
+    h.render({ ...base, closing: true });
+    assert.equal(env.frames.size, 0); assert.equal(env.animations.length, 1);
+    assert.equal(env.animations[0].config.duration, 0); assert.equal(env.animations[0].config.toValue, 0);
+    env.advanceFrame(); env.advanceFrame(); assert.equal(env.animations.length, 1);
+    env.animations[0].finish(); assert.equal(closes, 1); h.dispose();
+  }
+});
+
+test('unmount before first paint cancels scheduled frames without opening or navigating', async () => {
+  const env = environment(); await env.ready(); let closes = 0;
+  const h = env.mount(surface(env)), tree = h.render(props({ onClosed: () => closes++ }));
+  movingSurface(tree).props.onLayout(); h.render(); env.advanceFrame(); h.dispose();
+  assert.equal(env.frames.size, 0); env.advanceFrame(); assert.equal(env.animations.length, 0); assert.equal(closes, 0);
+});
+
+test('cold preference resolution cannot move an already exposed reduced-motion itinerary offscreen', async () => {
+  const env = environment(); const h = env.mount(surface(env));
+  const tree = h.render(props()); assert.deepEqual(flatten(movingSurface(tree).props.style).transform, []);
+  assert.equal(env.animations[0].value.value, 1);
+  await flush(); const normal = h.render();
+  assert.equal(flatten(movingSurface(normal).props.style).transform[0].translateX.parent.value, 1);
   h.dispose();
 });
