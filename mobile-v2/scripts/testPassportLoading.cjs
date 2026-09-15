@@ -60,6 +60,8 @@ const message = (webview, type, values = {}) => webview.props.onMessage({ native
     assert.equal(face.props.xml, artwork.passportCoverFace(width), 'Placeholder uses the exact WebView cover face');
     assert(!find(cover(tree), 'Text'), 'Cover title cannot fall back to a second native font/layout');
     assert.match(face.props.xml, /id="cover-lettering"[^>]+d="M/, 'Title is outlined before any font loads');
+    assert.equal((face.props.xml.match(/<svg\b/g) || []).length, 1, 'Native face cannot contain another SVG viewport with unsupported x/y positioning');
+    assert.doesNotMatch(face.props.xml, /\btransform=/, 'All artwork placement is baked into path coordinates for native rendering');
     host.pending.shift().resolve({ name: 'Traveler', fonts: {}, stamps: [] }); await flush();
     tree = host.render(); let webview = find(tree, 'WebView');
     assert(cover(tree), 'Preparing HTML must not remove the native cover');

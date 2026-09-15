@@ -1,5 +1,5 @@
 import React from "react";
-import { Animated, StyleSheet, Text, useWindowDimensions, View, type GestureResponderEvent } from "react-native";
+import { Animated, Platform, StyleSheet, Text, useWindowDimensions, View, type GestureResponderEvent } from "react-native";
 import Svg, { Defs, Line, LinearGradient, Rect, Stop } from "react-native-svg";
 import type { TripSummary } from "../../../data/trotterMock";
 import { fitDisplayFont } from "../displayTextFit";
@@ -88,6 +88,7 @@ export function WalletCover({
   embedded?: boolean;
   bodyOpacity?: Animated.AnimatedInterpolation<number>;
 }) {
+  const { width: windowWidth } = useWindowDimensions();
   const { shown, hidden } = React.useMemo(() => walletSummary(trip), [trip]);
   const surface = React.useRef<View>(null);
   const alive = React.useRef(true);
@@ -106,11 +107,18 @@ export function WalletCover({
   }, []);
   const measureSource = (event?: GestureResponderEvent) => {
     touchStart.current = event ? { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY } : undefined;
-    if (!alive.current || embedded || !surface.current?.measureInWindow) return;
+    if (!alive.current || embedded || !surface.current?.measure) return;
     const request = ++measurement.current, started = Date.now(), wallet = source.current;
     // Measure on finger-down while the native surface is still at rest. The
     // release never waits for this callback and a late result cannot navigate.
-    surface.current.measureInWindow((x, y, width, height) => {
+    // Native page coordinates share the popup's React root; measureInWindow
+    // applies Android's visible-window/status-bar offset and makes the copy jump.
+    const browserWidth = (globalThis as { innerWidth?: number }).innerWidth;
+    const webViewportWidth = typeof browserWidth === "number" && browserWidth > 0 ? browserWidth : windowWidth;
+    const rootLeft = Platform.OS === "web" ? Math.max(0, (webViewportWidth - getMobileVisualWidth(windowWidth)) / 2) : 0;
+    surface.current.measure((_localX, _localY, width, height, pageX, pageY) => {
+      // RN-web reports viewport coordinates; App's 430px root is centered.
+      const x = pageX - rootLeft, y = pageY;
       const now = Date.now(), age = now - started;
       if (!alive.current || request !== measurement.current || age < 0 || age > 250) return;
       measured.current = [x, y, width, height].every(Number.isFinite) && width > 0 && height > 0

@@ -28,7 +28,7 @@ function host(file, name, options = {}) {
     useEffect(fn, deps) { const i = cursor++; if (!slots[i] || !same(slots[i].deps, deps)) { slots[i]?.cleanup?.(); slots[i] = { deps }; effects.push(() => { slots[i].cleanup = fn(); }); } },
   };
   const tags = 'FlatList RefreshControl View Text Pressable TextInput ActivityIndicator'.split(' ');
-  const native = { ...Object.fromEntries(tags.map(tag => [tag, tag])), Animated: { View: 'AnimatedView' }, StyleSheet: { create: x => x }, useWindowDimensions: () => ({ width: options.width ?? 410, height: 880, fontScale: options.fontScale ?? 1 }) };
+  const native = { ...Object.fromEntries(tags.map(tag => [tag, tag])), Animated: { View: 'AnimatedView' }, Platform: { OS: options.platform ?? 'android' }, StyleSheet: { create: x => x }, useWindowDimensions: () => ({ width: options.width ?? 410, height: 880, fontScale: options.fontScale ?? 1 }) };
   const ui = Object.fromEntries('WWHeader WWButton WWEmpty WWIcon WWEmblem'.split(' ').map(tag => [tag, tag]));
   const wallet = { WalletCover: 'WalletCover', WalletHeading: 'WalletHeading', walletColors: palette };
   const motion = { PressFeedback: 'Pressable', useReducedMotion: () => options.reducedMotion !== false };
@@ -48,7 +48,7 @@ function host(file, name, options = {}) {
     '../services/travelTrips': { useTravelTrips: () => ({ trips: [], status: 'idle', refresh: async () => {}, loadTripDetail: async () => undefined, ...options.service }) },
     '../theme/trotterTheme': theme, '../../../theme/trotterTheme': theme,
     '../displayTextFit': { fitDisplayFont: (...args) => { options.fitArgs?.push(args); return args[1]; } },
-    '../../../utils/mobileLayout': { getMobileVisualWidth: width => width },
+    '../../../utils/mobileLayout': { getMobileVisualWidth: width => options.platform === 'web' ? Math.min(globalThis.innerWidth ?? width, 430) : width },
     '../AirlineLogo': { AirlineLogo: 'AirlineLogo', airlineName: code => code },
   };
   const Component = load(file, mocks)[name];
@@ -68,13 +68,19 @@ const segment = (id, depTime, arrTime, depAirport, arrAirport) => ({ id, depTime
 const earlier = segment('old', '2025-12-31T23:30:00-06:00', '2026-01-01T09:00:00+00:00', 'IAH', 'LHR');
 const later = segment('new', '2026-01-08T11:00:00+00:00', '2026-01-08T17:00:00-06:00', 'LHR', 'IAH');
 const trip = { id: 'trip-1', title: 'London', city: 'London', country: 'United Kingdom', airportCode: 'LHR', startDate: '2025-12-31', endDate: '2026-01-08', routeLabel: 'IAH to LHR', flightCount: 2, miles: 200, airlineCount: 1, airports: ['IAH', 'LHR'], airlines: ['UA'], segments: [earlier, later] };
+// Tests feed page bounds; deliberately different local offsets must never become the popup origin.
+function rootMeasurement(callbacks) {
+  return { measure: callback => callbacks.push((pageX, pageY, width, height) => callback(999, 777, width, height, pageX, pageY)),
+    measureInWindow: () => assert.fail('Window coordinates apply a status-bar offset and must not drive the popup') };
+}
+
 
 
 test('all wallet targets capture the whole stable wallet before release and open synchronously', () => {
   const opened = [], callbacks = [], bounds = [20, 310, 370, 260];
   const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
   const tree = h.render({ trip, onPress: (...args) => opened.push(args) });
-  tree.props.ref.current = { measureInWindow: callback => callbacks.push(callback) };
+  tree.props.ref.current = rootMeasurement(callbacks);
   assert.equal(tree.props.collapsable, false);
   const targets = nodes(tree).filter(node => node.type === 'Pressable');
   assert(targets.length >= 3);
@@ -89,11 +95,51 @@ test('all wallet targets capture the whole stable wallet before release and open
   h.dispose(); targets[0].props.onPress(); assert.equal(opened.length, targets.length);
 });
 
+test('native origin uses React-root page coordinates without the Android visible-window inset', () => {
+  for (const platform of ['android', 'ios']) {
+    const opened = [], callbacks = [];
+    const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover', { platform, width: 420 });
+    const tree = h.render({ trip, onPress: origin => opened.push(origin) });
+    let windowMeasurements = 0;
+    tree.props.ref.current = {
+      measure: callback => callbacks.push(callback),
+      measureInWindow: callback => { windowMeasurements++; callback(20, 251 + 1 / 3, 380, 254); },
+    };
+    const target = nodes(tree).find(node => node.type === 'Pressable');
+    target.props.onPressIn();
+    callbacks.shift()(0, 0, 380, 254, 20, 305 + 1 / 3);
+    target.props.onPress();
+    assert.equal(windowMeasurements, 0);
+    assert.equal(opened[0].x, 20); assert.equal(opened[0].y, 305 + 1 / 3);
+    assert.equal(opened[0].width, 380); assert.equal(opened[0].height, 254);
+    h.dispose();
+  }
+});
+
+test('web origin removes only the centered app-root inset and remains unchanged on a phone viewport', () => {
+  const previousWidth = globalThis.innerWidth;
+  try {
+    for (const viewport of [1200, 320]) {
+      globalThis.innerWidth = viewport;
+      const opened = [], callbacks = [], rootLeft = Math.max(0, (viewport - 430) / 2);
+      const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover', { platform: 'web', width: viewport });
+      const tree = h.render({ trip, onPress: origin => opened.push(origin) });
+      tree.props.ref.current = rootMeasurement(callbacks);
+      const target = nodes(tree).find(node => node.type === 'Pressable');
+      target.props.onPressIn(); callbacks.shift()(rootLeft + 20, 310, Math.min(viewport, 430) - 40, 254);
+      target.props.onPress();
+      assert.equal(opened[0].x, 20); assert.equal(opened[0].y, 310); h.dispose();
+    }
+  } finally {
+    if (previousWidth === undefined) delete globalThis.innerWidth; else globalThis.innerWidth = previousWidth;
+  }
+});
+
 test('a fast press uses a fresh layout fallback but never waits for or navigates from a measurement callback', () => {
   const opened = [], callbacks = [];
   const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
   const tree = h.render({ trip, onPress: origin => opened.push(origin) });
-  tree.props.ref.current = { measureInWindow: callback => callbacks.push(callback) };
+  tree.props.ref.current = rootMeasurement(callbacks);
   const target = nodes(tree).find(node => node.type === 'Pressable');
   tree.props.onLayout(); callbacks.shift()(20, 310, 370, 260);
   target.props.onPressIn(); target.props.onPress();
@@ -110,7 +156,7 @@ test('source callbacks reject zero/nonfinite/expired bounds and an unmounted wal
     const opened = [], callbacks = [];
     const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
     const tree = h.render({ trip, onPress: origin => opened.push(origin) });
-    tree.props.ref.current = { measureInWindow: callback => callbacks.push(callback) };
+    tree.props.ref.current = rootMeasurement(callbacks);
     const target = nodes(tree).find(node => node.type === 'Pressable');
     for (const bounds of [[20, 310, 0, 260], [NaN, 310, 370, 260], [20, 310, 370, -10]]) {
       target.props.onPressIn(); callbacks.shift()(...bounds); target.props.onPress();
@@ -129,7 +175,7 @@ test('scroll movement and newer presses invalidate stale source positions withou
   const opened = [], callbacks = [];
   const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
   const tree = h.render({ trip, onPress: origin => opened.push(origin) });
-  tree.props.ref.current = { measureInWindow: callback => callbacks.push(callback) };
+  tree.props.ref.current = rootMeasurement(callbacks);
   const target = nodes(tree).find(node => node.type === 'Pressable');
   target.props.onPressIn({ nativeEvent: { pageX: 100, pageY: 400 } });
   callbacks.shift()(20, 310, 370, 260);
@@ -148,7 +194,7 @@ test('source capture preserves the current scoped wallet and ignores callbacks f
   const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
   const onPress = origin => opened.push(origin);
   let tree = h.render({ trip, onPress });
-  tree.props.ref.current = { measureInWindow: callback => callbacks.push(callback) };
+  tree.props.ref.current = rootMeasurement(callbacks);
   nodes(tree).find(node => node.type === 'Pressable').props.onPressIn();
   const scoped = scope.scopeTripsToYear([trip], '2026')[0];
   tree = h.render({ trip: scoped, scopeYear: '2026', totalFlightCount: 2, onPress });
