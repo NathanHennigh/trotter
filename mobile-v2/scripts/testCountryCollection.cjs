@@ -15,6 +15,7 @@ const modules={
  '../motion':{PressFeedback:'PressFeedback'},'../WorldWindowUI':{WWIcon:'WWIcon'},'./PassportStamp':{CroppedPassportStamp:'CroppedPassportStamp'},
  './passport-model':{readableDate:x=>x},'../../../theme/trotterTheme':{colors:{},fonts:{}},
  '../../../data/collections/catalogs':{countryCatalog},'../collections/catalogProgress':progress,
+ '../collections/CollectionIndexHeader':{CollectionIndexHeader:'CollectionIndexHeader',CollectionProgress:'CollectionProgress'},
 };
 function loadIndex(){const host=hookHost(),file=path.join(mobile,'src/components/world-window/passport/CountryCollectionIndex.tsx'),mod={exports:{}};
  const compiled=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;

@@ -35,7 +35,7 @@ function host(file, name, options = {}) {
   const theme = { colors: palette, fonts: {}, layout: { bottomNavHeight: 68 } };
   const mocks = {
     react, 'react-native': native,
-    'react-native-svg': Object.fromEntries('default Svg Defs Line LinearGradient Rect Stop Circle Path Pattern'.split(' ').map(tag => [tag, tag])),
+    'react-native-svg': Object.fromEntries('default Svg Defs Line LinearGradient Rect Stop Circle Path Pattern ClipPath G'.split(' ').map(tag => [tag, tag])),
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) },
     '../components/trotter/TrotterKit': { BottomNav: 'BottomNav' },
     '../components/world-window/WorldWindowUI': ui, '../WorldWindowUI': ui,
@@ -51,8 +51,9 @@ function host(file, name, options = {}) {
     '../../../utils/mobileLayout': { getMobileVisualWidth: width => options.platform === 'web' ? Math.min(globalThis.innerWidth ?? width, 430) : width },
     '../AirlineLogo': { AirlineLogo: 'AirlineLogo', airlineName: code => code },
   };
-  const Component = load(file, mocks)[name];
+  const exports = load(file, mocks), Component = exports[name];
   return {
+    exports,
     render(next = props) { props = next; cursor = 0; const tree = Component(props); const pending = effects; effects = []; pending.forEach(fn => fn()); return tree; },
     dispose() { slots.forEach(slot => slot?.cleanup?.()); },
   };
@@ -383,6 +384,44 @@ test('boarding pass shows both local dates and the day change; large type moves 
   assert(copy.includes('31 Dec 2025')); assert(copy.includes('1 Jan 2026')); assert(copy.includes('Next day')); assert(copy.includes('23:30'));
   assert(nodes(tree).some(node => node.type === 'View' && Array.isArray(node.props.style) && node.props.style.some(style => style?.flexDirection === 'column')));
   assert(!copy.some(value => /seat|gate|boarding group/i.test(value)), 'No unsupported ticket facts are invented'); h.dispose();
+});
+
+test('flight paper has true transparent semicircle cutouts in both stub orientations', async () => {
+  const sharp = require('sharp');
+  for (const [width, height, seam, horizontal] of [[370, 310, 299, false], [280, 455, 365, true], [280, 680, 530, true]]) {
+    const h = host('components/world-window/trips/BoardingPass.tsx', 'BoardingPass');
+    const d = h.exports.ticketOutline(width, height, seam, horizontal);
+    const { data, info } = await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><path d="${d}" fill="#fcfaf3" stroke="#c6d0ca" stroke-width="1"/></svg>`)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const alpha = (x, y) => data[(y * info.width + x) * info.channels + 3];
+    for (const [x, y] of horizontal ? [[2, seam], [width - 3, seam]] : [[seam, 2], [seam, height - 3]]) {
+      assert.equal(alpha(x, y), 0, 'The notch center must show the actual background, with no painted circle or backing rectangle');
+    }
+    for (const [x, y] of horizontal ? [[8, seam], [width - 9, seam], [2, seam + 9]] : [[seam, 8], [seam, height - 9], [seam + 9, 2]]) {
+      assert.equal(alpha(x, y), 255, 'Paper beside and behind the notch remains intact');
+    }
+    h.dispose();
+  }
+});
+
+test('paper, stub color, grain and perforation share one silhouette at large text and selected state', () => {
+  const h = host('components/world-window/trips/BoardingPass.tsx', 'BoardingPass', { width: 320, fontScale: 2 });
+  let tree = h.render({ segment: earlier, availableWidth: 280, selected: true });
+  const paper = nodes(tree).find(n => n.props?.testID === 'boarding-pass-paper');
+  paper.props.onLayout({ nativeEvent: { layout: { width: 240, height: 650 } } });
+  nodes(tree).find(n => n.props?.testID === 'boarding-pass-stub').props.onLayout({ nativeEvent: { layout: { y: 495 } } });
+  tree = h.render();
+  const clip = find(tree, 'ClipPath'), fill = find(tree, 'G');
+  assert(clip); assert(fill); assert.equal(fill.props.clipPath, `url(#${clip.props.id})`);
+  assert.equal(nodes(fill).filter(n => n.type === 'Rect').length, 2, 'Both stub tint and grain are clipped to the paper');
+  assert(find(fill, 'Line'), 'Perforation also stops at the transparent notch');
+  const d = find(clip, 'Path').props.d;
+  assert(d.includes('A5 5 0 0 0 239.5 500')); assert(d.includes('A5 5 0 0 0 0.5 490'));
+  for (const n of nodes(tree).filter(n => n.type === 'View')) {
+    const style = Object.assign({}, ...(Array.isArray(n.props.style) ? n.props.style : [n.props.style]).flat().filter(Boolean));
+    assert.equal(style.backgroundColor, undefined, 'Native rectangles cannot fill the SVG cutouts');
+    assert.equal(style.borderWidth, undefined, 'Native borders cannot draw lines across the cutouts');
+  }
+  h.dispose();
 });
 
 test('narrow large text stacks counts, full airport endpoints, group headings and complete totals', () => {

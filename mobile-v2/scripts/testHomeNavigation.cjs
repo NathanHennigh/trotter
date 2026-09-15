@@ -97,11 +97,13 @@ function load(file, name, overrides = {}) {
   const compiled = ts.transpileModule(`${blurCapability?.getText(ast) ?? ""}\n${text.startsWith("export") ? text : "export " + text}\n${styles?.getText(ast) ?? ""}`, {
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  const tags = "View Text Pressable FlatList BoardingPass TripAtlas WalletHeading WWEmpty ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionScope CollectionList TransportCollectionIndex AirportLuggageLabel CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen PaperReveal PaperPresence TripNavigationSurface".split(" ");
+  const tags = "View Text Pressable FlatList BoardingPass TripAtlas WalletHeading WWEmpty ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionScope CollectionList TransportCollectionIndex AirportLuggageLabel CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen PaperReveal PaperPresence TripNavigationSurface TripBackground".split(" ");
   const globals = {
     ...Object.fromEntries(tags.map(tag => [tag, tag])),
+    CollectionProgress: "CollectionProgress",
     React: host.React, useState: host.React.useState, useMemo: host.React.useMemo, useEffect: host.React.useEffect, useRef: host.React.useRef,
     StyleSheet: { create: x => x, absoluteFillObject: {}, absoluteFill: {} },
+    Animated: { Value: class { constructor(value) { this.value = value; } setValue(value) { this.value = value; } stopAnimation() {} } },
     PressFeedback: "Pressable", useReducedMotion: () => false, selectionHaptic: noOp,
     useExperiencePreferences: () => { const [texture, setTexture] = host.React.useState("classic"); return { texture, setTexture, haptics: true, setHaptics: noOp }; },
     ...pure("src/utils/travelScope.ts"), ...pure("src/components/world-window/routeSelection.ts"),
@@ -354,7 +356,7 @@ test("Hidden tab layers cannot receive touches or appear in either accessibility
   find(tree,"HomeGlobeScreen").props.onChange("trips"); tree=host.render();
   const list=find(tree,"TripsListScreen"); list.props.onOpenTrip(trip); tree=host.render();
   assert(find(tree,"TripsListScreen"),"Trip list stays mounted beneath detail");
-  const layers=tree.props.children.flat(Infinity).filter(n=>n&&n.type==="View");
+  const layers=screenLayers(tree);
   assert.equal(layers.filter(n=>n.props.pointerEvents==="auto").length,0, "Only the separate itinerary surface accepts input");
   assert(find(tree, "TripNavigationSurface"));
   for(const layer of layers.filter(n=>n.props.pointerEvents==="none")){
@@ -440,12 +442,31 @@ test("Native screen boundaries stay stable through tab hiding, blur entry and cl
     assert.equal(flattenStyle(globe.props.style).opacity, tab === "globe" ? undefined : 0);
   }
   find(tree, "HomeGlobeScreen").props.onOpenTrip(trip); tree = host.render(); checkBoundaries();
-  assert.equal(flattenStyle(screenLayers(tree).find(layer => layer.props.testID === "screen-layer-globe").props.style).filter, "blur(4px)");
+  assert.equal(find(tree, "TripBackground").props.progress, find(tree, "TripNavigationSurface").props.motionProgress);
   find(tree, "TripNavigationSurface").props.onEntered(); tree = host.render(); checkBoundaries();
   find(tree, "TripNavigationSurface").props.onRequestClose(); tree = host.render(); checkBoundaries();
   tree = finishTripTransition(host); checkBoundaries();
   const globe = screenLayers(tree).find(layer => layer.props.testID === "screen-layer-globe");
   assert.equal(globe.props.pointerEvents, "auto"); assert.equal(flattenStyle(globe.props.style).filter, undefined);
+  host.unmount();
+});
+
+test("The selected wallet remains in the full background and explicit navigation resets in-flight blur", () => {
+  const host = appHost(); let tree = host.render({ consumeShare: noOp });
+  find(tree, "HomeGlobeScreen").props.onChange("trips"); tree = host.render();
+  const background = find(tree, "TripBackground");
+  find(tree, "TripsListScreen").props.onOpenTrip(trip, undefined, { x: 20, y: 300, width: 350, height: 260, wallet: { trip } });
+  tree = host.render();
+  assert.equal(find(tree, "TripsListScreen").props.liftedTripId, undefined, "Removing the source wallet would leave a rectangular hole in the blur");
+  const popup = find(tree, "TripNavigationSurface");
+  assert.equal(popup.props.motionProgress, background.props.progress);
+  assert.equal(popup.props.dragOffset, background.props.dragOffset);
+  popup.props.motionProgress.setValue(.4); popup.props.dragOffset.setValue(70);
+  find(tree, "TripDetailScreen").props.onChange("dreams"); tree = host.render();
+  assert.equal(find(tree, "TripNavigationSurface"), undefined);
+  assert.equal(find(tree, "TripBackground").props.progress.value, 0);
+  assert.equal(find(tree, "TripBackground").props.dragOffset.value, 0);
+  assert.strictEqual(find(tree, "TripBackground").props.progress, background.props.progress, "Wrapper and native values remain stable across tab changes");
   host.unmount();
 });
 
@@ -457,11 +478,14 @@ for (const platform of [{ OS: "android", Version: 31 }, { OS: "android", Version
     find(tree, "HomeGlobeScreen").props.onChange("profile"); tree = host.render();
     find(tree, "ProfileScreen").props.onChange("globe"); tree = host.render();
     find(tree, "HomeGlobeScreen").props.onOpenTrip(trip, "flight-one"); tree = host.render();
-    const layers = screenLayers(tree), filtered = layers.filter(layer => flattenStyle(layer.props.style).filter);
+    const layers = screenLayers(tree), background = find(tree, "TripBackground"), popup = find(tree, "TripNavigationSurface");
     assert(layers.every(layer => layer.props.collapsable === false), "Platform fallback must not change native screen boundaries");
-    const supported = platform.OS === "web" || platform.OS === "android" && platform.Version >= 31;
-    assert.deepEqual(filtered.map(layer => layer.props.testID), supported ? ["screen-layer-globe"] : []);
-    if (supported) assert.equal(flattenStyle(filtered[0].props.style).filter, "blur(4px)");
+    assert(layers.every(layer => !flattenStyle(layer.props.style).filter), "Individual screen layers never add separate blur rectangles");
+    assert.equal(background.props.progress, popup.props.motionProgress);
+    assert.equal(background.props.dragOffset, popup.props.dragOffset);
+    assert.equal(background.props.progress.value, 0, "Selecting the trip does not blur a still-resting source");
+    assert.equal(screenLayers(background).length, layers.length, "Every retained source lives in one complete background");
+    assert(!find(background, "TripNavigationSurface"), "The crisp wallet is outside the single filtered background");
     assert(layers.every(layer => !find(layer, "TripNavigationSurface")), "The wallet is not a descendant of a filtered source layer");
     assert(tree.props.children.flat(Infinity).includes(find(tree, "TripNavigationSurface")), "Modal remains a direct sibling of source screens");
     assert.equal(flattenStyle(tree.props.style).filter, undefined, "Shell never blurs the entire app");
@@ -485,19 +509,24 @@ for (const origin of ["globe", "trips", "countries", "airports"]) {
     } else find(tree, "HomeGlobeScreen").props.onOpenTrip(trip);
     tree = host.render();
     const source = origin === "airports" ? "passport" : origin;
-    const blurredKeys = () => screenLayers(tree).filter(layer => flattenStyle(layer.props.style).filter).map(layer => layer.props.testID);
-    assert.deepEqual(blurredKeys(), [`screen-layer-${source}`]);
+    const visibleKeys = () => screenLayers(tree).filter(layer => flattenStyle(layer.props.style).opacity !== 0).map(layer => layer.props.testID);
+    assert.deepEqual(visibleKeys(), [`screen-layer-${source}`]);
+    const progress = find(tree, "TripNavigationSurface").props.motionProgress;
+    const background = find(tree, "TripBackground");
+    progress.setValue(.45);
+    assert.equal(background.props.progress.value, .45, "The background tracks the actual opening timeline");
     assert.equal(find(tree, "TripDetailScreen").props.deferUpdates, true, "Hydration waits while opening");
     find(tree, "TripNavigationSurface").props.onEntered(); tree = host.render();
     assert.equal(find(tree, "TripDetailScreen").props.deferUpdates, false, "Hydration resumes only after entry completes");
     find(tree, "TripNavigationSurface").props.onRequestClose(); tree = host.render();
     assert.equal(find(tree, "TripNavigationSurface").props.closing, true);
     assert.equal(find(tree, "TripDetailScreen").props.deferUpdates, true, "Closing freezes detail presentation again");
-    assert.deepEqual(blurredKeys(), [`screen-layer-${source}`], "Close request does not snap the background sharp");
+    assert.equal(find(tree, "TripBackground").props.progress.value, .45, "Close request preserves the current blur until the native reversal advances");
     assert.equal(find(tree, "HomeGlobeScreen").props.visible, false);
     tree = finishTripTransition(host);
     assert.equal(find(tree, "TripNavigationSurface"), undefined);
-    assert.deepEqual(blurredKeys(), [], "Blur clears when the wallet has actually left");
+    assert.equal(find(tree, "TripBackground").props.progress.value, 0, "Blur is fully clear when the wallet has actually left");
+    assert.deepEqual(visibleKeys(), [`screen-layer-${source}`]);
     assert.equal(find(tree, "HomeGlobeScreen").props.filterYear, "2026");
     if (origin === "countries") assert.equal(find(tree, "CountryStampCollectionScreen").props.initialYear, "2026");
     if (origin === "airports") assert.equal(find(tree, "PassportStatsScreen").props.initialCollection, "airports");

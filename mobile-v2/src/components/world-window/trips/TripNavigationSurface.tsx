@@ -18,17 +18,19 @@ type WalletPopupChildProps = {
 };
 
 /** A single native timeline lifts and opens the wallet without scaling its paper. */
-export function TripNavigationSurface({ origin, closing, onClosed, onRequestClose, closeLabel = "Close itinerary", children, motionProgress, onEntered }: {
+export function TripNavigationSurface({ origin, closing, onClosed, onRequestClose, closeLabel = "Close itinerary", children, motionProgress, dragOffset, onEntered }: {
   trip: TripSummary; flightId?: string; origin?: TripOpenOrigin;
   closing: boolean; onClosed: () => void; onRequestClose: () => void;
   closeLabel?: string; children: React.ReactNode;
   motionProgress?: Animated.Value;
+  dragOffset?: Animated.Value;
   onEntered?: () => void;
 }) {
   const reduced = useReducedMotion();
   const localProgress = React.useRef(new Animated.Value(reduced ? 1 : 0)).current;
   const progress = motionProgress ?? localProgress;
-  const dragY = React.useRef(new Animated.Value(0)).current;
+  const localDrag = React.useRef(new Animated.Value(0)).current;
+  const dragY = dragOffset ?? localDrag;
   const [laidOut, setLaidOut] = React.useState(false);
   const [settled, setSettled] = React.useState(reduced);
   const [dragging, setDragging] = React.useState(false);

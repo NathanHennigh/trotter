@@ -76,6 +76,8 @@ export function CountryStampCollectionScreen({
   const [query, setQuery] = React.useState("");
   const [unvisited, setUnvisited] = React.useState<CountryCatalogRecord | null>(null);
   const detailBack = React.useRef<(() => boolean) | null>(null);
+  const indexBack = React.useRef<(() => boolean) | null>(null);
+  const registerIndexBack = React.useCallback((handler: (() => boolean) | null) => { indexBack.current = handler; }, []);
   const registerDetailBack = React.useCallback(
     (handler: (() => boolean) | null) => {
       detailBack.current = handler;
@@ -95,6 +97,7 @@ export function CountryStampCollectionScreen({
   );
   const handleBack = React.useCallback(() => {
     if (detailBack.current?.()) return true;
+    if (!country && !unvisited && indexBack.current?.()) return true;
     if ((!country && !unvisited) || initialCountry) return false;
     setSelectedKey(null);
     setUnvisited(null);
@@ -150,6 +153,8 @@ export function CountryStampCollectionScreen({
             backLabel={backLabel}
             year={year}
             onClearYear={clearYear}
+            active={visible && !hasDetail}
+            onBackHandlerChange={registerIndexBack}
           />
         </ScrollView>
       </View>

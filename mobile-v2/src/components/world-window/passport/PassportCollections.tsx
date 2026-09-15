@@ -4,7 +4,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -28,6 +27,7 @@ import { countryCatalog, airportCatalog, airlineCatalog } from "../../../data/co
 import { collectionProgress } from "../collections/catalogProgress";
 import { TransportCollectionIndex } from "../collections/TransportCollectionIndex";
 import { AirportLuggageLabel } from "../collections/AirportLuggageLabel";
+import { CollectionIndexHeader } from "../collections/CollectionIndexHeader";
 import { transportEntries } from "../collections/transportCollectionModel";
 export type CollectionKind = "countries" | "airports" | "airlines";
 const emblems = require("../../../../assets/world-window/passport/window-collection-emblems.png");
@@ -179,6 +179,8 @@ export function CollectionHeading({
   placeholder,
   onBack,
   backLabel = "Passport",
+  active = true,
+  onBackHandlerChange,
 }: {
   title: string;
   count?: number;
@@ -187,40 +189,10 @@ export function CollectionHeading({
   placeholder: string;
   onBack: () => void;
   backLabel?: string;
+  active?: boolean;
+  onBackHandlerChange?: (handler: (() => boolean) | null) => void;
 }) {
-  return (
-    <View style={styles.inset}>
-      <CollectionTitle
-        title={title}
-        count={count}
-        onBack={onBack}
-        backLabel={backLabel}
-      />
-      <View style={styles.search}>
-        <WWIcon name="search" size={18} color={colors.mutedInk} />
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder={placeholder}
-          placeholderTextColor={colors.mutedInk}
-          accessibilityLabel={placeholder}
-          style={styles.searchInput}
-          autoCorrect={false}
-          autoCapitalize="none"
-        />
-        {query ? (
-          <Pressable
-            onPress={() => setQuery("")}
-            accessibilityRole="button"
-            accessibilityLabel="Clear search"
-            style={styles.clear}
-          >
-            <WWIcon name="close" size={16} />
-          </Pressable>
-        ) : null}
-      </View>
-    </View>
-  );
+  return <CollectionIndexHeader title={title} query={query} setQuery={setQuery} placeholder={placeholder} onBack={onBack} backLabel={backLabel} active={active} onBackHandlerChange={onBackHandlerChange} />;
 }
 export function CountryIndex({
   arrivals,
@@ -407,6 +379,7 @@ export function CollectionList({
   scopeEpoch,
   year,
   onClearYear,
+  visible = true,
 }: {
   kind: CollectionKind;
   archive: PassportArchive;
@@ -420,6 +393,7 @@ export function CollectionList({
   scopeEpoch?: number;
   year?: string;
   onClearYear?: () => void;
+  visible?: boolean;
 }) {
   const largeText = useWindowDimensions().fontScale >= 1.35;
   const [detailCode, setDetailCode] = React.useState<string | null>(
@@ -437,12 +411,15 @@ export function CollectionList({
   const directDetail = Boolean(
     initialAirport && detail?.code === initialAirport,
   );
+  const indexBack = React.useRef<(() => boolean) | null>(null);
+  const registerIndexBack = React.useCallback((handler: (() => boolean) | null) => { indexBack.current = handler; }, []);
   React.useEffect(
     () => setDetailCode(initialAirport ?? null),
     [initialAirport, scopeEpoch],
   );
   React.useEffect(() => {
     onBackHandlerChange?.(() => {
+      if (!detail && indexBack.current?.()) return true;
       if (!detail || directDetail) return false;
       setDetailCode(null);
       return true;
@@ -545,7 +522,7 @@ export function CollectionList({
       >
         {kind !== 'countries' ? <TransportCollectionIndex kind={kind} entries={entries} query={query} onSelect={setDetailCode} year={year}
           header={<><CollectionHeading title={kind === 'airports' ? 'Airports' : 'Airlines'} query={query} setQuery={setQuery}
-            placeholder={kind === 'airports' ? 'Airport, city or country' : 'Airline name or code'} onBack={onBack} backLabel={backLabel} />
+            placeholder={kind === 'airports' ? 'Airport, city or country' : 'Airline name or code'} onBack={onBack} backLabel={backLabel} active={visible && !detail} onBackHandlerChange={registerIndexBack} />
             <View style={styles.inset}><CollectionScope year={year} onClear={onClearYear} /></View></>}
         /> : <ScrollView
           keyboardShouldPersistTaps="handled"
@@ -567,6 +544,8 @@ export function CollectionList({
             }
             onBack={onBack}
             backLabel={backLabel}
+            active={visible && !detail}
+            onBackHandlerChange={registerIndexBack}
           />
           <View style={styles.inset}>
             <CollectionScope year={year} onClear={onClearYear} />

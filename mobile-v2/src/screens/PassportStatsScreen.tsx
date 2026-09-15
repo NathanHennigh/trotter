@@ -251,6 +251,7 @@ export function PassportStatsScreen({
           importantForAccessibility={country ? "no-hide-descendants" : "auto"}
         >
           <CollectionList
+            visible={visible && !country}
             key={collection}
             kind={collection}
             archive={archive}

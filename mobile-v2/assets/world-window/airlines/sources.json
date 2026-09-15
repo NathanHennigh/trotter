@@ -1,0 +1,712 @@
+{
+  "version": 1,
+  "retrievedAt": "2026-09-15T19:40:43.242Z",
+  "provider": "Duffel airline symbol CDN",
+  "documentation": "https://duffel.com/docs/api/airlines",
+  "rights": "Airline trademarks belong to their respective owners. Assets identify carriers; no ownership or endorsement is claimed.",
+  "entries": [
+    {
+      "code": "3U",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/3U.svg",
+      "sourceSha256": "84ff453f32f420fadeb735bf2520b385caf1260f37be04debf4ea138d4ba21ef",
+      "sha256": "8c395605f467f85d02a403cca6c5837d1f998bf1820f0ed6fad77fcafa5e07c6",
+      "width": 128,
+      "height": 128,
+      "bytes": 6788
+    },
+    {
+      "code": "5J",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/5J.svg",
+      "sourceSha256": "8e14f4046c155c7f246a15d2bec4962d3fcf379a8618a44d684f3d6ac0f535c2",
+      "sha256": "e0584346672e898b7d9142b6dc7bec507da0a7ad6ed8ca10b6149e2c21ecd313",
+      "width": 128,
+      "height": 128,
+      "bytes": 3449
+    },
+    {
+      "code": "6E",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/6E.svg",
+      "sourceSha256": "155fc687a61f8537e0d95aa38bd7578558d4a26b0f733c42cc8168524d47ab24",
+      "sha256": "3ed82394e31413f90a237c3382ab62aacdccc887dbe4457fc63618f9fb8d9aac",
+      "width": 128,
+      "height": 128,
+      "bytes": 2899
+    },
+    {
+      "code": "7C",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/7C.svg",
+      "sourceSha256": "937a074ace1fd716c19e2da4c58a0a5c197355b58a356d0799ff8da008cc0663",
+      "sha256": "2b0a0bf3d7a7bb2e223a0e9d3441edb57e2ba2e85ea972d6f83aa5bdce4731ad",
+      "width": 128,
+      "height": 128,
+      "bytes": 2283
+    },
+    {
+      "code": "8M",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/8M.svg",
+      "sourceSha256": "ca788a16df1ec3fd119d76fa17e2089762a2f7210f088e99051dbfe09f867fee",
+      "sha256": "a99a64b0030a59692d0c18b966ef5833a475065ad246eab295fd2abc83e5429d",
+      "width": 128,
+      "height": 128,
+      "bytes": 5295
+    },
+    {
+      "code": "A3",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/A3.svg",
+      "sourceSha256": "a9330538a3afe3967a03a8db36600722c6a8e738e30234953225ab9cfe492e15",
+      "sha256": "3313fb810acfa74acce57700c147ddd77b0ecd6eddd9238d654b2a4d07965280",
+      "width": 128,
+      "height": 128,
+      "bytes": 3726
+    },
+    {
+      "code": "AC",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/AC.svg",
+      "sourceSha256": "96a84998f2f8f90d3c64ad31075c016731378b71d455fd7766cc750133768c48",
+      "sha256": "57ffb0e1f45737665123c765efab5419726f8463d32bfd045bf7a0fe63e46021",
+      "width": 128,
+      "height": 128,
+      "bytes": 4862
+    },
+    {
+      "code": "AF",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/AF.svg",
+      "sourceSha256": "7e5ebd30518ef18690cbb831cc0527fef72e7764fe1c62b2b1285db58f471c74",
+      "sha256": "7e2733cd1bc76411d2d4b24a43dd1e821b87ea5e1a5b64b042a07fc63f4bacee",
+      "width": 128,
+      "height": 128,
+      "bytes": 1889
+    },
+    {
+      "code": "AI",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/AI.svg",
+      "sourceSha256": "7f08c4df13b5896c7b0475d8fc1ec623d0d9a5136a6fa716178a4c798646860d",
+      "sha256": "e2158ea4de866ef41e91ac72f79f611f4434482c0305785ed241f82feac24b72",
+      "width": 128,
+      "height": 128,
+      "bytes": 5180
+    },
+    {
+      "code": "AK",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/AK.svg",
+      "sourceSha256": "59de2471ea751b0807ce1e51eaeecc627140b3775b4293ab7ec53fbedf5b6625",
+      "sha256": "51fb50317d9bf1717b338ce89fb3ddf67cf9ce80da43d2b6600b8236408d35a1",
+      "width": 128,
+      "height": 128,
+      "bytes": 2708
+    },
+    {
+      "code": "AS",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/AS.svg",
+      "sourceSha256": "378a15db6497b3277b96ee018f55208da36c8899d62e7279acf2664ca4b63aec",
+      "sha256": "b71e8ac0029c0e4f3ddd9601c439fa2cd19ab274fc52f8e6a642e0c27a7db301",
+      "width": 128,
+      "height": 128,
+      "bytes": 2900
+    },
+    {
+      "code": "AY",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/AY.svg",
+      "sourceSha256": "0f49fbb0c763234df5734865a82df5302fdca82c83cba59ba7ddec515262387b",
+      "sha256": "f06ceea69321c6375df9afa271f39e8d8b33e572cf17164cebc29db4512e13f3",
+      "width": 128,
+      "height": 128,
+      "bytes": 1403
+    },
+    {
+      "code": "AZ",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/AZ.svg",
+      "sourceSha256": "9af9a541ed2d27eeea9bcc38a76747a0c0a5254a1e70b0ade1f03481d7f150f2",
+      "sha256": "e3c12cecd204aee81d420515f07c3b02e91370637689916e6cdae3f556b87f94",
+      "width": 128,
+      "height": 128,
+      "bytes": 1536
+    },
+    {
+      "code": "BA",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/BA.svg",
+      "sourceSha256": "d8b96b689e78494873c6ae8a222dde427701240fa7dd6353922e7964cdfa924f",
+      "sha256": "e8b62ccee08af27a0a762d652d0a5aa301b24609e4459cfe947cd6e351ab4a99",
+      "width": 128,
+      "height": 128,
+      "bytes": 2366
+    },
+    {
+      "code": "BI",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/BI.svg",
+      "sourceSha256": "5263e6bda7810e78991b9eaa76355ff9305faeab0309aa51e4067dc4028fc323",
+      "sha256": "a0e980d990c4a6237d135d0c40acc84a91700e07ec9b88af9c489159abe09727",
+      "width": 128,
+      "height": 128,
+      "bytes": 2805
+    },
+    {
+      "code": "CA",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/CA.svg",
+      "sourceSha256": "2121162c56e83422c732e3be191512f1c534769c71a97929736cc04ef46c5260",
+      "sha256": "4882aa1258648baee1895b100e818f601dccbae6b8ba9f72755e1d722a9c9319",
+      "width": 128,
+      "height": 128,
+      "bytes": 4038
+    },
+    {
+      "code": "CI",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/CI.svg",
+      "sourceSha256": "66a34d0e58cd37433f458c8f1b07650c31acb7106c3c64d730d87c3f3b84e2de",
+      "sha256": "9319af1893c8046b3483a5bb43f528960365c84a0ab512a5fbc9f09c8bb8bd75",
+      "width": 128,
+      "height": 128,
+      "bytes": 14798
+    },
+    {
+      "code": "CM",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/CM.svg",
+      "sourceSha256": "a417418a52166468f8f21b943e29762e522a35ffe1bd10d62715c3b6b8c0c720",
+      "sha256": "613906f4249159ef7ed3f5d4c2df628cd8e81962dd67296c9afd920664a44233",
+      "width": 128,
+      "height": 128,
+      "bytes": 5756
+    },
+    {
+      "code": "CX",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/CX.svg",
+      "sourceSha256": "6a5d0bff1deb5d032da27006bfdd29cf69f7e4a6adaf46433d20216b1fbd667f",
+      "sha256": "84816da46331cdde71a91c273f250a14b6c0bbd7d2edb2f2a7c7c5c0fd8b9baf",
+      "width": 128,
+      "height": 128,
+      "bytes": 3279
+    },
+    {
+      "code": "D7",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/D7.svg",
+      "sourceSha256": "12309fdbd4d40bcff32d1b3ea6e033359b017c3112bc5e23e2519ae511824b74",
+      "sha256": "40834d5b5c9e3e080d3dae6093df6458ecd31ade7a504bcedeec7d27d429e7dd",
+      "width": 128,
+      "height": 128,
+      "bytes": 6122
+    },
+    {
+      "code": "EI",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/EI.svg",
+      "sourceSha256": "0259db3d4ca1802fa86f99e499b351bfef5579a8c1619119fc9577ed302e5969",
+      "sha256": "e391172a55ee68cc740122099cba11cc088c5b3efcbfa72ea9ea891598933a8a",
+      "width": 128,
+      "height": 128,
+      "bytes": 4633
+    },
+    {
+      "code": "EY",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/EY.svg",
+      "sourceSha256": "126ae16fe2ae42c4bd6d026a6713f1e43278f25e9a9f69ad1f8956f856e4ec9b",
+      "sha256": "80e58a0ca9dc0d2286042b3d6b57493fdfc2fb2af7f78d96d8f98216a4333f7a",
+      "width": 128,
+      "height": 128,
+      "bytes": 2463
+    },
+    {
+      "code": "FI",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/FI.svg",
+      "sourceSha256": "fddf2a753fde6745d6ebdfab347161df6f6c619191c00eae7c81d6a947a41f94",
+      "sha256": "d72995eaab4c6996b591fb506cad4978d279390e11c72c38b82f1727ec248e9e",
+      "width": 128,
+      "height": 128,
+      "bytes": 2279
+    },
+    {
+      "code": "FZ",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/FZ.svg",
+      "sourceSha256": "cf3cadaea9202cc7b4801aaac34ea677e50d4ecca8e1ce4a45c19ce6869c18b2",
+      "sha256": "7ad47de883f9fc481774b9768dd15e06aea56c4f532d6cf7ea477eb715791dcb",
+      "width": 128,
+      "height": 128,
+      "bytes": 1904
+    },
+    {
+      "code": "G9",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/G9.svg",
+      "sourceSha256": "10fd098469f62b344a1158a841cacbdb86a9ad34b0ae929bf6a6277cffa50926",
+      "sha256": "9357bde0966f4217c19271d632e4e5eba543370d3c2bb88233a5da2dfe291b5d",
+      "width": 128,
+      "height": 128,
+      "bytes": 2096
+    },
+    {
+      "code": "GA",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/GA.svg",
+      "sourceSha256": "4907c9abcf443a717ae0e758e678a285b153dcd547fcd5fcfc2824b81c93776b",
+      "sha256": "5c01650351ff6af1c7cd5e30c85968e8edb4c85fce67e42ce2b1a510bdcf1e6a",
+      "width": 128,
+      "height": 128,
+      "bytes": 3152
+    },
+    {
+      "code": "GF",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/GF.svg",
+      "sourceSha256": "da11d129ab95e6ecb08b3f7a3c36d805116d220a6b4f5861961ce5a4ab88c580",
+      "sha256": "a64b240920845db7af9379b27949f43aab7ee92448cc2330c78b6399786062f3",
+      "width": 128,
+      "height": 128,
+      "bytes": 5067
+    },
+    {
+      "code": "HA",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/HA.svg",
+      "sourceSha256": "97b8e77b40a67d005b5c8621c70bb6ece53001c9c7f56eaed1043076a285e213",
+      "sha256": "e772ecfe220a1ac2d545d8810e24479c66b871b3f7e6cd538cb3b664ea059c91",
+      "width": 128,
+      "height": 128,
+      "bytes": 6448
+    },
+    {
+      "code": "HO",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/HO.svg",
+      "sourceSha256": "91462fdb716bd6ad18b38d7044efb6ed329e0c4e58935a2c6cfeb78fabc30689",
+      "sha256": "7ca4e0631f65fc41fe34b992af8d48023bd76f346e76dd83b7bb261b92991591",
+      "width": 128,
+      "height": 128,
+      "bytes": 11214
+    },
+    {
+      "code": "HU",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/HU.svg",
+      "sourceSha256": "74085775f7d5a00d56bf0148e3db4d81dacdb3814ed2743be152f3116dcaa329",
+      "sha256": "9177104e7a152c929bea5214b1583d9ef9803c1f06d1b082af03617a7c9e57da",
+      "width": 128,
+      "height": 128,
+      "bytes": 6831
+    },
+    {
+      "code": "HX",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/HX.svg",
+      "sourceSha256": "315a95867f7e1f48fa1156eb76bae3dec891309a81832d659b7a95ea379f7681",
+      "sha256": "9ce928a71477231cf4de12c4dc48ddf2d8ed4d82be46cd19ff151f065d6e91c6",
+      "width": 128,
+      "height": 128,
+      "bytes": 4499
+    },
+    {
+      "code": "HY",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/HY.svg",
+      "sourceSha256": "ff8584c392dd615249edd597434ebcb081f607a33d9efaf849b45fd16f73de1f",
+      "sha256": "470e162bd87b89378a7f5dad73049247bd02976e50cd32c719702b7f006fffe8",
+      "width": 128,
+      "height": 128,
+      "bytes": 5088
+    },
+    {
+      "code": "I2",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/I2.svg",
+      "sourceSha256": "dc21c951a358b66119f9bc0e9389d72a7cd428904d84c328b82dae3471770069",
+      "sha256": "11c085c36b45f81216500fdf0cbfbc665730d4f4e7365ec4a6eaab36d9266bc6",
+      "width": 128,
+      "height": 128,
+      "bytes": 3172
+    },
+    {
+      "code": "J2",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/J2.svg",
+      "sourceSha256": "f9b8badcb650dd67f7f305f5ae565b984480b529ba5f8bd15a46239cc996fae2",
+      "sha256": "0b648d09ccedabb7a40be086f5dcc2451ee704a5d1295199b151c615c415d1b0",
+      "width": 128,
+      "height": 128,
+      "bytes": 3900
+    },
+    {
+      "code": "JD",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/JD.svg",
+      "sourceSha256": "321e0224ba5023c1c0ab50e5b43f0223481dea5ff4ef5caf61d755d3bce30376",
+      "sha256": "52d0402bb2dc4a9e342a1cfae991d258b694707329c8dadfc953544380cb811f",
+      "width": 128,
+      "height": 128,
+      "bytes": 4393
+    },
+    {
+      "code": "JL",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/JL.svg",
+      "sourceSha256": "0c1658a860273c7ad265f671263f941c16b789a33df9c7f02dbcd0bfacdf836d",
+      "sha256": "4d5992a9bdc5227becd7ecbeab111e2825746ad48747cc4a8718502ca7b2fb8b",
+      "width": 128,
+      "height": 128,
+      "bytes": 5392
+    },
+    {
+      "code": "JQ",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/JQ.svg",
+      "sourceSha256": "a30b9a1dd60bcc4c845a023f4cf0a8a69955e8912d530e49228ab5e3a7bb28c2",
+      "sha256": "49393be5e09aefb6e8961441aaaa0fcac95933fdc4449b95f45d8ec6f22c5586",
+      "width": 128,
+      "height": 128,
+      "bytes": 2185
+    },
+    {
+      "code": "KC",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/KC.svg",
+      "sourceSha256": "4fb683a91c54aeaf953f87a759bfe6ab0d6a677094d89fa7e1ae8a517270cb1b",
+      "sha256": "d99d0c33eb1fa004a490e9197414174d39348733dda4fe1836975f32bcfc0ac3",
+      "width": 128,
+      "height": 128,
+      "bytes": 6317
+    },
+    {
+      "code": "KE",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/KE.svg",
+      "sourceSha256": "4500635f2bef742dde46552471e1d66050b87a00bd5cc035c5f98e54ce2cd041",
+      "sha256": "2fb2f431b40ba4f88425b3c29e61b507edb8edc9e4213e43f4a3cffa9f0641eb",
+      "width": 128,
+      "height": 128,
+      "bytes": 4060
+    },
+    {
+      "code": "KL",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/KL.svg",
+      "sourceSha256": "6637758714eea027d8b0a79fce7f96dd00effbac751974ee71d6ec461e763841",
+      "sha256": "687359d7d8743122091ef49d92ba1d5db4fe5ce5b9b5b0e6f6657c5dcdd921d1",
+      "width": 128,
+      "height": 128,
+      "bytes": 1975
+    },
+    {
+      "code": "KQ",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/KQ.svg",
+      "sourceSha256": "057eb4869740a8171c7cb567f672148ae8a1b5f2cb1460cff3008c7e57957945",
+      "sha256": "672f29320be8ed9f17f5721447ce37f391f81e7cfb3ff20d012c5c4d68a3c76e",
+      "width": 128,
+      "height": 128,
+      "bytes": 4697
+    },
+    {
+      "code": "KU",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/KU.svg",
+      "sourceSha256": "842a54a7a44908b6ce281b32257fd9c6224acc8c7899d65d0aa69b9356deb128",
+      "sha256": "b8a1a173284b0244cb63b9fc2fcd29c5c0f63dab186c9d52542bfd624c162023",
+      "width": 128,
+      "height": 128,
+      "bytes": 3087
+    },
+    {
+      "code": "LA",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/LA.svg",
+      "sourceSha256": "2fef7bdbf4a3aca7aef08de477822a7555b2ea78d88fe30fb6cde2de825c180c",
+      "sha256": "95670bed142d1a9bc996b10e879f9ce0d3296f0704dc4c0206269bc456ad7c3f",
+      "width": 128,
+      "height": 128,
+      "bytes": 3002
+    },
+    {
+      "code": "LH",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/LH.svg",
+      "sourceSha256": "0c48ea86c17be8510f60ad60fb8feae184bfcc98c8e65537adc6e1f5c05e1316",
+      "sha256": "5e58edff3bfbf5b717c30dc8fc57592828675ccdcd6f2ed43bfb90352f57f7e0",
+      "width": 128,
+      "height": 128,
+      "bytes": 4824
+    },
+    {
+      "code": "LO",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/LO.svg",
+      "sourceSha256": "a4ce19a05b5f5935cadc392071efeaf55f17d65316fa30dd1d267f6f88d91975",
+      "sha256": "d83b810366ac64c2b38ef62493c2f37c26ec8ddcfaad653b35bd82d9958b35a1",
+      "width": 128,
+      "height": 128,
+      "bytes": 1944
+    },
+    {
+      "code": "LX",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/LX.svg",
+      "sourceSha256": "8318cc014b8968919bbbd06a9eb35353bd2f385bb040969bd639437203fb5efe",
+      "sha256": "798d4b203968adad3b9bd9b786b13e72e5d568d9bc32f7144f0933dc8eb4daf2",
+      "width": 128,
+      "height": 128,
+      "bytes": 1450
+    },
+    {
+      "code": "MH",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/MH.svg",
+      "sourceSha256": "46a7f1b7bb222de51fc3050a1bac46e6e9f39250afa78d3ab155f260310a6dd6",
+      "sha256": "008eea19a3bd3245c092b67cc2e9c87fae25891f7966151e0e20215f20faa2f1",
+      "width": 128,
+      "height": 128,
+      "bytes": 2706
+    },
+    {
+      "code": "MS",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/MS.svg",
+      "sourceSha256": "9d27292bf737ec784edec7a29c209799dcbd2f6050687f217fa50d473b261a98",
+      "sha256": "adb4374935a611070911584af8bab158d80da68fc9db643ff76c5a727cfc8fcc",
+      "width": 128,
+      "height": 128,
+      "bytes": 4912
+    },
+    {
+      "code": "MU",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/MU.svg",
+      "sourceSha256": "63c062b50f70fc996a4e7063a5ba9ab0b0ef9eff7afefd7b148914cea1495278",
+      "sha256": "cd0d1ea4402ce864b7a4cc031b2b7c0a71982927a85a7cf64cfc30be84d2c3e6",
+      "width": 128,
+      "height": 128,
+      "bytes": 2831
+    },
+    {
+      "code": "NZ",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/NZ.svg",
+      "sourceSha256": "07a01db9227d69ad8fbcd6a4e81c1811820c0b42a09d612ee516506bbc34a63e",
+      "sha256": "16f2c7b36270ad8ee67f1db9537c700b52d566827a95ee47d63c0667d83087c7",
+      "width": 128,
+      "height": 128,
+      "bytes": 2999
+    },
+    {
+      "code": "OD",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/OD.svg",
+      "sourceSha256": "74400a6cd59f0b4e923e183556371a8e2deaced21361c7014f191a3802bf4425",
+      "sha256": "416032306d0ab475ec6215254af32aeb8c64c5231ad2768389a7c3ec09920e07",
+      "width": 128,
+      "height": 128,
+      "bytes": 5341
+    },
+    {
+      "code": "OS",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/OS.svg",
+      "sourceSha256": "db9b1eaf0d9ff3b9b76eb17f691343f81cf4f7e266d9b746a0d450417c6b895d",
+      "sha256": "2325669bfa0aed08d1dfd8dacde346a772e9518c14309b08cece656e1eed911a",
+      "width": 128,
+      "height": 128,
+      "bytes": 2392
+    },
+    {
+      "code": "OU",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/OU.svg",
+      "sourceSha256": "f8c9566f7570b9c65ff1d49c9c2f65fd508fc5cd1e531840276edc46e7d4d90d",
+      "sha256": "1d40ca640524277e07eb6895bcce39fd187ee29bbf00f5b1427aae192dc65a4f",
+      "width": 128,
+      "height": 128,
+      "bytes": 1707
+    },
+    {
+      "code": "OZ",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/OZ.svg",
+      "sourceSha256": "4164d5ccd5ce9f26498213190f73f18094652615bdb59b25aa17a123a477e99b",
+      "sha256": "0cd673d421e5fba9174a0183f3c9e5912d734e4ec057948cddb8ae489efe01b3",
+      "width": 128,
+      "height": 128,
+      "bytes": 2310
+    },
+    {
+      "code": "PC",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/PC.svg",
+      "sourceSha256": "8d10c4094a88aa41875dac266e52f85f8f3fcbf503736efc0e8ae5daccb1a892",
+      "sha256": "ce60c76071c43bedc7b2b86732925fcf3474b0f1294a391a97e44c5a6e9fd759",
+      "width": 128,
+      "height": 128,
+      "bytes": 2651
+    },
+    {
+      "code": "PR",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/PR.svg",
+      "sourceSha256": "3e06ded7d03cc685742372f95e0eccd6f0a86f15744f9ab402b7ad7ef77e4820",
+      "sha256": "8a53260a4100459ebe656825049209520401391cb6f329e3c2ab43c9c8a8e26d",
+      "width": 128,
+      "height": 128,
+      "bytes": 3825
+    },
+    {
+      "code": "QF",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/QF.svg",
+      "sourceSha256": "b0911f0b492a2d1579a3193f6d6642f47130047e829b6bf71dc7aee199bd5e75",
+      "sha256": "cfeae5649f5be1a0b395331987140404cc3b98ee36ae67c61bce8d3a81ae8680",
+      "width": 128,
+      "height": 128,
+      "bytes": 3879
+    },
+    {
+      "code": "QR",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/QR.svg",
+      "sourceSha256": "ff18e3e13ff3b6170c728b6b079575e38badd01d2d500c0834f4871068c258d0",
+      "sha256": "f05084ee17ae8206b954c904b52b602e0838f7d3e77580a63afb9ff5afaea5dc",
+      "width": 128,
+      "height": 128,
+      "bytes": 5040
+    },
+    {
+      "code": "RJ",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/RJ.svg",
+      "sourceSha256": "4912555c65960c5efac79e761de33527923fea48f34fd4ca18621ef92482feb2",
+      "sha256": "f58def0956a5a0ea9dae34282d3055d382bdb44d2c2c0e024e2d413ab73aaf71",
+      "width": 128,
+      "height": 128,
+      "bytes": 4284
+    },
+    {
+      "code": "RO",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/RO.svg",
+      "sourceSha256": "9af0ad494432facbbb11b5c272721cdc38c40fb0b1d5b9fe56a34121e9664fad",
+      "sha256": "ca2869113e6388a9a00942e23c79715da65e8640e86dad2277a94e010186982f",
+      "width": 128,
+      "height": 128,
+      "bytes": 3707
+    },
+    {
+      "code": "SA",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/SA.svg",
+      "sourceSha256": "69ac01ddc51ab014a348004ad168c9ff90e3f7a592fa7430d613acec335ef018",
+      "sha256": "c207dc774f688dd0f6a067c7f8f534de2b595242600e98f5250d7cf5885e5551",
+      "width": 128,
+      "height": 128,
+      "bytes": 4377
+    },
+    {
+      "code": "SK",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/SK.svg",
+      "sourceSha256": "95f1cd3fbf28bb60d59e91be7b2ebe21556473d3c4d39ff929d28de24800289c",
+      "sha256": "b22e76496f723625662e42011a0b874c9a85975a5726e85096018926cb00187e",
+      "width": 128,
+      "height": 128,
+      "bytes": 2953
+    },
+    {
+      "code": "SN",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/SN.svg",
+      "sourceSha256": "cbca94ebe70eb771a8f31ab41463deeb2e095f80357153a494f0725db9def3bb",
+      "sha256": "4ffaa4b6d8e6a73207ea847cf28f0d02064c01f6884225b6923c39fbbe3f664f",
+      "width": 128,
+      "height": 128,
+      "bytes": 3146
+    },
+    {
+      "code": "SQ",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/SQ.svg",
+      "sourceSha256": "d97ee67a29cf382d6f8c797a38431c9e4f5aa18972980f670449cb458ba05bdb",
+      "sha256": "43cbb7ec28ff54ad9d62f1aab32c6bbfd6983a4aa75db353041dbfac96f64dc2",
+      "width": 128,
+      "height": 128,
+      "bytes": 3960
+    },
+    {
+      "code": "SU",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/SU.svg",
+      "sourceSha256": "f74621434a403c04a3b8c9b54bd09a4350713e245ba232cd987d204769517996",
+      "sha256": "6754317abdb6cba01c50cdf98d9de61b94e831a2af95dab974d9bc99c4ca80dd",
+      "width": 128,
+      "height": 128,
+      "bytes": 2416
+    },
+    {
+      "code": "SV",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/SV.svg",
+      "sourceSha256": "4e04bcd4bf32eab3d45047fd728bc03774c48302e28f1b6889492eb22a20ea63",
+      "sha256": "da8d85880f274f8257143fb4e30f2a523587498049ab19875bb3ddc84c109d64",
+      "width": 128,
+      "height": 128,
+      "bytes": 5780
+    },
+    {
+      "code": "TG",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/TG.svg",
+      "sourceSha256": "8a9b151c0128fa7069e70ba0e484f6b152b9da491ff0f73b950bb63fbf7ef539",
+      "sha256": "be7e86fd7dadfd78e2bf300a7dfce6adc5a49d5c28e837ac979be7325154202a",
+      "width": 128,
+      "height": 128,
+      "bytes": 5673
+    },
+    {
+      "code": "TK",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/TK.svg",
+      "sourceSha256": "9bf7d75a846a8bf889106ae7b5fbd953e88f011a348ea2985076dc0afa0fc7b0",
+      "sha256": "bb76cc23faf86c3a67d628df559e32afa58530e98a6e097f797be2955c8ce5c1",
+      "width": 128,
+      "height": 128,
+      "bytes": 5570
+    },
+    {
+      "code": "TP",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/TP.svg",
+      "sourceSha256": "b45bac119a0b24280b30c20fa4455b507a0f3393c8d2651ca9d63d65c25cfdd9",
+      "sha256": "8bf0b14ce55698d226fa91851d44e9cedc9ccd497417a56fa83d85a62455e401",
+      "width": 128,
+      "height": 128,
+      "bytes": 2241
+    },
+    {
+      "code": "TR",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/TR.svg",
+      "sourceSha256": "ab20543619ac75a1a241d210ecadd7037c932f1924261d6538c36a66f750da19",
+      "sha256": "36c5ddb1b5b4cc29dc68eee283329439cf9c79bcafd75dc1e0ceb77c081cb1d7",
+      "width": 128,
+      "height": 128,
+      "bytes": 4060
+    },
+    {
+      "code": "U2",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/U2.svg",
+      "sourceSha256": "dd2af06beeab793df016633ab77fe1a074211a9cbc67bcb52932602a5f1d3df1",
+      "sha256": "f47778694c6d4d3c95bb66b2a1b891f4077c8d671c457b2c4cf7db114dd73fff",
+      "width": 128,
+      "height": 128,
+      "bytes": 2102
+    },
+    {
+      "code": "VA",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/VA.svg",
+      "sourceSha256": "72eb5f08491f6d3404b38d01c08e85411bf3fdeb59a0a00713b0d5c0e7a998ab",
+      "sha256": "614aa99f4b467ab566bb204e4598da1f57e177faf28a8ed8fc6bc157e07db584",
+      "width": 128,
+      "height": 128,
+      "bytes": 6536
+    },
+    {
+      "code": "VN",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/VN.svg",
+      "sourceSha256": "173c137d1f1acbf3c536ffce2c03fd569b48570f39b421d5df06289fd7f5518b",
+      "sha256": "a327a8bfca78d75a1e1eb66e86ff84403f22ef470503243e2c41f7341e8d24a3",
+      "width": 128,
+      "height": 128,
+      "bytes": 3618
+    },
+    {
+      "code": "VS",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/VS.svg",
+      "sourceSha256": "ccd987ec2e8bfc30bc0fed8ecae1c9c6de2742ca6f43ca1ca215cd33456f3aa8",
+      "sha256": "7c4894dd68303257b08d12785612afff691ade85a5bd8e55ac4b332ede552979",
+      "width": 128,
+      "height": 128,
+      "bytes": 6346
+    },
+    {
+      "code": "VY",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/VY.svg",
+      "sourceSha256": "a690b0b0711aa0b63a1e8d16b3994e869a735ed372acd17cca2a60fb2e6eedc2",
+      "sha256": "ef316946d6320e0c55306fa71ce16f370e6d192251eb9aba1dedd9a0f6bccfbe",
+      "width": 128,
+      "height": 128,
+      "bytes": 3899
+    },
+    {
+      "code": "WS",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/WS.svg",
+      "sourceSha256": "36ab1f11d6970374267fd1ba251f3e3c2a2d22713b02840fa5d66c6968fdeebf",
+      "sha256": "9ef222954ea87ee839a9092930f818ed3cccfb0cc145b3af354e72c0de7cf5cb",
+      "width": 128,
+      "height": 128,
+      "bytes": 3940
+    },
+    {
+      "code": "WY",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/WY.svg",
+      "sourceSha256": "7f1d0b5f3ca7228b5552508f1ade1bf90a46a1390c99c9066a2598a79130e739",
+      "sha256": "413f0c5b99fefeaa6325f7a5977925f855020b148903b60182085e647d402794",
+      "width": 128,
+      "height": 128,
+      "bytes": 4491
+    },
+    {
+      "code": "XQ",
+      "sourceUrl": "https://assets.duffel.com/img/airlines/for-light-background/full-color-logo/XQ.svg",
+      "sourceSha256": "9da72cb5f2c06f53ec30cf013e29ec034e0eb894b8bddcf6e668a5c285c8fe09",
+      "sha256": "46a90b5f1d83b820e3a82a07e71ad89bf802ab449bcae9875122467683491f82",
+      "width": 128,
+      "height": 128,
+      "bytes": 4958
+    }
+  ],
+  "unavailable": []
+}

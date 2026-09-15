@@ -81,7 +81,7 @@ function load(file,name,overrides={}){
  assert(declaration);
  const styleText=file.endsWith('TrotterKit.tsx') ? 'const styles=StyleSheet.create({'+styles.declarationList.declarations[0].initializer.arguments[0].properties.filter(p=>/^(bottomNav|nav)/.test(p.name.getText(ast))).map(p=>p.getText(ast)).join(',')+'});' : styles?.getText(ast)||'';
  const compiled=ts.transpileModule(declaration.getText(ast)+'\n'+styleText,{compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const tags='FlatList TransportCollectionIndex AirportLuggageLabel View Text Pressable PressFeedback PaperReveal ScrollView RefreshControl BottomNav WWHeader WWButton WWIcon PassportBook ActivityChart CollectionButtons CollectionList CollectionScope CollectionBack CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CroppedPassportStamp TripRows AirportRouteFan AirlineLogo'.split(' ');
+ const tags='FlatList TransportCollectionIndex AirportLuggageLabel CollectionProgress CollectionIndexHeader View Text Pressable PressFeedback PaperReveal ScrollView RefreshControl BottomNav WWHeader WWButton WWIcon PassportBook ActivityChart CollectionButtons CollectionList CollectionScope CollectionBack CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CroppedPassportStamp TripRows AirportRouteFan AirlineLogo'.split(' ');
  const globals={...Object.fromEntries(tags.map(tag=>[tag,tag])),React:host.React,useState:host.React.useState,...pure('src/data/collections/catalogs.ts'),...pure('src/components/world-window/collections/catalogProgress.ts'),...pure('src/components/world-window/collections/transportCollectionModel.ts'),StyleSheet:{create:x=>x,absoluteFillObject:{}},useSafeAreaInsets:()=>({top:24,bottom:20}),useWindowDimensions:()=>({width:320,height:800,fontScale:1}),getMobileVisualWidth:x=>x,colors:{},fonts:{},layout:{bottomNavHeight:73},useTravelTrips:()=>({trips:[trip],profile:{},status:'idle',refresh:noOp}),buildPassportArchive:()=>archive,scopedPassportArchive:()=>archive,buildPassportArrivals:()=>[arrival],passportScope:()=>({trips:[trip],arrivals:[arrival],lifetimeArrivals:[arrival]}),scopeTripsToYear:t=>t,normalizeTravelYear:y=>/^\d{4}$/.test(y||'')?y:undefined,earnedCountries:()=>[],tripsForCountry:()=>[trip],readableDate:x=>x,airlineName:x=>x,Platform:{OS:'android'},...overrides};
  const mod={exports:{}};new Function('module','exports',...Object.keys(globals),compiled)(mod,mod.exports,...Object.values(globals));host.setComponent(mod.exports[name]);return host;
 }
@@ -189,4 +189,14 @@ for(const width of [320,420])for(const fontScale of [1,2]){
  for(const tab of tabs){const label=find(tab,'Text');assert.notEqual(label.props.allowFontScaling,false,'Persistent navigation enables bounded scaling');assert.equal(label.props.maxFontSizeMultiplier,1.25);assert.equal(label.props.children[0],tab.props.accessibilityLabel,'No visible tab labels are abbreviated');assert(tab.props.style[0].minHeight>=44);assert(tab.props.style[1].width>=44);}
  host.unmount();
 }
-console.log('Passport navigation passed: nested Back order, direct-country origins, inactive registration, preserved trip-return layers, and single bottom navigation.');
+for (const kind of ['countries', 'airports', 'airlines']) {
+ const isCountry=kind==='countries', host=isCountry?load('src/screens/CountryStampCollectionScreen.tsx','CountryStampCollectionScreen'):load('src/components/world-window/passport/PassportCollections.tsx','CollectionList');
+ let handler,closed=0,searchOpen=true;
+ const props=isCountry?{active:'passport',onChange:noOp,onBack:()=>closed++,onBackHandlerChange:value=>handler=value}:{kind,archive,onBack:()=>closed++,onSelectCountry:noOp,onBackHandlerChange:value=>handler=value};
+ let tree=host.render(props),heading=find(tree,isCountry?'CountryIndex':'CollectionHeading');
+ heading.props.onBackHandlerChange(()=>{if(!searchOpen)return false;searchOpen=false;return true;});
+ assert.equal(handler(),true,`${kind}: search consumes Back before collection navigation`);assert.equal(closed,0);assert.equal(searchOpen,false);assert.equal(handler(),false);
+ tree=host.render({...props,visible:false});assert.equal(find(tree,isCountry?'CountryIndex':'CollectionHeading').props.active,false,`${kind}: a hidden collection cannot focus its search`);
+ host.unmount();
+}
+console.log('Passport navigation passed: nested/search Back order, direct-country origins, inactive registration, preserved trip-return layers, and single bottom navigation.');

@@ -8,7 +8,7 @@ const { test } = require('node:test');
 const src = path.join(__dirname, '../src');
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 const flatten = value => Array.isArray(value) ? Object.assign({}, ...value.map(flatten)) : value || {};
-function environment({ reduced = false, os = 'android', width = 410, height = 880, visualWidth = 410 } = {}) {
+function environment({ reduced = false, os = 'android', version = 35, nativeBlur = true, width = 410, height = 880, visualWidth = 410 } = {}) {
   let current, nextTimer = 1;
   const frames = new Map(), timers = new Map(), animations = [], reducedListeners = new Set();
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => v === b[i]);
@@ -31,7 +31,9 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
     interpolate(config) { return { ...config, parent: this }; }
   }
   const native = {
-    View: 'View', Text: 'Text', Pressable: 'Pressable', Platform: { OS: os },
+    View: 'View', Text: 'Text', Pressable: 'Pressable', Platform: { OS: os, Version: version },
+    UIManager: { getViewManagerConfig: () => nativeBlur ? { NativeProps: { blurRadius: 'number' } } : undefined },
+    requireNativeComponent: name => name,
     StyleSheet: { create: x => x, flatten, absoluteFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } },
     useWindowDimensions: () => ({ width, height }), Easing: { bezier: () => 'paperEase', linear: x => x },
     AccessibilityInfo: {
@@ -48,7 +50,7 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
         }; return animation;
       },
       divide: (left, right) => ({ operator: 'divide', left, right }),
-      multiply: (left, right) => ({ operator: 'multiply', left, right }),
+      multiply: (left, right) => ({ operator: 'multiply', left, right, interpolate(config) { return { ...config, parent: this }; } }),
       event(mapping, config) {
         const value = mapping[0].nativeEvent.translationY; value.gesture = true;
         const event = ({ nativeEvent }) => { value.value = nativeEvent.translationY; };
@@ -99,7 +101,7 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
     };
   }
   const motion = load('components/world-window/motion.tsx');
-  return { motion, load, mount, get animations() { return animations.filter(animation => !animation.value.gesture); },
+  return { motion, load, mount, Value, get animations() { return animations.filter(animation => !animation.value.gesture); },
     get gestureAnimations() { return animations.filter(animation => animation.value.gesture); }, timers, frames,
     async ready() { const probe = mount(motion.useReducedMotion); probe.render(); await flush(); probe.render(); probe.dispose(); },
     advanceFrame() { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); },
@@ -290,6 +292,48 @@ test('dismissal needs a deliberate downward pull or projected flick, and rejects
   assert.equal(dismiss(150, -500, 800), false); assert.equal(dismiss(-40, 1200, 800), false);
   for (const values of [[NaN, 100, 800], [100, Infinity, 800], [100, 100, NaN]]) assert.equal(dismiss(...values), false);
 });
+
+test('one native background uses actual wallet progress, including prepaint, reversal and finger movement', async () => {
+  const env = environment(); await env.ready();
+  const progress = new env.Value(0), dragOffset = new env.Value(0);
+  const bg = env.mount(env.load('components/world-window/trips/TripBackground.tsx').TripBackground);
+  const background = bg.render({ progress, dragOffset, children: 'All retained screens' });
+  assert.equal(background.type, 'Animated(TrotterBlurBackground)');
+  assert.equal(background.props.collapsable, false); assert.equal(background.props.children[0], 'All retained screens');
+  const radius = background.props.blurRadius, h = env.mount(surface(env));
+  let tree = h.render(props({ motionProgress: progress, dragOffset }));
+  assert.equal(sampled(radius), 0, 'Mounting and measuring a popup leave the background sharp');
+  movingSurface(tree).props.onLayout(); h.render(); env.advanceFrame();
+  assert.equal(sampled(radius), 0, 'Prepainting the itinerary must not blur early');
+  env.advanceFrame(); assert.strictEqual(env.animations[0].value, progress);
+  progress.setValue(.05); assert.equal(sampled(radius), 0);
+  progress.setValue(.3); const mid = sampled(radius); assert(mid > 0 && mid < 4);
+  env.animations[0].finish(); tree = h.render(); assert.equal(sampled(radius), 4);
+  dragOffset.setValue(130); assert.equal(sampled(radius), 3, 'The whole background responds continuously during a pull');
+  h.render(props({ motionProgress: progress, dragOffset, closing: true }));
+  assert.equal(sampled(radius), 3, 'A Back request cannot snap the current blur');
+  progress.setValue(.3); dragOffset.setValue(0); assert.equal(sampled(radius), mid, 'The same blur curve reverses with the wallet');
+  progress.setValue(.05); assert.equal(sampled(radius), 0, 'Blur clears before the source reaches rest');
+  h.dispose(); bg.dispose();
+});
+
+for (const options of [{ os: 'android', version: 30 }, { os: 'android', nativeBlur: false }, { os: 'ios', version: '18' }, { os: 'web' }]) {
+  test(`background fallback remains stable and renders every source: ${JSON.stringify(options)}`, () => {
+    const env = environment(options), progress = new env.Value(0), dragOffset = new env.Value(0);
+    const h = env.mount(env.load('components/world-window/trips/TripBackground.tsx').TripBackground);
+    const tree = h.render({ progress, dragOffset, children: 'Complete source' });
+    assert.equal(tree.props.collapsable, false); assert.equal(tree.props.children[0], 'Complete source');
+    if (options.os === 'web') {
+      assert.equal(tree.type, 'AnimatedView'); const filter = flatten(tree.props.style).filter;
+      assert.deepEqual(filter.outputRange, ['blur(0px)', 'blur(4px)']);
+      assert.equal(sampled(filter.parent), 0); progress.setValue(1); assert.equal(sampled(filter.parent), 4);
+    } else {
+      assert.equal(tree.type, 'View'); assert.equal(tree.props.blurRadius, undefined);
+      assert.equal(flatten(tree.props.style).filter, undefined, 'Unsupported clients keep the ordinary tinted backdrop without throwing');
+    }
+    h.dispose();
+  });
+}
 
 test('wallet entry paints first, then runs one native lift-and-open timeline without a JS handoff', async () => {
   const env = environment(); await env.ready(); const h = env.mount(surface(env));

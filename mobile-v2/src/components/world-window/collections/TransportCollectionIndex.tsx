@@ -7,6 +7,7 @@ import { WWIcon } from '../WorldWindowUI';
 import { AirportLuggageLabel } from './AirportLuggageLabel';
 import { filterTransportEntries, transportCatalog, type TransportEntry, type TransportKind } from './transportCollectionModel';
 import { collectionProgress } from './catalogProgress';
+import { CollectionProgress } from './CollectionIndexHeader';
 
 export function TransportCollectionIndex({ kind, entries, query, header, onSelect, year }: {
   kind: TransportKind; entries: TransportEntry[]; query: string; header: React.ReactNode;
@@ -29,12 +30,7 @@ export function TransportCollectionIndex({ kind, entries, query, header, onSelec
     ListHeaderComponent={<>
       {header}
       <View style={s.inset}>
-        <View style={s.progressTop}>
-          <View style={s.progressNumbers}><Text style={s.collected}>{progress.collected}</Text><Text style={s.total}>/ {progress.total.toLocaleString()}</Text></View>
-          <PressFeedback onPress={() => setShowDirectory(value => !value)} accessibilityRole="button" accessibilityLabel="About this collection" accessibilityState={{ expanded: showDirectory }} style={s.info}><Text allowFontScaling={false} style={s.infoGlyph}>i</Text></PressFeedback>
-        </View>
-        <Text style={s.progressLabel}>{year ? `${verb.toLowerCase()} in ${year}` : verb.toLowerCase()} · {region || 'World'}</Text>
-        <View style={s.track}><View style={[s.fill, { width: `${Math.min(100, Math.max(0, progress.percent))}%` }]} /></View>
+        <CollectionProgress {...progress} label={`${year ? `${verb.toLowerCase()} in ${year}` : verb.toLowerCase()} · ${region || 'World'}`} expanded={showDirectory} onAbout={() => setShowDirectory(value => !value)} />
         {progress.outsideCatalogKeys.length > 0 && <Text style={s.outside}>+ {progress.outsideCatalogKeys.length} other {progress.outsideCatalogKeys.length === 1 ? kind.slice(0, -1) : kind} in your archive</Text>}
         {showDirectory && <View style={s.directory}>
           <Text style={s.directoryTitle}>{metadata.label}</Text>
@@ -66,13 +62,9 @@ export function TransportCollectionIndex({ kind, entries, query, header, onSelec
 }
 const s = StyleSheet.create({
   content: { paddingBottom: 36 }, inset: { paddingHorizontal: 24 },
-  progressTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }, progressNumbers: { flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', flex: 1 },
-  collected: { fontFamily: fonts.display, fontSize: 43, color: colors.ink }, total: { fontFamily: fonts.mono, fontSize: 15, color: colors.mutedInk }, progressLabel: { fontFamily: fonts.sansRegular, fontSize: 12, color: colors.mutedInk, marginTop: 2 },
-  info: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }, infoGlyph: { borderWidth: 1, borderColor: colors.paperBorder, borderRadius: 10, width: 20, height: 20, textAlign: 'center', fontFamily: fonts.displayItalic, color: colors.ink, fontSize: 15 },
-  track: { height: 2, backgroundColor: colors.paperBorderSoft, marginTop: 15, marginBottom: 7 }, fill: { height: 2, backgroundColor: colors.copper },
   outside: { color: colors.mutedInk, fontFamily: fonts.sansRegular, fontSize: 11, lineHeight: 17, marginTop: 4 },
   directory: { paddingVertical: 14, gap: 5, borderBottomWidth: 1, borderBottomColor: colors.paperBorder }, directoryTitle: { fontFamily: fonts.sans, color: colors.ink, fontSize: 14 }, directoryText: { fontFamily: fonts.sansRegular, fontSize: 12, lineHeight: 19, color: colors.mutedInk },
-  tabs: { flexDirection: 'row', gap: 22, borderBottomWidth: 1, borderBottomColor: colors.paperBorder, marginTop: 8 }, tab: { flexDirection: 'row', minHeight: 48, alignItems: 'center', gap: 9, borderBottomWidth: 2, borderBottomColor: 'transparent' }, tabSelected: { borderBottomColor: colors.blue }, tabText: { fontFamily: fonts.sans, color: colors.mutedInk, fontSize: 14 }, tabTextSelected: { color: colors.ink }, tabCount: { fontFamily: fonts.mono, fontSize: 11, color: colors.mutedInk },
-  regionRow: { gap: 7, paddingTop: 13, paddingBottom: 20 }, region: { minHeight: 44, paddingHorizontal: 12, justifyContent: 'center', borderWidth: 1, borderColor: colors.paperBorderSoft, borderRadius: 3 }, regionSelected: { borderColor: colors.ink, backgroundColor: colors.ink }, regionText: { fontFamily: fonts.sansRegular, fontSize: 11, color: colors.mutedInk }, regionTextSelected: { color: colors.paper },
+  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 22, borderBottomWidth: 1, borderBottomColor: colors.paperBorder }, tab: { flexDirection: 'row', minHeight: 44, alignItems: 'center', gap: 9, borderBottomWidth: 2, borderBottomColor: 'transparent' }, tabSelected: { borderBottomColor: colors.blue }, tabText: { fontFamily: fonts.sans, color: colors.mutedInk, fontSize: 14 }, tabTextSelected: { color: colors.ink }, tabCount: { fontFamily: fonts.mono, fontSize: 11, color: colors.mutedInk },
+  regionRow: { gap: 18, paddingTop: 3, paddingBottom: 8 }, region: { minHeight: 44, justifyContent: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' }, regionSelected: { borderBottomColor: colors.copper }, regionText: { fontFamily: fonts.sansRegular, fontSize: 11, color: colors.mutedInk }, regionTextSelected: { color: colors.ink, fontFamily: fonts.sans },
   airportRow: { marginHorizontal: 24, marginBottom: 15 }, airlineRow: { marginHorizontal: 24, paddingVertical: 17, flexDirection: 'row', alignItems: 'center', gap: 14, borderBottomWidth: 1, borderBottomColor: colors.paperBorderSoft }, logo: { width: 32, alignItems: 'center' }, carrierCopy: { flex: 1, minWidth: 0, gap: 4 }, carrier: { fontFamily: fonts.sans, fontSize: 16, lineHeight: 22, color: colors.ink }, carrierMeta: { fontFamily: fonts.sansRegular, fontSize: 11, lineHeight: 17, color: colors.mutedInk }, empty: { padding: 24, gap: 8 }, emptyTitle: { fontFamily: fonts.display, fontSize: 26, color: colors.ink },
 });

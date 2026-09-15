@@ -1,6 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import Svg, { Circle, Defs, Line, Path, Pattern, Rect } from "react-native-svg";
+import Svg, { Circle, ClipPath, Defs, G, Line, Path, Pattern, Rect } from "react-native-svg";
 import type { TripSegmentSummary } from "../../../data/trotterMock";
 import { colors, fonts } from "../../../theme/trotterTheme";
 import { AirlineLogo, airlineName } from "../AirlineLogo";
@@ -20,6 +20,8 @@ export function BoardingPass({
   const { width: windowWidth, fontScale } = useWindowDimensions();
   const width = availableWidth ?? (getMobileVisualWidth(windowWidth) || 410);
   const grain = React.useId().replace(/:/g, "");
+  const [paperSize, setPaperSize] = React.useState({ width: 0, height: 0 });
+  const [stubTop, setStubTop] = React.useState(0);
   const flight = segment.flightNumber
     ? segment.flightNumber
         .toUpperCase()
@@ -39,18 +41,18 @@ export function BoardingPass({
         })
       : undefined;
   const dayChange = arrivalDayChange(segment.depTime, segment.arrTime);
+  const seam = compact ? stubTop : paperSize.width - (narrow ? 60 : 70) - 1;
+  const outline = ticketOutline(paperSize.width, paperSize.height, seam, compact);
   return (
     <View style={s.ticketWrap}>
-      <View pointerEvents="none" style={s.paperEdge} />
-      <View style={[s.ticket, selected && s.selected, compact && s.compact]}>
-        <View style={[s.main, (narrow || compact) && s.narrowMain]}>
-          <Svg
-            pointerEvents="none"
-            style={StyleSheet.absoluteFill}
-            width="100%"
-            height="100%"
-          >
+      <View testID="boarding-pass-paper" style={[s.ticket, compact && s.compact]}
+        onLayout={event => {
+          const { width, height } = event.nativeEvent.layout;
+          setPaperSize(previous => previous.width === width && previous.height === height ? previous : { width, height });
+        }}>
+        <Svg pointerEvents="none" accessible={false} style={StyleSheet.absoluteFill} width="100%" height="100%">
             <Defs>
+              <ClipPath id={`${grain}outline`}><Path d={outline} /></ClipPath>
               <Pattern
                 id={grain}
                 width={7}
@@ -73,8 +75,19 @@ export function BoardingPass({
                 />
               </Pattern>
             </Defs>
-            <Rect width="100%" height="100%" fill={`url(#${grain})`} />
-          </Svg>
+            <G clipPath={`url(#${grain}outline)`}>
+              <Path d={outline} fill={colors.paperSheet} />
+              <Rect x={compact ? 0 : seam} y={compact ? seam : 0}
+                width={compact ? paperSize.width : paperSize.width - seam}
+                height={compact ? paperSize.height - seam : paperSize.height} fill="#e9eee7" />
+              <Rect width="100%" height="100%" fill={`url(#${grain})`} />
+              <Line x1={compact ? 0 : seam} y1={compact ? seam : 0}
+                x2={compact ? paperSize.width : seam} y2={compact ? seam : paperSize.height}
+                stroke="#a7bab5" strokeWidth={1} strokeDasharray="4 3" />
+            </G>
+            <Path d={outline} fill="none" stroke={selected ? walletColors.copper : colors.paperBorder} strokeWidth={1} />
+        </Svg>
+        <View style={[s.main, (narrow || compact) && s.narrowMain]}>
           <View style={s.airline}>
             <AirlineLogo code={segment.airline || ""} size={26} />
             <Text style={s.airlineName}>
@@ -167,41 +180,8 @@ export function BoardingPass({
             </View>
           )}
         </View>
-        <View style={[s.stub, narrow && s.narrowStub, compact && s.stubBottom, stackEndpoints && s.stackedStub]}>
-          <Svg
-            pointerEvents="none"
-            style={StyleSheet.absoluteFill}
-            width="100%"
-            height="100%"
-          >
-            {compact ? (
-              <Line
-                x1={0}
-                y1={0.5}
-                x2="100%"
-                y2={0.5}
-                stroke="#a7bab5"
-                strokeWidth={1}
-                strokeDasharray="4 3"
-              />
-            ) : (
-              <Line
-                x1={0.5}
-                y1={0}
-                x2={0.5}
-                y2="100%"
-                stroke="#a7bab5"
-                strokeWidth={1}
-                strokeDasharray="4 3"
-              />
-            )}
-          </Svg>
-          {!compact && (
-            <View pointerEvents="none" style={[s.notch, s.notchTop]} />
-          )}
-          {!compact && (
-            <View pointerEvents="none" style={[s.notch, s.notchBottom]} />
-          )}
+        <View testID="boarding-pass-stub" style={[s.stub, narrow && s.narrowStub, compact && s.stubBottom, stackEndpoints && s.stackedStub]}
+          onLayout={event => setStubTop(event.nativeEvent.layout.y)}>
           <View>
             <Text style={[s.label, compact && s.compactLabel]}>FLIGHT</Text>
             <Text style={[s.flight, compact && s.left]}>{flight}</Text>
@@ -223,32 +203,28 @@ export function BoardingPass({
     </View>
   );
 }
+
+/** A single paper silhouette, including the missing semicircles at the tear line. */
+export function ticketOutline(width: number, height: number, seam: number, horizontal: boolean) {
+  if (!(width > 8 && height > 8)) return "";
+  const l = .5, t = .5, r = width - .5, b = height - .5, c = 3, n = 5;
+  const cut = seam > 8 && seam < (horizontal ? height : width) - 8;
+  const top = !horizontal && cut ? `H${seam - n} A${n} ${n} 0 0 0 ${seam + n} ${t}` : "";
+  const right = horizontal && cut ? `V${seam - n} A${n} ${n} 0 0 0 ${r} ${seam + n}` : "";
+  const bottom = !horizontal && cut ? `H${seam + n} A${n} ${n} 0 0 0 ${seam - n} ${b}` : "";
+  const left = horizontal && cut ? `V${seam + n} A${n} ${n} 0 0 0 ${l} ${seam - n}` : "";
+  return `M${l + c} ${t} ${top} H${r - c} Q${r} ${t} ${r} ${t + c} ${right} V${b - c} Q${r} ${b} ${r - c} ${b} ${bottom} H${l + c} Q${l} ${b} ${l} ${b - c} ${left} V${t + c} Q${l} ${t} ${l + c} ${t} Z`;
+}
 const s = StyleSheet.create({
   stackedEndpoints: { flexDirection: "column", alignItems: "stretch", gap: 14 },
   stackedStub: { flexDirection: "column", alignItems: "flex-start", gap: 16 },
   largeCity: { fontSize: 11, lineHeight: 17 },
   ticketWrap: { position: "relative" },
-  paperEdge: {
-    position: "absolute",
-    top: 3,
-    bottom: -2,
-    left: 0,
-    right: 0,
-    backgroundColor: "#e0e5db",
-    borderRadius: 3,
-  },
   ticket: {
-    backgroundColor: colors.paperSheet,
     flexDirection: "row",
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
+    padding: 1,
     borderRadius: 3,
-    shadowColor: colors.ink,
-    shadowOpacity: 0.045,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 2,
   },
-  selected: { borderColor: walletColors.copper },
   compact: { flexDirection: "column" },
   main: {
     flex: 1,
@@ -346,7 +322,6 @@ const s = StyleSheet.create({
     paddingHorizontal: 6,
     gap: 20,
     justifyContent: "space-between",
-    backgroundColor: "#e9eee7",
     borderTopRightRadius: 3,
     borderBottomRightRadius: 3,
   },
@@ -404,17 +379,6 @@ const s = StyleSheet.create({
     lineHeight: 15,
     color: colors.ink,
   },
-  notch: {
-    position: "absolute",
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: walletColors.paper,
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
-  },
-  notchTop: { left: -5, top: -5 },
-  notchBottom: { left: -5, bottom: -5 },
   direction: {
     width: 18,
     height: 32,

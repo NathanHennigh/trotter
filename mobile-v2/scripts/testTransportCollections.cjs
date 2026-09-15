@@ -150,7 +150,7 @@ function indexHost() {
     useState: initial => { const i = cursor++; if (!(i in states)) states[i] = initial; return [states[i], next => states[i] = typeof next === 'function' ? next(states[i]) : next]; },
     useMemo: factory => factory() };
   const globals = { React, ...model, collectionProgress: (...args) => progress = collectionProgress(...args),
-    ...Object.fromEntries('FlatList ScrollView Text View PressFeedback AirlineLogo WWIcon AirportLuggageLabel'.split(' ').map(name => [name, name])), StyleSheet: { create: value => value }, colors: {}, fonts: {} };
+    ...Object.fromEntries('FlatList ScrollView Text View PressFeedback AirlineLogo WWIcon AirportLuggageLabel CollectionProgress'.split(' ').map(name => [name, name])), StyleSheet: { create: value => value }, colors: {}, fonts: {} };
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
   const mod = { exports: {} }; new Function('module', 'exports', ...Object.keys(globals), output)(mod, mod.exports, ...Object.values(globals));
   return { render: next => { props = next ?? props; cursor = 0; const tree = mod.exports.TransportCollectionIndex(props); return { tree, progress }; } };

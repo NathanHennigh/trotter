@@ -4,29 +4,12 @@ import {
   StyleSheet,
   Text,
   View,
-  type ImageSourcePropType,
 } from "react-native";
+import { SvgXml } from 'react-native-svg';
 import { colors, fonts } from "../../theme/trotterTheme";
+import { bundledAirlineLogos } from './airlineLogoAssets';
+import { cachedAirlineSymbol, loadAirlineSymbol, normalizeAirlineCode } from './airlineLogoRemote';
 
-const logos: Record<string, ImageSourcePropType> = {
-  AA: require("../../../assets/world-window/airlines/AA.png"),
-  AM: require("../../../assets/world-window/airlines/AM.png"),
-  AT: require("../../../assets/world-window/airlines/AT.png"),
-  B6: require("../../../assets/world-window/airlines/B6.png"),
-  BR: require("../../../assets/world-window/airlines/BR.png"),
-  DL: require("../../../assets/world-window/airlines/DL.png"),
-  EK: require("../../../assets/world-window/airlines/EK.png"),
-  ET: require("../../../assets/world-window/airlines/ET.png"),
-  F9: require("../../../assets/world-window/airlines/F9.png"),
-  G4: require("../../../assets/world-window/airlines/G4.png"),
-  IB: require("../../../assets/world-window/airlines/IB.png"),
-  NH: require("../../../assets/world-window/airlines/NH.png"),
-  NK: require("../../../assets/world-window/airlines/NK.png"),
-  SY: require("../../../assets/world-window/airlines/SY.png"),
-  UA: require("../../../assets/world-window/airlines/UA.png"),
-  WN: require("../../../assets/world-window/airlines/WN.png"),
-  Z2: require("../../../assets/world-window/airlines/Z2.png"),
-};
 const names: Record<string, string> = {
   AA: "American Airlines",
   AM: "Aeroméxico",
@@ -64,29 +47,38 @@ export function AirlineLogo({
   code: string;
   size?: number;
 }) {
-  const key = code.trim().toUpperCase(),
-    source = logos[key];
-  const [failed, setFailed] = React.useState(false);
-  React.useEffect(() => setFailed(false), [key]);
-  return source && !failed ? (
+  const key = normalizeAirlineCode(code), source = bundledAirlineLogos[key];
+  const [failedKey, setFailedKey] = React.useState<string>();
+  const [remote, setRemote] = React.useState<{ key: string; xml: string | null }>();
+  const localAvailable = source && failedKey !== key;
+  React.useEffect(() => {
+    if (localAvailable) return;
+    let current = true;
+    void loadAirlineSymbol(key).then(xml => { if (current) setRemote({ key, xml }); });
+    return () => { current = false; };
+  }, [key, localAvailable]);
+  const xml = remote?.key === key ? remote.xml : cachedAirlineSymbol(key);
+  const fallback = (
+    <View accessibilityLabel={airlineName(key) || "Airline"} style={[styles.fallback, { width: size, height: size }]}>
+      <Text style={[styles.code, { fontSize: size * 0.35 }]}>{key.slice(0, 2) || "✈"}</Text>
+    </View>
+  );
+  return localAvailable ? (
     <Image
+      key={key}
       source={source}
       accessibilityLabel={airlineName(key)}
       resizeMode="contain"
-      onError={() => setFailed(true)}
+      onError={() => setFailedKey(key)}
       style={{ width: size, height: size, borderRadius: 3 }}
     />
-  ) : (
-    <View
-      accessibilityLabel={airlineName(key) || "Airline"}
-      style={[styles.fallback, { width: size, height: size }]}
-    >
-      <Text style={[styles.code, { fontSize: size * 0.35 }]}>
-        {key.slice(0, 2) || "✈"}
-      </Text>
+  ) : xml ? (
+    <View accessible accessibilityLabel={airlineName(key) || 'Airline'} style={{ width: size, height: size }}>
+      <SvgXml xml={xml} width={size} height={size} preserveAspectRatio="xMidYMid meet" onError={ignoreInvalidSymbol} fallback={fallback} />
     </View>
-  );
+  ) : fallback;
 }
+const ignoreInvalidSymbol = () => {};
 const styles = StyleSheet.create({
   fallback: {
     borderWidth: 1,

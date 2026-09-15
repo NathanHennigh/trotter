@@ -1,616 +1,106 @@
-import React from "react";
-import {
-  ActivityIndicator,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { fitDisplayFont } from "../components/world-window/displayTextFit";
-import { getMobileVisualWidth } from "../utils/mobileLayout";
-import { BottomNav } from "../components/trotter/TrotterKit";
-import { WWEmblem, WWIcon } from "../components/world-window/WorldWindowUI";
-import { TripAtlas } from "../components/world-window/trips/TripAtlas";
-import { flightDate } from "../components/world-window/trips/tripPresentation";
-import type { BottomNavTab, TripSegmentSummary } from "../data/trotterMock";
-import { useTravelTrips } from "../services/travelTrips";
-import { colors, fonts, layout } from "../theme/trotterTheme";
-import { PressFeedback } from "../components/world-window/motion";
-import { useExperiencePreferences } from "../utils/experiencePreferences";
+import React from 'react';
+import { ActivityIndicator, Image, RefreshControl, ScrollView, StyleSheet, Switch, Text, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BottomNav } from '../components/trotter/TrotterKit';
+import { WWHeader, WWIcon } from '../components/world-window/WorldWindowUI';
+import { PressFeedback } from '../components/world-window/motion';
+import { TravelerCard } from '../components/world-window/profile/TravelerCard';
+import { HomeAirportPicker } from '../components/world-window/profile/HomeAirportPicker';
+import type { BottomNavTab } from '../data/trotterMock';
+import airports from '../data/collections/airports.json';
+import { getApiBaseUrl, useTravelTrips } from '../services/travelTrips';
+import { useExperiencePreferences, selectionHaptic } from '../utils/experiencePreferences';
+import { useTravelerIdentity } from '../utils/travelerIdentity';
+import { getMobileVisualWidth } from '../utils/mobileLayout';
+import { colors, fonts, layout } from '../theme/trotterTheme';
 
-export function ProfileScreen({
-  active,
-  onChange,
-  onOpenStamps,
-  onOpenAirport,
-}: {
-  active: BottomNavTab;
-  onChange: (tab: BottomNavTab) => void;
-  onOpenStamps: () => void;
-  onOpenAirport?: (code: string) => void;
+export function ProfileScreen({ active, onChange, onOpenAirport }: {
+  active: BottomNavTab; onChange: (tab: BottomNavTab) => void; onOpenStamps?: () => void; onOpenAirport?: (code: string) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const preferences = useExperiencePreferences();
   const { width, fontScale } = useWindowDimensions();
-  const largeText = fontScale >= 1.35;
   const visualWidth = getMobileVisualWidth(width);
-  const {
-    profile,
-    trips,
-    status,
-    error,
-    accountEmail,
-    lastSyncedAt,
-    gmailSyncStatus,
-    gmailSyncError,
-    lastGmailSyncedAt,
-    refresh,
-    syncFromGmail,
-    signOut,
-  } = useTravelTrips();
-  const busy = ["loading", "refreshing", "syncing"].includes(status);
-  const nameSize = fitDisplayFont(profile.name, 38, visualWidth - 48, fontScale);
+  const large = fontScale >= 1.35 || visualWidth < 350;
+  const preferences = useExperiencePreferences();
+  const { profile, trips, status, error, accountId, accountEmail, lastSyncedAt, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt, refresh, syncFromGmail, signOut } = useTravelTrips();
+  const identity = useTravelerIdentity(accountId ? `${getApiBaseUrl()}/${accountId}` : undefined);
+  const [choosingHome, setChoosingHome] = React.useState(false);
+  const busy = ['loading', 'refreshing', 'syncing'].includes(status);
+  const scanning = gmailSyncStatus === 'syncing' || status === 'syncing';
+  const home = airports.entries.find(entry => entry.key === identity.homeAirport);
+  const segments = React.useMemo(() => [...new Map(trips.flatMap(trip => trip.segments ?? [])
+    .filter(segment => Number.isFinite(Date.parse(segment.depTime)) && Date.parse(segment.depTime) <= Date.now())
+    .map(segment => [segment.id, segment])).values()], [trips]);
   const firstYear = profile.firstFlightDate?.match(/^\d{4}/)?.[0];
-  const segments = React.useMemo(
-    () => [
-      ...new Map(
-        trips
-          .flatMap((trip) => trip.segments ?? [])
-          .map((segment) => [segment.id, segment]),
-      ).values(),
-    ],
-    [trips],
-  );
-  const airport = React.useMemo(() => frequentAirport(segments), [segments]);
-  const latestDate =
-    segments
-      .map((segment) => segment.depTime)
-      .filter(Boolean)
-      .sort()
-      .slice(-1)[0] ??
-    trips
-      .map((trip) => trip.startDate)
-      .filter(Boolean)
-      .sort()
-      .slice(-1)[0];
-  return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: insets.bottom + layout.bottomNavHeight + 28 },
-        ]}
-        refreshControl={
-          <RefreshControl
-            refreshing={status === "refreshing"}
-            onRefresh={() => void refresh()}
-            tintColor={colors.blue}
-          />
-        }
-      >
-        <View style={styles.signature}>
-          <View style={styles.brand} accessibilityLabel="Trotter">
-            <WWEmblem size={18.5} color={colors.blue} />
-            <Text style={styles.wordmark}>TROTTER</Text>
+  const syncCopy = scanning ? 'Finding flight confirmations…' : gmailSyncStatus === 'error' ? 'Scan needs attention' : lastGmailSyncedAt ? `Last scan · ${formatUpdated(lastGmailSyncedAt)}` : 'Ready to scan for flights';
+  return <View style={[s.screen, { paddingTop: insets.top }]}>
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 22 }}
+      refreshControl={<RefreshControl refreshing={status === 'refreshing'} onRefresh={() => void refresh()} tintColor={colors.blue} />}>
+      <WWHeader title="Profile" />
+      <View style={[s.content, { width: Math.min(visualWidth - 48, 592) }]}>
+        <TravelerCard name={profile.name} firstYear={firstYear} homeAirport={identity.homeAirport} homeCity={home?.city || home?.name} segments={segments} ready={identity.ready}
+          onChooseHome={() => setChoosingHome(true)} onOpenAirport={onOpenAirport} />
+        {identity.error ? <Text style={s.error} accessibilityRole="alert">{identity.error}</Text> : null}
+        <View style={s.connection}>
+          <View style={s.sectionHeading}><Text style={s.overline}>FLIGHT CONFIRMATIONS</Text>
+            {gmailSyncStatus === 'synced' && !scanning ? <Text style={s.success} accessibilityLabel="Scan complete">✓</Text> : null}
           </View>
-          <Text style={styles.signatureLabel}>Profile</Text>
-        </View>
-        <View style={styles.owner}>
-          <Text accessibilityRole="header" style={[styles.name, { fontSize: nameSize, lineHeight: nameSize * 42 / 38 }]}>
-            {profile.name}
-          </Text>
-          {firstYear ? (
-            <View style={styles.ownerDetails}>
-              <Text style={styles.since}>
-                First recorded flight in {firstYear}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-        <View style={styles.source}>
-          <View style={styles.sourceHeading}>
-            <Text style={styles.sectionTitle}>Flight confirmations</Text>
-            <View style={styles.sourceStatus}>
-              <View style={styles.statusDot} />
-              <Text style={styles.statusText}>
-                {gmailSyncStatus === "syncing" ? "Checking" : gmailSyncStatus === "synced" ? "Synced" : gmailSyncStatus === "error" ? "Needs attention" : "Not checked"}
-              </Text>
-            </View>
-          </View>
-          <View style={[styles.sourceProvider, largeText && styles.sourceProviderLarge]}>
-            <WWIcon name="sync" size={23} color={colors.blue} />
-            <View style={styles.sourceCopy}>
-              <Text style={styles.providerName}>Gmail</Text>
-              <Text style={styles.secondary}>
-                {profile.flights.toLocaleString()} saved{" "}
-                {profile.flights === 1 ? "flight" : "flights"}
-              </Text>
-            </View>
-            <PressFeedback
-              accessibilityRole="button"
-              accessibilityLabel="Check Gmail for new flights"
-              accessibilityState={{
-                disabled: busy,
-                busy: status === "syncing",
-              }}
-              disabled={busy}
-              onPress={() => void syncFromGmail()}
-              style={({ pressed }) => [
-                styles.syncButton,
-                largeText && styles.syncButtonLarge,
-                busy && styles.disabled,
-
-              ]}
-            >
-              {status === "syncing" ? (
-                <ActivityIndicator color={colors.blue} size="small" />
-              ) : (
-                <WWIcon name="sync" size={19} color={colors.blue} />
-              )}
-              <Text style={styles.textButtonLabel}>Check mail</Text>
+          <View style={[s.provider, large && s.providerLarge]}>
+            <View style={s.providerCopy}><Text style={s.providerName}>Gmail</Text><Text style={s.secondary} accessibilityLiveRegion="polite">{syncCopy}</Text></View>
+            <PressFeedback accessibilityRole="button" accessibilityLabel="Scan Gmail for flights" accessibilityState={{ disabled: busy, busy: scanning }} disabled={busy} onPress={() => void syncFromGmail()} style={[s.scan, large && s.scanLarge, busy && s.disabled]}>
+              {scanning ? <ActivityIndicator color={colors.blue} size="small" /> : <WWIcon name="sync" size={17} color={colors.blue} />}
+              <Text style={s.scanText}>{scanning ? 'Scanning…' : 'Scan for flights'}</Text>
             </PressFeedback>
           </View>
-          <Text style={styles.sourceNote} accessibilityLiveRegion="polite">
-            {status === "syncing"
-              ? "Finding flight confirmations. Your import continues if you close Trotter."
-              : lastGmailSyncedAt
-                ? `Last successful scan ${formatUpdated(lastGmailSyncedAt)}`
-                : "Check Gmail to add flight confirmations to your archive."}
-          </Text>
-          {gmailSyncError ? (
-            <Text
-              style={styles.error}
-              accessibilityRole="alert"
-              accessibilityLiveRegion="polite"
-            >
-              {gmailSyncError}
-            </Text>
-          ) : null}
+          {scanning ? <Text style={s.note}>Your scan continues if you leave the app.</Text> : null}
+          {gmailSyncError ? <Text style={s.error} accessibilityRole="alert">{gmailSyncError}</Text> : null}
         </View>
-        {airport ? (
-          <View style={styles.routeSheet}>
-            <View style={styles.routeSheetHeading}>
-              <Text style={styles.routeSheetLabel}>Most visited airport</Text>
-              <Text style={styles.routeSheetLabel}>
-                {airport.routes} {airport.routes === 1 ? "route" : "routes"}
-              </Text>
-            </View>
-            <TripAtlas
-              variant="profile"
-              segments={airport.segments}
-              destination={airport.code}
-              backgroundColor="#b5ced1"
-            />
-            <PressFeedback accessibilityRole="button" accessibilityLabel={`View ${airport.code} airport history`}
-              disabled={!onOpenAirport} onPress={() => onOpenAirport?.(airport.code)}
-              style={[styles.airport, largeText && styles.airportLarge]}>
-              <Text style={styles.airportCode}>{airport.code}</Text>
-              <View style={styles.airportCopy}>
-                {airport.point?.city ? (
-                  <Text style={styles.airportCity}>{airport.point.city}</Text>
-                ) : null}
-                <Text style={styles.airportFlights}>
-                  {airport.segments.length} recorded{" "}
-                  {airport.segments.length === 1 ? "flight" : "flights"}
-                </Text>
+        <View style={s.preferences}>
+          <Text style={s.overline}>PREFERENCES</Text>
+          <Text style={s.preferenceTitle}>Globe appearance</Text>
+          <View style={[s.textures, large && s.texturesLarge]}>
+            {(['classic', 'nasa'] as const).map(texture => <PressFeedback key={texture} accessibilityRole="radio" accessibilityLabel={texture === 'classic' ? 'Classic globe' : 'NASA globe'} accessibilityState={{ selected: preferences.texture === texture }}
+              onPress={() => { preferences.setTexture(texture); selectionHaptic(); }} style={[s.texture, preferences.texture === texture && s.textureSelected]}>
+              <View accessible={false} style={[s.swatch, texture === 'classic' ? s.classic : s.nasa]}>
+                {texture === 'classic' ? <WWIcon name="globe" size={22} color={colors.ink} /> : <Image source={require('../../assets/world-window/nasa-day-base-2048.jpg')} style={s.nasaImage} />}
               </View>
-              {onOpenAirport ? <WWIcon name="arrow" size={19} color={colors.blue} /> : null}
-            </PressFeedback>
-            {airport.point ? (
-              <Text style={styles.coordinates}>
-                {coordinates(airport.point.lat, airport.point.lon)}
-              </Text>
-            ) : null}
+              <Text style={s.textureLabel}>{texture === 'classic' ? 'Classic' : 'NASA'}</Text>
+              <Text accessible={false} style={[s.textureCheck, preferences.texture !== texture && { opacity: 0 }]}>✓</Text>
+            </PressFeedback>)}
           </View>
-        ) : null}
-        <View style={styles.history}>
-          <Text style={styles.secondary}>Latest recorded flight</Text>
-          <Text style={styles.historyDate}>
-            {latestDate ? flightDate(latestDate) : "No flights yet"}
-          </Text>
-        </View>
-        <ArchiveRow
-          label="Trip archive"
-          value={`${trips.length.toLocaleString()} ${trips.length === 1 ? "trip" : "trips"}`}
-          onPress={() => onChange("trips")}
-        />
-        <ArchiveRow
-          label="Country stamps"
-          value={`${profile.countries.toLocaleString()} ${profile.countries === 1 ? "country" : "countries"}`}
-          onPress={onOpenStamps}
-        />
-        <View style={styles.account}>
-          <View style={styles.feedbackSetting}>
-            <View style={styles.feedbackCopy}>
-              <Text style={styles.sectionTitle}>Tactile feedback</Text>
-              <Text style={styles.secondary}>Page turns and confirmations</Text>
-            </View>
-            <Switch accessibilityLabel="Tactile feedback" value={preferences.haptics} hitSlop={12}
-              onValueChange={preferences.setHaptics}
-              trackColor={{ false: colors.paperBorder, true: colors.blue }} thumbColor={colors.paperSoft} />
-          </View>
-          <Text style={styles.sectionTitle}>Google account</Text>
-          <Text style={styles.accountEmail} selectable>
-            {accountEmail}
-          </Text>
-          {lastSyncedAt ? <Text style={styles.secondary}>Archive refreshed {formatUpdated(lastSyncedAt)}</Text> : null}
-          {error && error !== gmailSyncError ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
-          <View style={styles.accountActions}>
-            <PressFeedback
-              accessibilityRole="button"
-              accessibilityState={{
-                disabled: busy,
-                busy: status === "refreshing",
-              }}
-              disabled={busy}
-              onPress={() => void refresh()}
-              style={({ pressed }) => [
-                styles.textButton,
-                busy && styles.disabled,
-
-              ]}
-            >
-              {status === "refreshing" ? (
-                <ActivityIndicator color={colors.blue} size="small" />
-              ) : (
-                <WWIcon name="sync" size={16} color={colors.blue} />
-              )}
-              <Text style={styles.textButtonLabel}>
-                {status === "refreshing" ? "Refreshing…" : "Refresh archive"}
-              </Text>
-            </PressFeedback>
-            <PressFeedback
-              accessibilityRole="button"
-              onPress={() => void signOut()}
-              style={({ pressed }) => [
-                styles.textButton,
-
-              ]}
-            >
-              <Text style={styles.textButtonLabel}>Sign out</Text>
-              <WWIcon name="logout" size={16} color={colors.blue} />
-            </PressFeedback>
+          <View style={s.haptics}><View style={s.hapticCopy}><Text style={s.preferenceTitle}>Tactile feedback</Text><Text style={s.secondary}>Page turns and confirmations</Text></View>
+            <Switch accessibilityLabel="Tactile feedback" value={preferences.haptics} onValueChange={preferences.setHaptics} trackColor={{ false: colors.paperBorder, true: colors.blue }} thumbColor={colors.paperSoft} hitSlop={10} />
           </View>
         </View>
-      </ScrollView>
-      <BottomNav active={active} onChange={onChange} />
-    </View>
-  );
-}
-function ArchiveRow({
-  label,
-  value,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  onPress: () => void;
-}) {
-  return (
-    <PressFeedback
-      accessibilityRole="button"
-      onPress={onPress}
-      style={styles.archiveRow}
-    >
-      <Text style={styles.archiveLabel}>{label}</Text>
-      <View style={styles.archiveValue}>
-        <Text style={styles.archiveLabel}>{value}</Text>
-        <WWIcon name="arrow" size={17} color={colors.blue} />
+        <View style={s.account}>
+          <Text style={s.overline}>GOOGLE ACCOUNT</Text><Text selectable style={s.email}>{accountEmail}</Text>
+          <View style={s.accountBottom}><Text style={s.note}>{lastSyncedAt ? `Updated ${formatUpdated(lastSyncedAt)}` : 'Connected with Google'}</Text>
+            <PressFeedback accessibilityRole="button" onPress={() => void signOut()} style={s.signOut}><Text style={s.signOutText}>Sign out</Text><WWIcon name="logout" size={16} color={colors.mutedInk} /></PressFeedback>
+          </View>
+          {error && error !== gmailSyncError ? <Text style={s.error} accessibilityRole="alert">{error}</Text> : null}
+        </View>
       </View>
-    </PressFeedback>
-  );
-}
-// An observed airport is not a user-declared home. Keep that distinction in the label.
-function frequentAirport(segments: TripSegmentSummary[]) {
-  const counts = new Map<string, number>();
-  for (const segment of segments) {
-    for (const code of new Set(
-      [segment.depAirport, segment.arrAirport].filter(Boolean),
-    ))
-      counts.set(code, (counts.get(code) ?? 0) + 1);
-  }
-  const code = [...counts].sort(
-    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
-  )[0]?.[0];
-  if (!code) return undefined;
-  const flights = segments.filter(
-    (segment) => segment.depAirport === code || segment.arrAirport === code,
-  );
-  const point = flights
-    .flatMap((segment) => [segment.depPoint, segment.arrPoint])
-    .find(
-      (point) =>
-        point?.code === code &&
-        Number.isFinite(point.lat) &&
-        Number.isFinite(point.lon),
-    );
-  return {
-    code,
-    point,
-    segments: flights,
-    routes: new Set(
-      flights
-        .map((segment) =>
-          segment.depAirport === code ? segment.arrAirport : segment.depAirport,
-        )
-        .filter(Boolean),
-    ).size,
-  };
-}
-function coordinates(lat: number, lon: number) {
-  return `${Math.abs(lat).toFixed(2)}° ${lat < 0 ? "S" : "N"} / ${Math.abs(lon).toFixed(2)}° ${lon < 0 ? "W" : "E"}`;
+    </ScrollView>
+    <BottomNav active={active} onChange={onChange} />
+    {choosingHome ? <HomeAirportPicker selected={identity.homeAirport} onClose={() => setChoosingHome(false)} onSave={async code => { await identity.setHomeAirport(code); selectionHaptic('confirmation'); }} /> : null}
+  </View>;
 }
 function formatUpdated(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "recently"
-    : date.toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
+  return Number.isFinite(date.getTime()) ? date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'recently';
 }
-// Profile-specific geometry follows identity.css and approved window-polish.css.
-const styles = StyleSheet.create({
-  feedbackSetting: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, paddingBottom: 22, marginBottom: 22, borderBottomWidth: 1, borderBottomColor: colors.paperBorder },
-  feedbackCopy: { flex: 1, gap: 6 },
-  screen: { flex: 1, backgroundColor: colors.paperSoft },
-  content: {
-    paddingHorizontal: 24,
-    paddingTop: 25,
-    maxWidth: 640,
-    width: "100%",
-    alignSelf: "center",
-  },
-  signature: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  brand: { flexDirection: "row", alignItems: "center", minHeight: 25, gap: 7 },
-  wordmark: {
-    fontFamily: fonts.sansSemi,
-    fontSize: 15,
-    color: colors.blue,
-    letterSpacing: 1.8,
-  },
-  signatureLabel: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 12,
-    color: colors.blue,
-  },
-  owner: { paddingTop: 28, paddingBottom: 18 },
-  name: {
-    fontFamily: fonts.display,
-    fontSize: 38,
-    lineHeight: 42,
-    letterSpacing: -0.7,
-    color: colors.blue,
-  },
-  ownerDetails: { minHeight: 44, justifyContent: "center", marginTop: 8 },
-  since: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.mutedInk,
-  },
-  routeSheet: {
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
-    backgroundColor: "#F4F5EB",
-    marginBottom: 25,
-    overflow: "hidden",
-  },
-  routeSheetHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-    borderBottomWidth: 1,
-    borderColor: colors.paperBorder,
-    flexWrap: "wrap",
-  },
-  routeSheetLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    lineHeight: 18,
-    color: colors.blue,
-  },
-  airport: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    paddingHorizontal: 13,
-    paddingTop: 15,
-    paddingBottom: 10,
-  },
-  airportCode: {
-    fontFamily: fonts.mono,
-    fontSize: 36,
-    lineHeight: 42,
-    letterSpacing: -1.2,
-    color: colors.blue,
-  },
-  airportCopy: { flex: 1, minWidth: 0 },
-  airportCity: {
-    fontFamily: fonts.display,
-    fontSize: 24,
-    lineHeight: 27,
-    color: colors.blue,
-  },
-  airportFlights: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.mutedInk,
-    marginTop: 6,
-  },
-  coordinates: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    lineHeight: 18,
-    paddingHorizontal: 13,
-    paddingBottom: 13,
-    color: colors.mutedInk,
-  },
-  source: {
-    borderTopWidth: 1,
-    borderColor: colors.paperBorder,
-    paddingTop: 20,
-    paddingBottom: 16,
-  },
-  sourceHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    flexWrap: "wrap",
-  },
-  sectionTitle: {
-    fontFamily: fonts.sans,
-    fontSize: 14,
-    lineHeight: 20,
-    color: colors.blue,
-  },
-  sourceStatus: { flexDirection: "row", alignItems: "center", gap: 5 },
-  statusDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: colors.blue,
-  },
-  statusText: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 12,
-    color: colors.blue,
-  },
-  sourceProvider: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 13,
-    paddingTop: 19,
-  },
-  sourceProviderLarge: { flexWrap: "wrap" },
-  syncButtonLarge: { width: "100%" },
-  airportLarge: { flexDirection: "column", alignItems: "flex-start" },
-  sourceCopy: { flex: 1, minWidth: 0, gap: 5 },
-  providerName: {
-    fontFamily: fonts.display,
-    fontSize: 24,
-    lineHeight: 29,
-    color: colors.blue,
-  },
-  secondary: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.mutedInk,
-  },
-  syncButton: {
-    minHeight: 44,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    flexDirection: "row",
-    gap: 7,
-    borderRadius: 3,
-    borderWidth: 1,
-    borderColor: colors.paperBorder,
-    backgroundColor: "#EDF0E7",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sourceNote: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 12,
-    lineHeight: 19,
-    color: colors.mutedInk,
-    backgroundColor: "#EDF0E7",
-    padding: 15,
-    marginTop: 14,
-  },
-  history: {
-    borderTopWidth: 1,
-    borderColor: colors.paperBorder,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
-    paddingVertical: 18,
-    flexWrap: "wrap",
-  },
-  historyDate: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.blue,
-    fontVariant: ["tabular-nums"],
-  },
-  archiveRow: {
-    borderTopWidth: 1,
-    borderColor: colors.paperBorder,
-    minHeight: 59,
-    paddingVertical: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 13,
-    flexWrap: "wrap",
-  },
-  archiveLabel: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 14,
-    lineHeight: 21,
-    color: colors.blue,
-  },
-  archiveValue: { flexDirection: "row", alignItems: "center", gap: 11 },
-  account: {
-    borderTopWidth: 1,
-    borderColor: colors.paperBorder,
-    paddingTop: 20,
-    paddingBottom: 4,
-  },
-  accountEmail: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.mutedInk,
-    marginTop: 7,
-  },
-  accountActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-    marginTop: 8,
-    flexWrap: "wrap",
-  },
-  textButton: {
-    minHeight: 44,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  textButtonLabel: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.blue,
-  },
-  error: {
-    fontFamily: fonts.sansRegular,
-    color: colors.redDeep,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 14,
-  },
-  pressed: { opacity: 0.7, transform: [{ scale: 0.985 }] },
-  disabled: { opacity: 0.5 },
+const s = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.paperSoft }, content: { alignSelf: 'center' },
+  connection: { marginTop: 25, paddingBottom: 22, borderBottomWidth: 1, borderBottomColor: colors.paperBorder },
+  sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, overline: { fontFamily: fonts.mono, fontSize: 10, lineHeight: 16, letterSpacing: .7, color: colors.mutedInk },
+  success: { fontFamily: fonts.sans, fontSize: 16, color: colors.green }, provider: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 10 }, providerLarge: { flexWrap: 'wrap' },
+  providerCopy: { flex: 1, gap: 4, minWidth: 130 }, providerName: { fontFamily: fonts.display, fontSize: 25, lineHeight: 30, color: colors.ink },
+  secondary: { fontFamily: fonts.sansRegular, fontSize: 11, lineHeight: 17, color: colors.mutedInk }, scan: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.paperBorder, borderRadius: 3 }, scanLarge: { width: '100%' }, scanText: { fontFamily: fonts.sans, fontSize: 11, lineHeight: 17, color: colors.blue }, disabled: { opacity: .5 },
+  preferences: { paddingTop: 21 }, preferenceTitle: { fontFamily: fonts.sans, fontSize: 14, lineHeight: 21, color: colors.ink, marginTop: 8 }, textures: { flexDirection: 'row', gap: 10, paddingVertical: 11 }, texturesLarge: { flexDirection: 'column' },
+  texture: { flex: 1, minHeight: 55, padding: 10, gap: 9, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.paperBorder, borderRadius: 3 }, textureSelected: { borderColor: colors.blue, backgroundColor: '#EFF1E8' }, textureLabel: { fontFamily: fonts.sans, fontSize: 12, lineHeight: 18, color: colors.ink, flex: 1 }, textureCheck: { fontSize: 13, color: colors.blue },
+  swatch: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }, classic: { backgroundColor: '#B3CDD0' }, nasa: { backgroundColor: '#133047' }, nasaImage: { width: 56, height: 28 },
+  haptics: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingTop: 8, paddingBottom: 21 }, hapticCopy: { flex: 1, gap: 4 },
+  account: { borderTopWidth: 1, borderTopColor: colors.paperBorder, paddingTop: 21 }, email: { fontFamily: fonts.sansRegular, fontSize: 13, lineHeight: 21, color: colors.ink, marginTop: 9 }, accountBottom: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  note: { fontFamily: fonts.sansRegular, fontSize: 10, lineHeight: 17, color: colors.mutedInk, marginTop: 7 }, signOut: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 7 }, signOutText: { fontFamily: fonts.sansRegular, fontSize: 11, color: colors.mutedInk },
+  error: { fontFamily: fonts.sansRegular, fontSize: 12, lineHeight: 18, color: colors.redDeep, marginTop: 10 },
 });
