@@ -44,6 +44,19 @@ def resolve(sessions, job_id, status="resolved", *, candidates=None, now=NOW):
     return asyncio.run(locations.resolve_location_job(job_id, session_factory=sessions, resolver=resolver, now=now))
 
 
+def legacy_review(sessions, job_id, *, candidate_ids=None):
+    """Seed the old approval state without passing through the new worker."""
+    with sessions() as db:
+        row = db.get(DreamLocation, job_id)
+        row.status, row.provider = "needs_review", "google_places"
+        row.message = "Choose the place that matches your save."
+        row.next_attempt_at = None
+        identity = google.ensure_identity(db, row)
+        identity.place_fingerprint = google.source_place_fingerprint(row.item)
+        identity.candidate_place_ids = candidate_ids or [CANDIDATE["id"]]
+        db.commit()
+
+
 def test_google_payload_is_never_stored_in_db_or_history_and_coordinate_cache_is_bounded(sessions, isolated_cache):
     add_item(sessions)
     before = snapshot(sessions)
@@ -65,6 +78,106 @@ def test_google_payload_is_never_stored_in_db_or_history_and_coordinate_cache_is
     _, payload, ttl = isolated_cache.writes[0]
     assert set(payload) == {"latitude", "longitude", "expires_at"}
     assert ttl == 29 * 24 * 60 * 60
+
+
+@pytest.mark.parametrize("provider_status", ["resolved", "needs_review"])
+def test_google_match_populates_map_without_claiming_user_approval(sessions, provider_status):
+    add_item(sessions)
+    before = snapshot(sessions)
+    job_id, _ = enqueue(sessions)
+    assert resolve(sessions, job_id, provider_status) == "resolved"
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        fields = locations.public_location(item)
+        assert locations.location_coordinates(item) == (40.4, -3.7, "place")
+        assert fields["location_status"] == "resolved"
+        assert fields["location_place_id"] == CANDIDATE["id"]
+        assert fields["location_user_confirmed"] is False
+        assert item.location.google_identity.confirmed_place_id is None
+        assert "query_place_id=google-place-a" in locations.location_maps_url(item)
+        assert fields["location_message"] == "Location found on Google Maps."
+    assert snapshot(sessions) == before
+
+
+def test_legacy_multiple_provider_candidates_use_first_match_without_approval(sessions):
+    add_item(sessions)
+    job_id, _ = enqueue(sessions)
+    candidates = [{**CANDIDATE, "id": "z-relevant-place"}, {**CANDIDATE, "id": "a-other-branch"}]
+    assert resolve(sessions, job_id, "needs_review", candidates=candidates) == "resolved"
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        assert item.location.google_identity.selected_place_id == "z-relevant-place"
+        assert locations.public_location(item)["location_user_confirmed"] is False
+
+
+def test_legacy_review_backfill_revalidates_current_inputs_once_and_preserves_saves(sessions):
+    from app.tasks.dream_location_tasks import dispatch_pending_locations
+    for item_id in (1, 2):
+        add_item(sessions, item_id=item_id)
+        job_id, _ = enqueue(sessions, item_id)
+        legacy_review(sessions, job_id)
+    add_item(sessions, item_id=3, google_maps_url="https://maps.google.com/?q=1.3,103.8")
+    enqueue(sessions, 3)
+    before = snapshot(sessions)
+    sent = []
+    result = dispatch_pending_locations(session_factory=sessions, publish=sent.append, now=NOW)
+    assert result["queued"] == 2 and result["dispatched"] == 2
+    assert dispatch_pending_locations(session_factory=sessions, publish=sent.append, now=NOW)["queued"] == 0
+    for job_id in sent:
+        # Fresh search is used, rather than assuming an old candidate is still
+        # valid or fetching the first historical ID without its search context.
+        with sessions() as db:
+            row = db.get(DreamLocation, job_id)
+            assert row.status == "queued" and row.generation == 2
+            assert row.google_identity.selected_place_id is None
+            assert row.history[-1]["candidate_place_ids"] == [CANDIDATE["id"]]
+        assert resolve(sessions, job_id) == "resolved"
+    assert dispatch_pending_locations(session_factory=sessions, publish=sent.append, now=NOW)["queued"] == 0
+    with sessions() as db:
+        assert locations.location_coordinates(db.get(DreamItem, 3)) == (1.3, 103.8, "place")
+        assert db.query(DreamLocation).count() == 3
+    assert snapshot(sessions) == before
+
+
+def test_review_backfill_is_bounded_and_stale_candidates_cannot_invent_a_pin(sessions):
+    for item_id in range(1, 4):
+        add_item(sessions, item_id=item_id)
+        job_id, _ = enqueue(sessions, item_id)
+        legacy_review(sessions, job_id)
+    with sessions() as db:
+        assert google.queue_pending_google_matches(db, now=NOW, limit=2) == 2
+        db.commit()
+        assert google.queue_pending_google_matches(db, now=NOW, limit=2) == 1
+        db.commit()
+        assert google.queue_pending_google_matches(db, now=NOW, limit=2) == 0
+    assert resolve(sessions, 1, "needs_review", candidates=[]) == "not_found"
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        assert item.location.google_identity.selected_place_id is None
+        assert locations.location_coordinates(item) == (None, None, None)
+        assert google.queue_pending_google_matches(db, now=NOW, limit=2) == 0
+
+
+def test_automatic_google_match_yields_to_manual_correction_and_rejects_stale_search(sessions):
+    add_item(sessions)
+    job_id, _ = enqueue(sessions)
+    resolve(sessions, job_id)
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        item.place_name = "Different Venue"
+        locations.enqueue_location(db, item, now=NOW)
+        db.commit()
+        assert item.location.google_identity.selected_place_id is None
+    async def delayed_match(*_):
+        with sessions() as editing:
+            item = editing.get(DreamItem, 1)
+            item.google_maps_url = "https://maps.google.com/?q=1.3,103.8"
+            locations.enqueue_location(editing, item, now=NOW)
+            editing.commit()
+        return {"provider": "google_places", "status": "resolved", "candidates": [CANDIDATE]}
+    assert asyncio.run(locations.resolve_location_job(job_id, session_factory=sessions, resolver=delayed_match, now=NOW)) == "superseded"
+    with sessions() as db:
+        assert locations.location_coordinates(db.get(DreamItem, 1)) == (1.3, 103.8, "place")
 
 
 def test_expiry_hides_every_coordinate_path_even_if_redis_retains_old_value(sessions, monkeypatch):
@@ -107,7 +220,7 @@ def test_missing_cache_is_hidden_and_recovered_without_new_name_search(sessions,
 def test_fresh_details_are_transient_owner_scoped_and_do_not_mutate_cache_or_rows(sessions, isolated_cache):
     add_item(sessions)
     job_id, _ = enqueue(sessions)
-    resolve(sessions, job_id, "needs_review")
+    legacy_review(sessions, job_id)
     before = snapshot(sessions)
     async def fetch(identity):
         assert identity == "google-place-a"
@@ -136,7 +249,7 @@ def test_long_provider_identity_is_retained_without_truncation(sessions):
 def test_google_confirmation_preserves_category_edits_but_invalidates_place_identity(sessions):
     add_item(sessions)
     job_id, _ = enqueue(sessions)
-    resolve(sessions, job_id, "needs_review")
+    legacy_review(sessions, job_id)
     async def fetch(_):
         return copy.deepcopy(CANDIDATE)
     with sessions() as db:
@@ -177,7 +290,7 @@ def test_manual_coordinate_edit_supersedes_google_choice_and_cache(sessions):
 def test_confirmation_requires_current_id_and_rejects_inflight_user_edits(sessions):
     add_item(sessions)
     job_id, _ = enqueue(sessions)
-    resolve(sessions, job_id, "needs_review")
+    legacy_review(sessions, job_id)
     async def wrong(_):
         raise AssertionError("An unrelated candidate must not call the provider")
     with sessions() as db, pytest.raises(ValueError):
@@ -238,7 +351,7 @@ def test_many_serialized_points_share_one_short_cache_failure(sessions, isolated
 def test_fresh_details_reports_concurrent_confirmation_current_state(sessions):
     add_item(sessions)
     job_id, _ = enqueue(sessions)
-    resolve(sessions, job_id, "needs_review")
+    legacy_review(sessions, job_id)
     async def confirm_during_fetch(_):
         with sessions() as editing:
             row = editing.get(DreamLocation, job_id)

@@ -124,6 +124,9 @@ def apply_google_result(db, row, result, now):
         if identity.confirmed_place_id:
             row.status = "manual"
             row.message = "Location confirmed by you."
+        else:
+            row.status = "resolved"
+            row.message = "Location found on Google Maps."
     elif not identity.confirmed_place_id:
         identity.selected_place_id = None
 
@@ -147,6 +150,37 @@ def google_public_fields(row):
 def place_maps_url(item, place_id):
     # A display query is never a coordinate fallback, including for old clients.
     return "https://www.google.com/maps/search/?" + urlencode({"api": "1", "query": "place " + (item.place_name or ""), "query_place_id": place_id})
+
+
+def queue_pending_google_matches(db, *, now, limit):
+    """Resume old approval-gated saves using fresh provider evidence.
+
+    No cached display payload is promoted. The ordinary durable worker searches
+    current item inputs, validates Google results and caches fresh coordinates.
+    A result leaves needs_review permanently, so this is bounded and idempotent
+    across dispatcher ticks without a schema or destructive data migration.
+    """
+    from .dream_locations import enqueue_location
+    items = db.query(DreamItem).join(
+        DreamLocation,
+        (DreamLocation.item_id == DreamItem.id) & (DreamLocation.user_id == DreamItem.user_id),
+    ).join(DreamGoogleIdentity).filter(
+        DreamLocation.provider == PROVIDER,
+        DreamLocation.status == "needs_review",
+        DreamGoogleIdentity.confirmed_place_id.is_(None),
+    ).order_by(DreamItem.id).limit(limit).with_for_update(of=DreamItem, skip_locked=True).populate_existing().all()
+    queued = 0
+    for item in items:
+        # enqueue_location also locks/rechecks the row and preserves a newer
+        # manual pin if the item was edited while this batch was being selected.
+        row = db.query(DreamLocation).filter_by(item_id=item.id, user_id=item.user_id).with_for_update().populate_existing().first()
+        if not row or row.status != "needs_review" or row.provider != PROVIDER:
+            continue
+        if row.google_identity and row.google_identity.confirmed_place_id:
+            continue
+        _, added = enqueue_location(db, item, force=True, now=now)
+        queued += added
+    return queued
 
 
 def queue_google_refreshes(db, *, now, limit):

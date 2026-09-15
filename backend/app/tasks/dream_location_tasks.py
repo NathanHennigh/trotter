@@ -21,8 +21,10 @@ def dispatch_pending_locations(*, session_factory=None, publish=None, now=None):
     publish = publish or resolve_dream_location.delay
     now = now or utcnow()
     with session_factory() as db:
-        from app.services.google_location_lifecycle import queue_google_refreshes
-        queue_google_refreshes(db, now=now, limit=setting("DREAM_LOCATION_BATCH_SIZE", 25, 100))
+        from app.services.google_location_lifecycle import queue_google_refreshes, queue_pending_google_matches
+        batch_size = setting("DREAM_LOCATION_BATCH_SIZE", 25, 100)
+        refreshed = queue_google_refreshes(db, now=now, limit=batch_size)
+        resumed = queue_pending_google_matches(db, now=now, limit=batch_size)
         discovery = queue_missing(db, limit=setting("DREAM_LOCATION_BATCH_SIZE", 25, 100), only_undiscovered=True, now=now)
         jobs = due_jobs(db, now=now, limit=setting("DREAM_LOCATION_BATCH_SIZE", 25, 100))
         ids = [row.id for row in jobs]
@@ -38,7 +40,7 @@ def dispatch_pending_locations(*, session_factory=None, publish=None, now=None):
             # Do not log broker credentials or payloads. Durable rows remain due;
             # the next tick retries notification after the 60-second dispatch lease.
             continue
-    return {"queued": discovery["queued"], "dispatched": dispatched, "enabled": True}
+    return {"queued": discovery["queued"] + refreshed + resumed, "dispatched": dispatched, "enabled": True}
 
 
 @celery_app.task(name="app.tasks.dream_location_tasks.discover_dream_locations", ignore_result=True)

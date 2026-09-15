@@ -24,7 +24,6 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from .dream_place_search import (
     RetryableDreamPlaceLookupError,
-    _CHAINS,
     _GENERIC,
     _VENUE_WORDS,
     _country,
@@ -74,7 +73,7 @@ _DETAIL_FIELDS = (
 _SEARCH_FIELDS = ",".join("places." + field for field in _DETAIL_FIELDS.split(","))
 _TOTAL_TIMEOUT = 30
 _LOCAL_TYPES = {"locality", "postal_town", "sublocality", "sublocality_level_1"}
-_REGION_TYPES = {"neighborhood", "sublocality", "sublocality_level_1", "sublocality_level_2"}
+_NEIGHBORHOOD_TYPES = {"neighborhood", "sublocality", "sublocality_level_1", "sublocality_level_2"}
 _AREA_TYPES = {
     "country",
     "political",
@@ -366,12 +365,12 @@ def _brand_words(name: str) -> list[str]:
     return [word for word in _normal(name).split() if word not in _VENUE_WORDS]
 
 
-def _review_brand_similarity(wanted: str, actual: str) -> float:
-    """Compare distinctive brand windows, never use this score for auto-pinning.
+def _brand_similarity(wanted: str, actual: str) -> float:
+    """Compare distinctive brand windows after checking the venue's geography.
 
     Places can include extra descriptors or join/transliterate a saved brand's
     words. Verified geography and a known compatible category are required
-    separately by the caller; a cafe/restaurant difference remains review-only.
+    separately by the caller; a cafe/restaurant difference is compatible.
     Branch numbers are identity evidence, not optional descriptive text.
     """
     left, right = _brand_words(wanted), _brand_words(actual)
@@ -406,12 +405,44 @@ def _unverifiable_locality(wanted: str, values: set[str]) -> bool:
     )
 
 
+def _region_conflicts(wanted: str, components: dict[str, set[str]]) -> bool:
+    """Reject comparable region evidence, not missing/mixed-level geography."""
+    if not wanted:
+        return False
+    groups = {kind: values for kind, values in components.items()
+              if kind in _NEIGHBORHOOD_TYPES | _LOCAL_TYPES or kind.startswith("administrative_area_level_")}
+    values = {value for group in groups.values() for value in group}
+    if any(_normal(wanted) == _normal(value) or _same_admin(wanted, value) for value in values):
+        return False
+    # region_or_neighborhood is freeform. Local neighborhood evidence is
+    # comparable to it; a state's name alone is not proof that an unspecified
+    # neighborhood is wrong. Explicit district/state labels or short state
+    # codes allow comparison at that administrative level as well.
+    neighborhoods = {value for kind in _NEIGHBORHOOD_TYPES for value in groups.get(kind, set())}
+    if neighborhoods and not _unverifiable_locality(wanted, neighborhoods):
+        return True
+    normalized = _normal(wanted)
+    state_hint = bool(re.search(r"\b(state|province|region)\b", normalized)) or bool(re.fullmatch(r"[A-Z]{2}", wanted))
+    district_hint = bool(re.search(r"\b(district|county)\b", normalized))
+    for kind, hinted in (("administrative_area_level_1", state_hint), ("administrative_area_level_2", district_hint)):
+        group = groups.get(kind, set())
+        if hinted and group and not _unverifiable_locality(wanted, group):
+            return True
+    return False
+
+
 def _match(
     candidate: GoogleCandidate, name: str, city: str, country: str, region: str, category: str
 ):
     components = candidate._components
     countries = {_country(value) for value in components.get("country", set())} - {""}
     if not _country(country) or _country(country) not in countries:
+        return None
+    # Branch numbers are identity evidence on every matching path, including a
+    # high whole-name score that bypasses the transliteration comparison.
+    if re.findall(r"\d+", _normal(name)) != re.findall(r"\d+", _normal(candidate.name)):
+        return None
+    if _region_conflicts(region, components):
         return None
     score = _name_score(name, candidate.name)
     wanted_city = _locality(city, country)
@@ -430,49 +461,31 @@ def _match(
     if not allowed:
         return None
     geography_verified = city_exact or administrative
-    brand_score = _review_brand_similarity(name, candidate.name)
+    brand_score = _brand_similarity(name, candidate.name)
     distinctive_exact = (
         _normal(name) == _normal(candidate.name)
         and len(_brand_words(name)) >= 2
         and len("".join(_brand_words(name))) >= 8
     )
-    locality_review = (
+    local_script_match = (
         not geography_verified
         and distinctive_exact
         and category_exact
         and _unverifiable_locality(city, city_values)
     )
-    brand_review = (
+    variant_brand_match = (
         geography_verified
         and _normal(category) in _CATEGORY_TYPES
         and allowed
         and score < 0.70
         and brand_score >= 0.86
     )
-    if not geography_verified and not locality_review:
+    if not geography_verified and not local_script_match:
         return None
-    if score < 0.70 and not brand_review:
+    if score < 0.70 and not variant_brand_match:
         return None
-    region_values = admin_values | {
-        value for kind in _REGION_TYPES for value in components.get(kind, set())
-    }
-    region_exact = not region or _normal(region) in {_normal(value) for value in region_values}
-    candidate.score = round(score, 4)
-    normalized_name = _normal(name)
-    chain = any(
-        normalized_name == _normal(value) or normalized_name.startswith(_normal(value) + " ")
-        for value in _CHAINS
-    )
-    strong = (
-        not (locality_review or brand_review)
-        and city_exact
-        and score >= 0.96
-        and category_exact
-        and region_exact
-        and not chain
-        and candidate._business_status in {"", "OPERATIONAL"}
-    )
-    return candidate, strong
+    candidate.score = round(max(score, brand_score if variant_brand_match else 0), 4)
+    return candidate
 
 
 async def _details(client, key: str, place_id: str) -> GoogleCandidate | None:
@@ -512,7 +525,13 @@ async def search_google_dream_place(
     region: str | None = None,
     category: str | None = None,
 ) -> GoogleSearchResult:
-    """At most two requests; multi-result or contextual ambiguity stays reviewable."""
+    """Use Google's first compatible result, without a user-approval step.
+
+    Google ranks its text results for the complete name and location query. Keep
+    that order after rejecting mismatched countries, cities, names and venue
+    types; sorting opaque place IDs must never decide which branch is pinned.
+    At most two provider requests are made, including fresh details.
+    """
     name, city, country, region, category = map(
         _text, (place_name, city, country, region, category)
     )
@@ -526,7 +545,7 @@ async def search_google_dream_place(
         )
     ):
         return GoogleSearchResult(
-            status="needs_review",
+            status="not_found",
             message="Add a specific place name, city and country to find its location.",
         )
     if any(
@@ -534,7 +553,7 @@ async def search_google_dream_place(
         for value in (name, city, country, region, category)
     ):
         return GoogleSearchResult(
-            status="needs_review",
+            status="not_found",
             message="Check the place name and location before searching again.",
         )
     query = {
@@ -584,19 +603,12 @@ async def search_google_dream_place(
         raise RetryableDreamPlaceLookupError(
             "Google place lookup is temporarily unavailable."
         ) from None
-    unique = {candidate.id: (candidate, strong) for candidate, strong in matches}
-    ordered = sorted(unique.values(), key=lambda item: (-item[0].score, item[0].id))
-    if not ordered:
+    if not matches:
         return GoogleSearchResult(
             status="not_found", message="No reliable Google place match was found."
         )
-    status = "resolved" if singleton and len(ordered) == 1 and ordered[0][1] else "needs_review"
     return GoogleSearchResult(
-        status=status,
-        candidates=[item[0] for item in ordered[:5]],
-        message=(
-            None
-            if status == "resolved"
-            else "Check the place name and address before adding it to your map."
-        ),
+        status="resolved",
+        candidates=[matches[0]],
+        message="Location found on Google Maps.",
     )

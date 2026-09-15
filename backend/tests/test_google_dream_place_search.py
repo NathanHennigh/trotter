@@ -111,7 +111,7 @@ def test_singleton_uses_ids_only_then_details_pro_and_verifies_identity(monkeypa
 @pytest.mark.parametrize("input_field", ["place_name", "city", "country"])
 @pytest.mark.parametrize("value", [None, "", "---", "???", "Unknown", "N/A"])
 def test_missing_identity_never_queries(input_field, value):
-    assert lookup(**{input_field: value}).status == "needs_review"
+    assert lookup(**{input_field: value}).status == "not_found"
 
 
 @pytest.mark.parametrize(
@@ -123,8 +123,8 @@ def test_missing_identity_never_queries(input_field, value):
         {"city": "Oaxaca\nLondon"},
     ],
 )
-def test_generic_or_unsafe_inputs_require_review(updates):
-    assert lookup(**updates).status == "needs_review"
+def test_generic_or_unsafe_inputs_do_not_invent_a_pin(updates):
+    assert lookup(**updates).status == "not_found"
 
 
 def test_explicit_google_key_required_even_with_geoapify_or_legacy_configuration(monkeypatch):
@@ -146,7 +146,7 @@ def test_empty_search_is_not_found_without_details(monkeypatch, payload):
     assert lookup().status == "not_found" and len(calls) == 1
 
 
-def test_multiple_ids_use_one_pro_search_and_never_auto_choose_first(monkeypatch):
+def test_multiple_ids_use_google_relevance_order_not_opaque_place_id_sort(monkeypatch):
     first, second = place(), place(
         id="synthetic-place-2", formattedAddress="34 Other Road, Oaxaca, Mexico"
     )
@@ -155,20 +155,21 @@ def test_multiple_ids_use_one_pro_search_and_never_auto_choose_first(monkeypatch
         [{"places": [{"id": first["id"]}, {"id": second["id"]}]}, {"places": [second, first]}],
     )
     result = lookup()
-    assert result.status == "needs_review" and len(result.candidates) == 2
+    assert result.status == "resolved" and len(result.candidates) == 1
+    assert result.candidates[0].id == second["id"]
     assert len(calls) == 2 and all(call["method"] == "POST" for call in calls)
     assert "places.displayName" in calls[1]["headers"]["X-Goog-FieldMask"]
 
 
-def test_single_id_with_next_page_preserves_ambiguity(monkeypatch):
+def test_single_id_with_next_page_uses_first_compatible_google_result(monkeypatch):
     calls, _ = responses(
         monkeypatch,
         [{"places": [{"id": "synthetic-place-1"}], "nextPageToken": "more"}, {"places": [place()]}],
     )
-    assert lookup().status == "needs_review" and calls[1]["method"] == "POST"
+    assert lookup().status == "resolved" and calls[1]["method"] == "POST"
 
 
-def test_multiple_ids_cannot_become_automatic_after_other_results_filtered(monkeypatch):
+def test_multiple_ids_automatically_use_compatible_result_after_filtering(monkeypatch):
     responses(
         monkeypatch,
         [
@@ -177,7 +178,21 @@ def test_multiple_ids_cannot_become_automatic_after_other_results_filtered(monke
         ],
     )
     result = lookup()
-    assert result.status == "needs_review" and len(result.candidates) == 1
+    assert result.status == "resolved" and len(result.candidates) == 1
+
+
+def test_higher_ranked_wrong_country_does_not_override_a_later_valid_match(monkeypatch):
+    wrong = place(id="first-wrong-country", addressComponents=[
+        component("locality", "Oaxaca"), component("country", "Spain", "ES"),
+    ])
+    correct = place(id="second-correct-place")
+    responses(monkeypatch, [
+        {"places": [{"id": wrong["id"]}, {"id": correct["id"]}]},
+        {"places": [wrong, correct]},
+    ])
+    result = lookup()
+    assert result.status == "resolved"
+    assert result.candidates[0].id == correct["id"]
 
 
 @pytest.mark.parametrize(
@@ -234,7 +249,7 @@ def test_precise_name_in_wrong_city_is_rejected(monkeypatch):
     assert lookup().status == "not_found"
 
 
-def test_admin_geography_recovers_krabi_cafe_as_review_only(monkeypatch):
+def test_admin_geography_recovers_krabi_cafe_automatically(monkeypatch):
     data = place(
         displayName={"text": "Kuan Nom Cafe"},
         addressComponents=[
@@ -245,11 +260,11 @@ def test_admin_geography_recovers_krabi_cafe_as_review_only(monkeypatch):
     )
     singleton(monkeypatch, data)
     result = lookup(place_name="Kuan Nom Saow Cafe", city="Krabi", country="Thailand")
-    assert result.status == "needs_review" and result.candidates[0].city == "Ban Khao Thong"
+    assert result.status == "resolved" and result.candidates[0].city == "Ban Khao Thong"
 
 
 @pytest.mark.parametrize("locality", [None, "Δοκιμή"])
-def test_exact_distinctive_venue_with_missing_or_local_script_city_is_review_only(
+def test_exact_distinctive_venue_with_missing_or_local_script_city_resolves(
     monkeypatch, locality
 ):
     components = [component("country", "Greece", "GR")]
@@ -269,7 +284,7 @@ def test_exact_distinctive_venue_with_missing_or_local_script_city_is_review_onl
         country="Greece",
         category="restaurant",
     )
-    assert result.status == "needs_review" and len(result.candidates) == 1
+    assert result.status == "resolved" and len(result.candidates) == 1
     assert len(calls) == 2
 
 
@@ -332,13 +347,13 @@ def test_readable_contradictory_city_is_not_recovered_by_exact_name(monkeypatch)
         "Lookout HarborGreen Coastal Cafe",
     ],
 )
-def test_compounded_or_romanized_brand_with_extra_descriptors_is_review_only(
+def test_compounded_or_romanized_brand_with_extra_descriptors_resolves(
     monkeypatch, provider_name
 ):
     assert search._name_score("Harbor Green Cafe", provider_name) < 0.70
     calls, _ = singleton(monkeypatch, place(displayName={"text": provider_name}))
     result = lookup(place_name="Harbor Green Cafe")
-    assert result.status == "needs_review" and len(result.candidates) == 1
+    assert result.status == "resolved" and len(result.candidates) == 1
     assert len(calls) == 2
 
 
@@ -361,7 +376,38 @@ def test_variant_brand_cannot_hide_a_conflicting_branch_number(monkeypatch):
     assert lookup(place_name="Harbor Green 2 Cafe").status == "not_found"
 
 
-def test_variant_brand_with_known_catering_type_difference_remains_review_only(monkeypatch):
+@pytest.mark.parametrize("provider_name", ["Harbor Green 3 Cafe", "Harbor Green Cafe", "Harbor Green 12 Cafe"])
+def test_whole_name_similarity_never_overrides_conflicting_branch_numbers(monkeypatch, provider_name):
+    assert search._name_score("Harbor Green 2 Cafe", provider_name) >= 0.70
+    singleton(monkeypatch, place(displayName={"text": provider_name}))
+    assert lookup(place_name="Harbor Green 2 Cafe").status == "not_found"
+
+
+@pytest.mark.parametrize("kind,wanted,actual", [
+    ("neighborhood", "North Shore", "South Shore"),
+    ("sublocality_level_1", "Brooklyn", "Manhattan"),
+    ("administrative_area_level_1", "TX", "CA"),
+    ("administrative_area_level_1", "Northern Province", "Southern Province"),
+    ("administrative_area_level_2", "North District", "South District"),
+])
+def test_known_comparable_region_conflict_rejects_same_name_place(monkeypatch, kind, wanted, actual):
+    singleton(monkeypatch, place(addressComponents=[
+        component("locality", "Oaxaca"), component("country", "Mexico", "MX"),
+        component(kind, actual),
+    ]))
+    assert lookup(region=wanted).status == "not_found"
+
+
+def test_admin_region_and_city_equivalence_keeps_krabi_local_venue(monkeypatch):
+    singleton(monkeypatch, place(displayName={"text": "Kuan Nom Cafe"}, addressComponents=[
+        component("locality", "Ban Khao Thong"), component("sublocality", "Khao Thong"),
+        component("administrative_area_level_2", "Mueang Krabi District"),
+        component("country", "Thailand", "TH"),
+    ]))
+    assert lookup(place_name="Kuan Nom Saow Cafe", city="Krabi", country="Thailand", region="Mueang Krabi District").status == "resolved"
+
+
+def test_variant_brand_with_compatible_catering_type_resolves(monkeypatch):
     singleton(
         monkeypatch,
         place(
@@ -370,7 +416,7 @@ def test_variant_brand_with_known_catering_type_difference_remains_review_only(m
         ),
     )
     result = lookup(place_name="Harbor Green Cafe", category="cafe")
-    assert result.status == "needs_review" and len(result.candidates) == 1
+    assert result.status == "resolved" and len(result.candidates) == 1
 
 
 def test_short_single_word_brand_is_not_matched_to_a_long_descriptor(monkeypatch):
@@ -411,25 +457,25 @@ def test_country_alias_region_and_accent_match(monkeypatch):
 @pytest.mark.parametrize(
     "updates", [{"region": "Another Neighborhood"}, {"category": "unknown"}, {"category": None}]
 )
-def test_unverified_region_or_category_requires_confirmation(monkeypatch, updates):
+def test_exact_venue_in_matching_city_does_not_require_category_approval(monkeypatch, updates):
     singleton(monkeypatch)
-    assert lookup(**updates).status == "needs_review"
+    assert lookup(**updates).status == "resolved"
 
 
 @pytest.mark.parametrize("name", ["Starbucks", "Starbucks Reserve", "Hilton Garden Inn"])
-def test_known_chain_is_never_chosen_automatically(monkeypatch, name):
+def test_known_chain_uses_google_match_for_saved_city(monkeypatch, name):
     singleton(monkeypatch, place(displayName={"text": name}))
-    assert lookup(place_name=name).status == "needs_review"
+    assert lookup(place_name=name).status == "resolved"
 
 
-def test_catering_type_variation_is_reviewable(monkeypatch):
+def test_compatible_catering_type_variation_is_automatic(monkeypatch):
     singleton(
         monkeypatch,
         place(
             types=["greek_restaurant", "restaurant", "food", "point_of_interest", "establishment"]
         ),
     )
-    assert lookup(category="cafe").status == "needs_review"
+    assert lookup(category="cafe").status == "resolved"
     singleton(
         monkeypatch,
         place(
@@ -440,9 +486,9 @@ def test_catering_type_variation_is_reviewable(monkeypatch):
 
 
 @pytest.mark.parametrize("status", ["CLOSED_TEMPORARILY", "FUTURE_OPENING"])
-def test_non_operational_business_requires_review(monkeypatch, status):
+def test_temporarily_closed_or_future_opening_venue_can_still_be_saved(monkeypatch, status):
     singleton(monkeypatch, place(businessStatus=status))
-    assert lookup().status == "needs_review"
+    assert lookup().status == "resolved"
 
 
 def test_attributions_are_preserved_without_provider_raw_payload(monkeypatch):
@@ -528,7 +574,8 @@ def test_total_request_budget_is_hard_bounded(monkeypatch):
         ],
     )
     result = lookup()
-    assert len(calls) == 2 and len(result.candidates) == 5 and result.status == "needs_review"
+    assert len(calls) == 2 and len(result.candidates) == 1 and result.status == "resolved"
+    assert result.candidates[0].id == "place-0"
 
 
 def test_fresh_details_confirms_same_id_without_rebinding(monkeypatch):

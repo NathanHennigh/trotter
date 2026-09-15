@@ -1,4 +1,7 @@
+import asyncio
+
 import pytest
+from sqlalchemy.orm import sessionmaker
 
 from app.models import Dream, DreamItem, DreamLocation, DreamGoogleIdentity
 from app.services import dream_locations as locations
@@ -45,6 +48,27 @@ def test_fresh_details_are_authenticated_no_store_and_never_persisted(test_db,te
     assert listed.json()[0]['location_candidate_ids']==[CANDIDATE['id']]
     assert listed.json()[0]['location_candidates']==[]
     assert len(calls)==1
+
+
+def test_background_result_is_immediately_mappable_without_confirmation_endpoint(test_db, test_user, client, google_item):
+    row, added = locations.enqueue_location(test_db, google_item, force=True, now=NOW)
+    assert added
+    test_db.commit()
+    async def resolver(*_):
+        return {"provider": "google_places", "status": "resolved", "candidates": [CANDIDATE]}
+    sessions = sessionmaker(bind=test_db.get_bind(), autoflush=False)
+    assert asyncio.run(locations.resolve_location_job(row.id, session_factory=sessions, resolver=resolver, now=NOW)) == "resolved"
+    test_db.expire_all()
+    response = client.get("/dream-items", headers={"X-Trotter-Maps": "google"})
+    assert response.headers["cache-control"] == "private, no-store"
+    item = response.json()[0]
+    assert item["location_status"] == "resolved"
+    assert item["location_user_confirmed"] is False
+    assert item["location_place_id"] == CANDIDATE["id"]
+    assert (item["latitude"], item["longitude"]) == (40.4, -3.7)
+    assert "query_place_id=google-place-a" in item["google_maps_url"]
+    assert item["place_name"] == "Original user label" and item["summary"] == "Original notes"
+    assert item["location_address"] is None and item["location_candidates"] == []
 
 
 def test_foreign_owner_details_and_confirmation_never_call_provider(test_db,test_user,client,google_item,monkeypatch):

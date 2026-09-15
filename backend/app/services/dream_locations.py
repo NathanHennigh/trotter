@@ -319,6 +319,12 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
                 raise ValueError("Invalid location candidate")
             # Links are derived from validated coordinates, never provider-supplied arbitrary URLs.
             candidate["google_maps_url"] = f"https://www.google.com/maps/search/?api=1&query={candidate['latitude']},{candidate['longitude']}"
+        # Older providers/workers returned usable Google matches for approval.
+        # A background match now populates the map directly; it is still an
+        # automatic result, never evidence that the user confirmed a place.
+        if result["provider"] == "google_places" and result["status"] == "needs_review":
+            result["status"] = "resolved" if candidates else "not_found"
+            candidates = result["candidates"] = candidates[:1]
         if result["status"] == "resolved" and len(candidates) != 1:
             raise ValueError("Resolved location requires one candidate")
     except RetryableDreamPlaceLookupError:

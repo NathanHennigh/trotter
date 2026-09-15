@@ -245,7 +245,8 @@ def test_no_match_or_configuration_problem_retains_save_without_fake_pin(session
     add_item(sessions)
     before = snapshot(sessions)
     job_id, _ = enqueue(sessions)
-    assert run_job(sessions, job_id, status, []) == status
+    # Empty Google results no longer stop at an approval step.
+    assert run_job(sessions, job_id, status, []) == ("not_found" if status == "needs_review" else status)
     assert snapshot(sessions) == before
     with sessions() as db:
         item = db.get(DreamItem, 1)
