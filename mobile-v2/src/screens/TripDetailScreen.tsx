@@ -229,7 +229,7 @@ export function TripDetailScreen({
                       {String(groupIndex + 1).padStart(2, "0")}
                     </Text>
                     <View style={{ flex: 1 }}>
-                      <Text style={s.groupTitle}>{group.title}</Text>
+                      <Text style={[s.groupTitle, stackTotals && s.largeGroupTitle]}>{group.title}</Text>
                       <Text style={s.groupDate}>{group.dates}</Text>
                     </View>
                   </View>
@@ -416,6 +416,7 @@ const s = StyleSheet.create({
     lineHeight: 28,
     color: walletColors.ink,
   },
+  largeGroupTitle: { fontSize: 21, lineHeight: 26 },
   groupDate: {
     fontFamily: fonts.sansRegular,
     fontSize: 12,

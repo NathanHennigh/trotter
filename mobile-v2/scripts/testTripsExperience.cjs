@@ -161,11 +161,13 @@ test('source capture preserves the current scoped wallet and ignores callbacks f
   assert.deepEqual(trip.segments, [earlier, later]); h.dispose();
 });
 
-test('popup wallet heading fits to its inset width rather than the screen width', () => {
+test('popup and source headings have identical usable text widths while respecting actual wallet insets', () => {
   const fitArgs = [], h = host('components/world-window/trips/WalletCover.tsx', 'WalletHeading', { width: 420, fitArgs });
   h.render({ trip, compact: true, availableWidth: 376 });
-  assert.equal(fitArgs.at(-1)[2], 298);
-  h.render({ trip, availableWidth: 376 }); assert.equal(fitArgs.at(-1)[2], 292);
+  assert.equal(fitArgs.at(-1)[2], 338);
+  h.render({ trip, availableWidth: 376 }); assert.equal(fitArgs.at(-1)[2], 332);
+  h.render({ trip, compact: true }); const sourceWidth = fitArgs.at(-1)[2];
+  h.render({ trip, compact: true, availableWidth: 380 }); assert.equal(fitArgs.at(-1)[2], sourceWidth);
   h.render({ trip }); assert.equal(fitArgs.at(-1)[2], 336); h.dispose();
 });
 

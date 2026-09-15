@@ -31,7 +31,12 @@ export function WalletHeading({
   const gradient = React.useId();
   const { width, fontScale } = useWindowDimensions();
   const baseSize = compact ? 27 : 33;
-  const titleSize = fitDisplayFont(trip.city || trip.title, baseSize, (availableWidth ?? getMobileVisualWidth(width)) - (compact ? 78 : 84), fontScale);
+  // Explicit width describes the wallet itself; the list's implicit viewport
+  // also includes its 20px margins. Both paths must yield identical title sizes.
+  const titleWidth = availableWidth != null
+    ? availableWidth - (compact ? 38 : 44)
+    : getMobileVisualWidth(width) - (compact ? 78 : 84);
+  const titleSize = fitDisplayFont(trip.city || trip.title, baseSize, titleWidth, fontScale);
   return (
     <View style={[s.heading, compact && s.headingCompact]}>
       <Svg
