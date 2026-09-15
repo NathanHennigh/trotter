@@ -266,11 +266,11 @@ export function ActivityChart({
 }
 const styles = StyleSheet.create({
   chart: {
-    backgroundColor: "#e4eeea",
+    backgroundColor: colors.paperSoft,
     paddingHorizontal: 15,
     paddingVertical: 18,
-    borderBottomWidth: 2,
-    borderBottomColor: "#9db9b4",
+    borderBottomWidth: 1,
+    borderBottomColor: colors.paperBorder,
   },
   switch: {
     flexDirection: "row",

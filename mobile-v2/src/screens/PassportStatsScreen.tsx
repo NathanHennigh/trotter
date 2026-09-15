@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -67,7 +66,7 @@ export function PassportStatsScreen({
   initialAirport?: string;
 }) {
   const insets = useSafeAreaInsets(),
-    { width, fontScale } = useWindowDimensions(),
+    { width } = useWindowDimensions(),
     visualWidth = getMobileVisualWidth(width);
   const { trips, profile, status, refresh, lastGmailSyncedAt } =
     useTravelTrips();
@@ -233,45 +232,6 @@ export function PassportStatsScreen({
                   .at(-1)}
               />
             </View>
-            {archive.records.length > 0 && (
-              <View style={styles.records}>
-                <Text accessibilityRole="header" style={styles.sectionTitle}>
-                  Travel records
-                </Text>
-                {archive.records.map((record) => (
-                  <Pressable
-                    key={record.label}
-                    disabled={!record.trip || !openTrip}
-                    accessibilityRole={
-                      record.trip && openTrip ? "button" : undefined
-                    }
-                    onPress={() => record.trip && openTrip?.(record.trip)}
-                    style={({ pressed }) => [
-                      styles.record,
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <Text style={styles.recordLabel}>{record.label}</Text>
-                    <View
-                      style={[
-                        styles.recordCopy,
-                        fontScale >= 1.35 && styles.recordStacked,
-                      ]}
-                    >
-                      <Text style={styles.recordValue}>{record.value}</Text>
-                      <Text
-                        style={[
-                          styles.recordDetail,
-                          fontScale >= 1.35 && styles.recordDetailLarge,
-                        ]}
-                      >
-                        {record.detail}
-                      </Text>
-                    </View>
-                  </Pressable>
-                ))}
-              </View>
-            )}
           </View>
         </ScrollView>
       </View>
@@ -340,8 +300,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.paperSoft,
   },
-  recordStacked: { flexDirection: "column", alignItems: "flex-start" },
-  recordDetailLarge: { maxWidth: "100%", textAlign: "left" },
   book: { alignItems: "center", marginTop: 8, marginBottom: 24 },
   content: { paddingHorizontal: 24 },
   activity: { marginTop: 28 },
@@ -351,33 +309,5 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: colors.ink,
     marginBottom: 16,
-  },
-  records: { marginTop: 28 },
-  record: {
-    paddingVertical: 13,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.paperBorder,
-    gap: 5,
-  },
-  recordCopy: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
-  recordLabel: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    color: colors.mutedInk,
-  },
-  recordValue: {
-    flex: 1,
-    fontFamily: fonts.display,
-    fontSize: 21,
-    lineHeight: 24,
-    color: colors.ink,
-  },
-  recordDetail: {
-    maxWidth: 90,
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    lineHeight: 19.5,
-    color: colors.mutedInk,
-    textAlign: "right",
   },
 });

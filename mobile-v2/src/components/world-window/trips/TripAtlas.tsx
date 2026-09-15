@@ -1,15 +1,6 @@
 import React from "react";
 import { StyleSheet, View } from "react-native";
-import Svg, {
-  Circle,
-  Defs,
-  G,
-  LinearGradient,
-  Path,
-  Rect,
-  Stop,
-  Text,
-} from "react-native-svg";
+import Svg, { Circle, G, Path, Rect, Text } from "react-native-svg";
 import world from "../../../data/worldCountries.json";
 import type { TripSegmentSummary } from "../../../data/trotterMock";
 import { fonts } from "../../../theme/trotterTheme";
@@ -33,7 +24,6 @@ export function TripAtlas({
     () => tripAtlasGeometry(segments, world, destination, profile ? { maxLabels: 7, prioritizeByFrequency: true } : {}),
     [segments, destination, profile],
   );
-  const fold = React.useId().replace(/:/g, "");
   return (
     <View
       accessible
@@ -106,33 +96,15 @@ export function TripAtlas({
           </G>
         ))}
         {!profile && (
-          <>
-            <Defs>
-              <LinearGradient id={fold} x1="0" y1="0" x2="1" y2="0">
-                <Stop offset="0" stopColor="#63714c" stopOpacity={0} />
-                <Stop offset="0.42" stopColor="#63714c" stopOpacity={0.025} />
-                <Stop offset="0.5" stopColor="#fffdf3" stopOpacity={0.5} />
-                <Stop offset="0.58" stopColor="#6c7350" stopOpacity={0.08} />
-                <Stop offset="1" stopColor="#6c7350" stopOpacity={0} />
-              </LinearGradient>
-            </Defs>
-            <Rect
-              x={194}
-              y={0}
-              width={12}
-              height={230}
-              fill={`url(#${fold})`}
-            />
-            <Rect
-              x={2.5}
-              y={2.5}
-              width={395}
-              height={225}
-              stroke="#f8f3e4"
-              strokeOpacity={0.2}
-              strokeWidth={5}
-            />
-          </>
+          <Rect
+            x={2.5}
+            y={2.5}
+            width={395}
+            height={225}
+            stroke="#f8f3e4"
+            strokeOpacity={0.2}
+            strokeWidth={5}
+          />
         )}
       </Svg>
     </View>
