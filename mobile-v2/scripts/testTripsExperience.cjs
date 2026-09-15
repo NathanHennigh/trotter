@@ -217,29 +217,30 @@ test('popup and source headings have identical usable text widths while respecti
   h.render({ trip }); assert.equal(fitArgs.at(-1)[2], 336); h.dispose();
 });
 
-test('year scope counts departure-year legs but opens the preserved complete trip', () => {
+test('Trips shows complete journeys across years with no year tabs or hidden year scope', () => {
   const opened = [], h = host('screens/TripsListScreen.tsx', 'TripsListScreen', { service: { trips: [trip] } });
-  const props = { active: 'trips', onChange: noop, onOpenTrip: (...args) => opened.push(args), initialYear: '2026', scopeEpoch: 1 };
+  const props = { active: 'trips', onChange: noop, onOpenTrip: (...args) => opened.push(args), resetEpoch: 1 };
   h.render(props); const tree = h.render(); const list = find(tree, 'FlatList');
-  assert.equal(list.props.data.length, 1); assert.deepEqual(list.props.data[0].segments, [later]);
+  assert.equal(list.props.data.length, 1); assert.deepEqual(list.props.data[0].segments, [earlier, later]);
+  assert(!nodes(tree).some(node => node.props?.accessibilityRole === 'tab'));
   const wallet = find(list.props.renderItem({ item: list.props.data[0], index: 0 }), 'WalletCover');
-  assert.equal(wallet.props.trip.flightCount, 1); assert.equal(wallet.props.totalFlightCount, 2); assert.equal(wallet.props.scopeYear, '2026');
+  assert.equal(wallet.props.trip.flightCount, 2); assert.equal(wallet.props.scopeYear, undefined);
   const origin = { x: 0, y: 100, width: 400, height: 250 }; wallet.props.onPress(origin);
   assert.strictEqual(opened[0][0], trip); assert.equal(opened[0][1], undefined); assert.equal(opened[0][2], origin);
   assert.deepEqual(trip.segments, [earlier, later]); h.dispose();
 });
 
-test('retained Trips keeps search until an explicit scope epoch changes and All years clears the scope', () => {
-  let clears = 0;
+test('retained Trips keeps search, while a direct Home entry or Show all trips restores the whole archive', () => {
   const h = host('screens/TripsListScreen.tsx', 'TripsListScreen', { service: { trips: [trip] } });
-  const props = { active: 'trips', onChange: noop, initialYear: '2026', scopeEpoch: 1, onClearYear: () => clears++ };
+  const props = { active: 'trips', onChange: noop, resetEpoch: 1 };
   h.render(props); let tree = h.render();
   find(tree, 'TextInput').props.onChangeText('No such city'); tree = h.render();
   assert.equal(find(tree, 'FlatList').props.data.length, 0);
   tree = h.render(props); assert.equal(find(tree, 'TextInput').props.value, 'No such city');
-  h.render({ ...props, scopeEpoch: 2 }); tree = h.render(); assert.equal(find(tree, 'TextInput').props.value, '');
-  const all = nodes(tree).find(node => node.props?.accessibilityRole === 'tab' && texts(node).some(value => value.startsWith('All years')));
-  all.props.onPress(); tree = h.render(); assert.equal(clears, 1); assert.equal(find(tree, 'FlatList').props.data[0].segments.length, 2);
+  find(tree, 'WWEmpty').props.action.props.onPress(); tree = h.render();
+  assert.equal(find(tree, 'TextInput').props.value, ''); assert.equal(find(tree, 'FlatList').props.data[0].segments.length, 2);
+  find(tree, 'TextInput').props.onChangeText('Another search'); tree = h.render();
+  h.render({ ...props, resetEpoch: 2 }); tree = h.render(); assert.equal(find(tree, 'TextInput').props.value, '');
   h.dispose();
 });
 
@@ -323,6 +324,35 @@ test('wallet motion pins its initial flight snapshot and defers network work unt
   h.dispose();
 });
 
+test('top-header dismissal never wraps flight scrolling, and drag freezing never refetches detail', async () => {
+  let calls = 0;
+  const service = { trips: [{ ...trip, backendId: 1 }], loadTripDetail: async () => { calls++; return service.trips[0]; } };
+  const h = host('screens/TripDetailScreen.tsx', 'TripDetailScreen', { service });
+  const wrapper = heading => ({ type: 'WalletHeaderPan', props: { children: [heading] } });
+  const props = { trip: service.trips[0], active: 'trips', onBack: noop, onChange: noop,
+    popup: true, walletHeader: wrapper, walletDragging: false, freezeUpdates: false };
+  let tree = h.render(props); await flush(); tree = h.render();
+  const header = find(tree, 'WalletHeaderPan');
+  assert(header); assert(find(header, 'WalletHeading'));
+  assert(!find(header, 'TripAtlas')); assert(!find(header, 'FlatList'));
+  assert.equal(find(tree, 'FlatList').props.scrollEnabled, true);
+  assert.equal(calls, 1);
+  tree = h.render({ ...props, walletDragging: true, freezeUpdates: true });
+  assert.equal(find(tree, 'FlatList').props.scrollEnabled, false, 'Only an active header drag suspends itinerary scrolling');
+  service.trips = [{ ...service.trips[0], segments: [...trip.segments, segment('added-return', '2026-01-09T11:00:00Z', '2026-01-09T13:00:00Z', 'IAH', 'DFW')] }];
+  tree = h.render();
+  assert.equal(find(tree, 'FlatList').props.data.length, 2, 'Provider updates cannot shift the paper under the finger');
+  tree = h.render({ ...props, walletDragging: false, freezeUpdates: true });
+  assert.equal(find(tree, 'FlatList').props.scrollEnabled, true);
+  assert.equal(find(tree, 'FlatList').props.data.length, 2, 'The returning spring keeps the same map and flight layout');
+  tree = h.render(props); await flush(); tree = h.render();
+  assert.equal(find(tree, 'FlatList').props.data.at(-1).id, 'added-return', 'Queued provider changes reappear after settling');
+  assert.equal(calls, 1, 'Canceling or settling a header drag must not trigger another detail request');
+  tree = h.render({ ...props, popup: false });
+  assert(!find(tree, 'WalletHeaderPan'), 'Standalone itinerary keeps its ordinary navigation');
+  assert(button(tree, 'Back to trips')); h.dispose();
+});
+
 for (const reducedMotion of [true, false]) test(`overview stays at top; exact Home flight entry focuses only that flight (reduced motion ${reducedMotion})`, () => {
   const scrolls = [], h = host('screens/TripDetailScreen.tsx', 'TripDetailScreen', { reducedMotion });
   const props = { trip, active: 'trips', onBack: noop, onChange: noop };
@@ -358,9 +388,9 @@ test('boarding pass shows both local dates and the day change; large type moves 
 test('narrow large text stacks counts, full airport endpoints, group headings and complete totals', () => {
   const options = { width: 320, fontScale: 2, service: { trips: [trip] } };
   const listHost = host('screens/TripsListScreen.tsx', 'TripsListScreen', options);
-  const listTree = listHost.render({ active: 'trips', onChange: noop, initialYear: '2026' });
+  const listTree = listHost.render({ active: 'trips', onChange: noop });
   assert.equal(find(listTree, 'WWHeader').props.action, undefined);
-  assert(texts(listTree).some(value => value === '1 of 1 trips')); listHost.dispose();
+  assert(texts(listTree).some(value => value === '1 trip')); listHost.dispose();
   const detailHost = host('screens/TripDetailScreen.tsx', 'TripDetailScreen', options);
   const detailTree = detailHost.render({ trip, active: 'trips', onBack: noop, onChange: noop });
   const list = find(detailTree, 'FlatList');

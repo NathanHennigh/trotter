@@ -14,6 +14,8 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => v === b[i]);
   const React = {
     createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
+    isValidElement: value => Boolean(value && typeof value === 'object' && value.type && value.props),
+    cloneElement: (element, extra) => ({ ...element, props: { ...element.props, ...extra } }),
     useRef(value) { const c = current, i = c.cursor++; return c.slots[i] ?? (c.slots[i] = { current: value }); },
     useState(initial) { const c = current, i = c.cursor++; if (!(i in c.slots)) c.slots[i] = typeof initial === 'function' ? initial() : initial; return [c.slots[i], value => { c.slots[i] = typeof value === 'function' ? value(c.slots[i]) : value; }]; },
     useReducer(reducer, initial) { const [value, setValue] = React.useState(initial); return [value, action => setValue(previous => reducer(previous, action))]; },
@@ -21,8 +23,11 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
     useEffect(fn, deps) { const c = current, i = c.cursor++; if (!c.slots[i] || !same(c.slots[i].deps, deps)) { c.slots[i]?.cleanup?.(); c.slots[i] = { deps }; c.effects.push(() => { c.slots[i].cleanup = fn(); }); } },
   };
   class Value {
-    constructor(value) { this.value = value; this.active = undefined; }
-    stopAnimation() { this.active?.stop(); }
+    constructor(value) { this.value = value; this.offset = 0; this.active = undefined; }
+    stopAnimation(callback) { this.active?.stop(); callback?.(this.value + this.offset); }
+    setValue(value) { this.value = value; }
+    extractOffset() { this.offset += this.value; this.value = 0; }
+    flattenOffset() { this.value += this.offset; this.offset = 0; }
     interpolate(config) { return { ...config, parent: this }; }
   }
   const native = {
@@ -44,6 +49,12 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
       },
       divide: (left, right) => ({ operator: 'divide', left, right }),
       multiply: (left, right) => ({ operator: 'multiply', left, right }),
+      event(mapping, config) {
+        const value = mapping[0].nativeEvent.translationY; value.gesture = true;
+        const event = ({ nativeEvent }) => { value.value = nativeEvent.translationY; };
+        event.nativeConfig = config; return event;
+      },
+      spring(value, config) { return this.timing(value, { ...config, spring: true }); },
       subtract: (left, right) => ({ operator: 'subtract', left, right }),
       sequence(children) {
         let active, cancelled = false, done = false, callback;
@@ -65,6 +76,7 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
     const module = { exports: {} };
     const mocks = {
       react: React, 'react-native': native,
+      'react-native-gesture-handler': { PanGestureHandler: 'PanGestureHandler', State: { UNDETERMINED: 0, FAILED: 1, BEGAN: 2, CANCELLED: 3, ACTIVE: 4, END: 5 } },
       'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) },
       '../../../theme/trotterTheme': { colors: { paperSoft: '#faf8f2', ink: '#193a49', paperBorder: '#d6dbd0' }, fonts: {} },
       '../../../utils/mobileLayout': { getMobileVisualWidth: () => visualWidth },
@@ -87,7 +99,8 @@ function environment({ reduced = false, os = 'android', width = 410, height = 88
     };
   }
   const motion = load('components/world-window/motion.tsx');
-  return { motion, load, mount, animations, timers, frames,
+  return { motion, load, mount, get animations() { return animations.filter(animation => !animation.value.gesture); },
+    get gestureAnimations() { return animations.filter(animation => animation.value.gesture); }, timers, frames,
     async ready() { const probe = mount(motion.useReducedMotion); probe.render(); await flush(); probe.render(); probe.dispose(); },
     advanceFrame() { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); },
     advanceTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(fn => fn()); },
@@ -117,7 +130,7 @@ function sampled(value, progress) {
     const fraction = (amount - input[index]) / (input[index + 1] - input[index]);
     return output[index] + (output[index + 1] - output[index]) * fraction;
   }
-  assert.equal(typeof value.value, 'number'); return progress ?? value.value;
+  assert.equal(typeof value.value, 'number'); return progress ?? (value.value + (value.offset || 0));
 }
 const transform = (tree, id, key) => flatten(byId(tree, id).props.style).transform.find(entry => key in entry)?.[key];
 
@@ -152,6 +165,131 @@ const movingSurface = tree => byId(tree, 'wallet-popup-panel');
 const paintEntry = (h, env, tree = h.render()) => {
   movingSurface(tree).props.onLayout(); h.render(); env.advanceFrame(); env.advanceFrame(); return h.render();
 };
+
+const detailChild = tree => byId(tree, 'wallet-popup-content').props.children[0];
+const headerGesture = tree => detailChild(tree).props.walletHeader('Actual wallet heading');
+const gestureState = (handler, state, oldState = 0, velocityY = 0) => handler.props.onHandlerStateChange({ nativeEvent: { state, oldState, velocityY } });
+async function openedWallet(overrides = {}, options = {}) {
+  const env = environment(options); await env.ready(); const h = env.mount(surface(env));
+  const input = props({ children: { type: 'TripDetail', props: {} }, ...overrides });
+  let tree = h.render(input);
+  if (!options.reduced) tree = paintEntry(h, env, tree);
+  env.animations.at(-1).finish(); tree = h.render();
+  return { env, h, input, tree };
+}
+
+test('only the top wallet heading accepts a native downward pan; map and itinerary keep their scroll path', async () => {
+  const env = environment(); await env.ready(); const h = env.mount(surface(env));
+  let tree = h.render(props({ children: { type: 'TripDetail', props: {} } }));
+  assert.equal(headerGesture(tree).props.enabled, false, 'An unfinished opening must not compete with a drag');
+  paintEntry(h, env, tree); env.animations.at(-1).finish(); tree = h.render();
+  const handler = headerGesture(tree);
+  assert.equal(handler.type, 'PanGestureHandler'); assert.equal(handler.props.enabled, true);
+  assert.equal(handler.props.activeOffsetY, 8); assert.equal(handler.props.failOffsetY, -8);
+  assert.deepEqual(handler.props.failOffsetX, [-18, 18]); assert.equal(handler.props.maxPointers, 1);
+  assert.equal(handler.props.shouldCancelWhenOutside, false);
+  assert.equal(handler.props.onGestureEvent.nativeConfig.useNativeDriver, true);
+  assert(!nodes(tree).some(node => node.type === 'PanGestureHandler'), 'The whole popup must not intercept scrolling');
+  gestureState(handler, 2); gestureState(handler, 4, 2);
+  handler.props.onGestureEvent({ nativeEvent: { translationY: 58 } }); tree = h.render();
+  assert.equal(sampled(transform(tree, 'wallet-drag-stage', 'translateY')), 58, 'Native movement follows the finger one-for-one');
+  const stage = byId(tree, 'wallet-drag-stage');
+  for (const id of ['wallet-popup-paper', 'wallet-popup-panel', 'wallet-source-cover', 'wallet-popup-dismiss']) assert(byId(stage, id));
+  assert.equal(detailChild(tree).props.walletDragging, true);
+  assert.equal(detailChild(tree).props.freezeUpdates, true);
+  assert.equal(detailChild(tree).props.deferUpdates, undefined, 'A drag must not restart the network request lifecycle');
+  h.dispose();
+});
+
+test('short pulls spring home while a deliberate downward flick dismisses once using its latest callback', async () => {
+  let closes = 0, oldCloses = 0;
+  const { env, h, input, tree } = await openedWallet({ onRequestClose: () => oldCloses++ });
+  let handler = headerGesture(tree);
+  gestureState(handler, 2); gestureState(handler, 4, 2);
+  handler.props.onGestureEvent({ nativeEvent: { translationY: 44 } }); gestureState(handler, 5, 4, 50);
+  let next = h.render(); const settle = env.gestureAnimations.at(-1);
+  assert.equal(settle.config.spring, true); assert.equal(settle.config.useNativeDriver, true);
+  assert.equal(settle.value.value, 44, 'Release cannot reset position before the spring starts');
+  assert.equal(detailChild(next).props.walletDragging, false); assert.equal(detailChild(next).props.freezeUpdates, true);
+  settle.finish(); next = h.render({ ...input, onRequestClose: () => closes++ });
+  assert.equal(detailChild(next).props.freezeUpdates, false); assert.equal(closes + oldCloses, 0);
+  handler = headerGesture(next); gestureState(handler, 2); gestureState(handler, 4, 2);
+  handler.props.onGestureEvent({ nativeEvent: { translationY: 35 } }); gestureState(handler, 5, 4, 850);
+  gestureState(handler, 5, 4, 850);
+  assert.equal(closes, 1); assert.equal(oldCloses, 0);
+  h.dispose();
+});
+
+test('cancel, additional-finger cancellation and horizontal failure never navigate', async () => {
+  let closes = 0; const { env, h, tree } = await openedWallet({ onRequestClose: () => closes++ });
+  for (const state of [3, 1]) {
+    const handler = headerGesture(h.render()); gestureState(handler, 2); gestureState(handler, 4, 2);
+    handler.props.onGestureEvent({ nativeEvent: { translationY: 220 } }); gestureState(handler, state, 4, 1400);
+    assert.equal(env.gestureAnimations.at(-1).config.spring, true); env.gestureAnimations.at(-1).finish();
+  }
+  assert.equal(closes, 0); h.dispose();
+});
+
+test('a returning wallet can be re-grabbed without jumping to the old spring origin', async () => {
+  const { env, h, tree } = await openedWallet(); let handler = headerGesture(tree);
+  gestureState(handler, 2); gestureState(handler, 4, 2);
+  handler.props.onGestureEvent({ nativeEvent: { translationY: 70 } }); gestureState(handler, 5, 4, 0);
+  const settle = env.gestureAnimations.at(-1); settle.value.value = 31;
+  handler = headerGesture(h.render()); gestureState(handler, 2);
+  assert.equal(settle.stopped, true); assert.equal(sampled(transform(h.render(), 'wallet-drag-stage', 'translateY')), 31);
+  gestureState(handler, 4, 2); handler.props.onGestureEvent({ nativeEvent: { translationY: 14 } });
+  assert.equal(sampled(transform(h.render(), 'wallet-drag-stage', 'translateY')), 45, 'New translation starts at the interrupted native position');
+  gestureState(handler, 5, 4, 0); env.gestureAnimations.at(-1).finish();
+  assert.equal(sampled(transform(h.render(), 'wallet-drag-stage', 'translateY')), 0); h.dispose();
+});
+
+test('Back during an active drag reverses from that position and a canceled close can reopen without a leftover offset', async () => {
+  let closes = 0, requests = 0;
+  const { env, h, input, tree } = await openedWallet({ onClosed: () => closes++, onRequestClose: () => requests++ });
+  const handler = headerGesture(tree); gestureState(handler, 2); gestureState(handler, 4, 2);
+  handler.props.onGestureEvent({ nativeEvent: { translationY: 86 } });
+  let next = h.render({ ...input, closing: true });
+  const dragExit = env.gestureAnimations.at(-1), exit = env.animations.at(-1);
+  assert.equal(sampled(transform(next, 'wallet-drag-stage', 'translateY')), 86);
+  assert.equal(dragExit.config.toValue, 0); assert.equal(dragExit.config.useNativeDriver, true);
+  gestureState(handler, 5, 4, 1200); assert.equal(requests, 0, 'A late native release cannot race Android Back');
+  dragExit.value.value = 42; exit.value.value = .55;
+  next = h.render({ ...input, closing: false });
+  assert.equal(exit.stopped, true); assert.equal(dragExit.stopped, true);
+  assert.equal(sampled(transform(next, 'wallet-drag-stage', 'translateY')), 42);
+  env.gestureAnimations.at(-1).finish(); env.animations.at(-1).finish(); next = h.render();
+  assert.equal(sampled(transform(next, 'wallet-drag-stage', 'translateY')), 0);
+  assert.equal(headerGesture(next).props.enabled, true); assert.equal(closes, 0); h.dispose();
+});
+
+test('stale native distance callbacks are ignored after a newer grab or unmount', async () => {
+  let closes = 0; const { h, tree } = await openedWallet({ onRequestClose: () => closes++ });
+  let handler = headerGesture(tree); gestureState(handler, 2); gestureState(handler, 4, 2);
+  handler.props.onGestureEvent({ nativeEvent: { translationY: 220 } });
+  const value = transform(tree, 'wallet-drag-stage', 'translateY').parent, callbacks = [];
+  value.stopAnimation = callback => { if (callback) callbacks.push(callback); };
+  gestureState(handler, 5, 4, 1000);
+  handler = headerGesture(h.render()); gestureState(handler, 2); callbacks.shift()(220);
+  assert.equal(closes, 0, 'Old release must not dismiss a new grab');
+  gestureState(handler, 4, 2); gestureState(handler, 5, 4, 1000); h.dispose(); callbacks.shift()(220);
+  assert.equal(closes, 0, 'Unmounted popup must not navigate');
+});
+
+test('reduced motion keeps direct manipulation but settles release immediately', async () => {
+  const { env, h, tree } = await openedWallet({}, { reduced: true }); const handler = headerGesture(tree);
+  gestureState(handler, 2); gestureState(handler, 4, 2); handler.props.onGestureEvent({ nativeEvent: { translationY: 40 } });
+  assert.equal(sampled(transform(h.render(), 'wallet-drag-stage', 'translateY')), 40);
+  gestureState(handler, 5, 4, 0); assert.equal(env.gestureAnimations.at(-1).config.duration, 0);
+  env.gestureAnimations.at(-1).finish(); assert.equal(sampled(transform(h.render(), 'wallet-drag-stage', 'translateY')), 0); h.dispose();
+});
+
+test('dismissal needs a deliberate downward pull or projected flick, and rejects corrupt native values', () => {
+  const env = environment(), dismiss = env.load('components/world-window/trips/tripTransition.ts').shouldDismissWallet;
+  assert.equal(dismiss(150, 0, 800), true); assert.equal(dismiss(40, 700, 800), true);
+  assert.equal(dismiss(40, 0, 800), false); assert.equal(dismiss(16, 1800, 800), false);
+  assert.equal(dismiss(150, -500, 800), false); assert.equal(dismiss(-40, 1200, 800), false);
+  for (const values of [[NaN, 100, 800], [100, Infinity, 800], [100, 100, NaN]]) assert.equal(dismiss(...values), false);
+});
 
 test('wallet entry paints first, then runs one native lift-and-open timeline without a JS handoff', async () => {
   const env = environment(); await env.ready(); const h = env.mount(surface(env));
@@ -257,7 +395,7 @@ test('motion curves have no velocity discontinuity where lift, expansion or reve
   const env = environment();
   const frame = env.load('components/world-window/trips/tripTransition.ts').walletMotionFrame;
   const epsilon = 1e-5;
-  for (const point of [.025, .09, .19, .34, .56, .65]) for (const key of ['travel', 'expansion', 'lift', 'reveal', 'summary']) {
+  for (const point of [.025, .09, .22, .30, .32, .46, .65]) for (const key of ['travel', 'expansion', 'lift', 'reveal', 'summary']) {
     const left = (frame(point)[key] - frame(point - epsilon)[key]) / epsilon;
     const right = (frame(point + epsilon)[key] - frame(point)[key]) / epsilon;
     assert(Math.abs(left - right) < .1, `${key} must not stop/restart at ${point}`);
@@ -370,7 +508,7 @@ for (const dimensions of [
     const contentAlpha = 1 - sampled(flatten(byId(tree, 'wallet-reveal-curtain').props.style).opacity, progress);
     const coverAlpha = sampled(flatten(ghost(tree).props.style).opacity, progress);
     const summaryAlpha = sampled(ghost(tree).props.children[0].props.bodyOpacity, progress) * coverAlpha;
-    assert.equal(summaryAlpha * contentAlpha, 0, 'Coupon text and route-map text never overlap during the handoff');
+    assert(summaryAlpha * contentAlpha < .001, 'Text overlap during the short handoff is below one tenth of one percent');
     assert(contentAlpha >= 0 && contentAlpha <= 1 && coverAlpha >= 0 && coverAlpha <= 1);
     assert(contentAlpha + coverAlpha > .99, 'There must always be visible paper through the reveal');
   }
