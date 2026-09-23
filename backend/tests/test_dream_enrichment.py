@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy.orm import sessionmaker
 
 from app.models import DreamEnrichmentJob, DreamItem
 from app.services.dream_enrichment import (
@@ -70,6 +71,108 @@ def test_partial_batch_keeps_already_captured_links(client, test_db, test_user, 
             "https://instagram.com/reel/first", "https://instagram.com/reel/second"]})
     assert test_db.query(DreamItem).one().source_url.endswith("first")
     assert test_db.query(DreamEnrichmentJob).one().status == "queued"
+
+
+@pytest.mark.parametrize("field", ["caption", "shared_text"])
+def test_duplicate_adds_missing_caption_and_cold_replay_keeps_one_generation(client, test_db, test_user, field):
+    source = "https://instagram.com/reel/late-caption"
+    first = client.post("/dreams/share", json={"source_url": source, "shared_text": source}).json()
+    caption = "Garden Cafe in Madrid, Spain."
+    duplicate = client.post("/dreams/share", json={"source_url": source, field: caption}).json()
+    assert duplicate["duplicate"] and duplicate["dream_item_id"] == first["dream_item_id"]
+    assert duplicate["status"] == "processing"
+    item = test_db.get(DreamItem, first["dream_item_id"])
+    assert item.caption == caption and item.enrichment.generation == 2
+    assert item.enrichment.status == "queued" and item.enrichment.attempts == 0
+    if field == "shared_text":
+        assert item.raw_metadata_json["shared_text"] == caption
+    # Re-delivery after the client loses the acknowledgement uses only persisted
+    # server state and cannot reset attempts or create another job generation.
+    test_db.close()
+    replay = client.post("/dreams/share", json={"source_url": source, field: caption}).json()
+    assert replay == duplicate
+    assert test_db.get(DreamItem, first["dream_item_id"]).enrichment.generation == 2
+    assert test_db.query(DreamEnrichmentJob).count() == 1
+
+
+def test_duplicate_caption_supersedes_worker_already_reading_url(client, test_db, test_user):
+    source = "https://instagram.com/reel/racing-caption"
+    item_id = client.post("/dreams/share", json={"source_url": source}).json()["dream_item_id"]
+    job_id = test_db.query(DreamEnrichmentJob).one().id
+    factory = sessionmaker(bind=test_db.get_bind(), autoflush=False)
+    test_db.commit()
+    caption = "The late caption names Garden Cafe in Madrid, Spain."
+    def stale_reader(claim):
+        assert claim["caption"] is None
+        accepted = client.post("/dreams/share", json={"source_url": source, "shared_text": caption})
+        assert accepted.status_code == 200 and accepted.json()["status"] == "processing"
+        return result()
+    assert resolve_enrichment_job(job_id, session_factory=factory, reader=stale_reader) == "superseded"
+    test_db.expire_all()
+    item = test_db.get(DreamItem, item_id)
+    assert item.caption == caption and item.enrichment.generation == 2
+    assert item.enrichment.status == "queued"
+    assert item.place_name is None and "parser_raw" not in item.raw_metadata_json
+    test_db.commit()
+    def fresh_reader(claim):
+        assert claim["caption"] == caption and claim["shared_text"] == caption
+        output = result()
+        output["caption"] = claim["caption"]
+        return output
+    assert resolve_enrichment_job(job_id, session_factory=factory, reader=fresh_reader) == "completed"
+    test_db.expire_all()
+    assert test_db.get(DreamItem, item_id).caption == caption
+
+
+def test_duplicate_caption_restarts_terminal_unresolved_work(client, test_db, test_user, monkeypatch):
+    source = "https://instagram.com/reel/missing-caption"
+    item_id = client.post("/dreams/share", json={"source_url": source}).json()["dream_item_id"]
+    job_id = test_db.query(DreamEnrichmentJob).one().id
+    factory = sessionmaker(bind=test_db.get_bind(), autoflush=False)
+    test_db.commit()
+    monkeypatch.setenv("DREAM_ENRICHMENT_MAX_ATTEMPTS", "1")
+    def unavailable(_):
+        raise RuntimeError("Synthetic metadata failure")
+    assert resolve_enrichment_job(job_id, session_factory=factory, reader=unavailable) == "failed"
+    response = client.post("/dreams/share", json={"source_url": source, "caption": "Garden Cafe in Madrid, Spain."})
+    assert response.json()["status"] == "processing"
+    test_db.expire_all()
+    item = test_db.get(DreamItem, item_id)
+    assert item.enrichment.generation == 2 and item.enrichment.attempts == 0
+    assert item.caption == "Garden Cafe in Madrid, Spain."
+
+
+@pytest.mark.parametrize("protection", ["existing_text", "confirmed", "edited", "manual_pin"])
+def test_duplicate_never_replaces_usable_text_or_protected_saves(client, test_db, test_user, protection):
+    source = "https://instagram.com/reel/protected-caption"
+    original = "Garden Cafe in Madrid, Spain."
+    payload = {"source_url": source}
+    if protection == "existing_text":
+        payload["shared_text"] = original
+    item_id = client.post("/dreams/share", json=payload).json()["dream_item_id"]
+    item = test_db.get(DreamItem, item_id)
+    if protection == "confirmed":
+        item.status = "confirmed"
+    elif protection == "edited":
+        item.raw_metadata_json = {**item.raw_metadata_json, "dream_user_edited": True}
+    elif protection == "manual_pin":
+        item.google_maps_url = "https://maps.google.com/?q=38.67,15.9"
+    old_caption, old_raw = item.caption, dict(item.raw_metadata_json)
+    test_db.commit()
+    response = client.post("/dreams/share", json={"source_url": source,
+                           "caption": "A different place in France.", "shared_text": "A different place in France."})
+    assert response.status_code == 200 and response.json()["duplicate"]
+    test_db.expire_all()
+    item = test_db.get(DreamItem, item_id)
+    assert item.caption == old_caption and item.raw_metadata_json == old_raw
+
+
+def test_duplicate_url_only_text_does_not_restart_work(client, test_db, test_user):
+    source = "https://instagram.com/reel/url-replay"
+    item_id = client.post("/dreams/share", json={"source_url": source}).json()["dream_item_id"]
+    client.post("/dreams/share", json={"source_url": source, "caption": source, "shared_text": source})
+    item = test_db.get(DreamItem, item_id)
+    assert item.caption is None and item.enrichment.generation == 1
 
 
 def test_sort_is_atomic_owner_scoped_idempotent_and_cannot_overwrite_edits(client, test_db, test_user):

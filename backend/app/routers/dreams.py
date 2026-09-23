@@ -41,7 +41,7 @@ from ..services.instagram_metadata import InstagramMetadataError, fetch_instagra
 from ..services.dream_locations import (
     confirm_candidate, enqueue_location, location_coordinates, location_maps_url, public_location,
 )
-from ..services.dream_enrichment import cancel_enrichment, enqueue_enrichment
+from ..services.dream_enrichment import cancel_enrichment, enqueue_enrichment, enrichment_is_protected
 from ..tasks.dream_enrichment_tasks import notify_enrichment
 from .auth import get_current_user
 
@@ -784,7 +784,27 @@ def capture_dream(db: Session, payload: ShareDreamRequest, user_id: int):
     item = db.query(DreamItem).filter_by(user_id=user_id, source_url=source_url).with_for_update().first()
     if item:
         job = None
-        if item.status in {"created", "processing", "needs_review", "failed"} and not (item.place_name or item.city or item.country):
+        added_text = False
+        if not enrichment_is_protected(item):
+            raw = item.raw_metadata_json or {}
+            existing_shared = usable_caption_text(raw.get("shared_text"), source_url)
+            incoming_caption = usable_caption_text(payload.caption, source_url)
+            incoming_shared = usable_caption_text(payload.shared_text, source_url)
+            if not usable_caption_text(item.caption, source_url):
+                # Keep earlier usable share text if present. Only URL placeholders
+                # and missing captions can be filled by a later delivery.
+                caption = existing_shared or incoming_caption or incoming_shared
+                if caption:
+                    item.caption = caption
+                    added_text = True
+            if not existing_shared and incoming_shared:
+                item.raw_metadata_json = {**raw, "shared_text": incoming_shared}
+                added_text = True
+        if added_text:
+            # The old worker may already be reading this URL. A new fingerprint
+            # and generation preserve the caption and supersede its stale result.
+            job, _ = enqueue_enrichment(db, item, force=True)
+        elif item.status in {"created", "processing", "needs_review", "failed"} and not (item.place_name or item.city or item.country):
             job, _ = enqueue_enrichment(db, item)
         return item, True, job
     parsed = draft_parse(payload.shared_text, payload.caption, source_url)

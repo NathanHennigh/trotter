@@ -30,12 +30,17 @@ def fingerprint(item):
     return hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def enrichment_is_protected(item: DreamItem):
+    has_chosen_location = bool(item.location and (
+        item.location.status == "manual" or (item.location.google_identity and item.location.google_identity.confirmed_place_id)))
+    return bool(item.status == "confirmed" or (item.raw_metadata_json or {}).get("dream_user_edited")
+                or has_chosen_location or explicit_pin(item)[0] is not None)
+
+
 def enqueue_enrichment(db: Session, item: DreamItem, *, force=False, now=None):
     """Caller holds the item lock. The job and processing state commit together."""
     now = now or utcnow()
-    has_chosen_location = bool(item.location and (
-        item.location.status == "manual" or (item.location.google_identity and item.location.google_identity.confirmed_place_id)))
-    if item.status == "confirmed" or (item.raw_metadata_json or {}).get("dream_user_edited") or has_chosen_location or explicit_pin(item)[0] is not None:
+    if enrichment_is_protected(item):
         cancel_enrichment(db, item, now=now)
         return None, False
     row = db.query(DreamEnrichmentJob).filter_by(item_id=item.id, user_id=item.user_id).with_for_update().first()
