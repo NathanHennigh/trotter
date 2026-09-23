@@ -150,6 +150,7 @@ type TravelTripsContextValue = {
   lastGmailSyncedAt?: string;
   error?: string;
   accountId?: number;
+  accountRevision?: number;
   accountEmail?: string;
   lastSyncedAt?: string;
   signIn: () => Promise<void>;
@@ -182,6 +183,7 @@ export function useTravelTrips() {
 function useTravelTripsState(): TravelTripsContextValue {
   const [trips, setTrips] = React.useState<TripSummary[]>([]);
   const [account, setAccount] = React.useState<AccountIdentity>();
+  const [accountRevision, setAccountRevision] = React.useState<number>();
   const [authStatus, setAuthStatus] = React.useState<TravelAuthStatus>('loading');
   const [status, setStatus] = React.useState<TravelTripsStatus>('loading');
   const [error, setError] = React.useState<string>();
@@ -207,6 +209,7 @@ function useTravelTripsState(): TravelTripsContextValue {
   const resetAccount = React.useCallback(() => {
     accountRef.current = undefined;
     setAccount(undefined);
+    setAccountRevision(undefined);
     setTrips([]);
     tripsRef.current = [];
     tripReads.current.clear();
@@ -233,15 +236,25 @@ function useTravelTripsState(): TravelTripsContextValue {
     }
     if (mode !== 'silent') setStatus(mode);
     try {
-      const [meResponse, tripsResponse] = await Promise.all([
-        authFetch('/auth/me', undefined, token), authFetch('/trips', undefined, token),
-      ]);
+      const readAccountResponse = async (path: string) => {
+        const response = await authFetch(path, undefined, token);
+        if (response.status === 401) {
+          if (relevant()) {
+            await clearAuthToken();
+            if (mounted.current && !getStoredToken()) setError('Your session expired. Sign in with Google again.');
+          }
+          throw new SessionExpired();
+        }
+        return response;
+      };
+      // Observe both failures immediately, but let a verified identity open the
+      // app while its archive loads. Sharing a place does not depend on trips.
+      const tripsRequest = readAccountResponse('/trips').then(
+        response => ({ ok: true as const, response }),
+        error => ({ ok: false as const, error }),
+      );
+      const meResponse = await readAccountResponse('/auth/me');
       if (!relevant()) return;
-      if (meResponse.status === 401 || tripsResponse.status === 401) {
-        await clearAuthToken();
-        if (mounted.current && !getStoredToken()) setError('Your session expired. Sign in with Google again.');
-        return;
-      }
       const me = await readJson(meResponse) as AccountIdentity;
       if (!relevant()) return;
       if (!meResponse.ok || !Number.isInteger(me.user_id) || !me.email) {
@@ -251,7 +264,12 @@ function useTravelTripsState(): TravelTripsContextValue {
       if (accountRef.current && accountRef.current.user_id !== me.user_id) setTrips([]);
       accountRef.current = me;
       setAccount(me);
+      setAccountRevision(revision);
       setAuthStatus('signed-in');
+      const tripsResult = await tripsRequest;
+      if (!relevant()) return;
+      if (!tripsResult.ok) throw tripsResult.error;
+      const tripsResponse = tripsResult.response;
       const payload = await readJson(tripsResponse);
       if (!relevant()) return;
       if (!tripsResponse.ok) throw new Error(`Your trips could not be loaded (${tripsResponse.status}). Pull to retry.`);
@@ -483,7 +501,7 @@ function useTravelTripsState(): TravelTripsContextValue {
 
   return { trips, profile: buildProfile(trips, account), source: 'api', status, authStatus,
     signOutPending, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt,
-    error, accountId: account?.user_id, accountEmail: account?.email, lastSyncedAt,
+    error, accountId: account?.user_id, accountRevision, accountEmail: account?.email, lastSyncedAt,
     signIn, retryAuth, signOut, refresh: () => loadTrips('refreshing'), loadTripDetail, syncFromGmail };
 }
 

@@ -115,7 +115,7 @@ function load(file, name, overrides = {}) {
     ...pure("src/components/world-window/trips/tripPresentation.ts"), walletColors: {}, Platform: { OS: "android", Version: 35 }, colors: {}, fonts: {}, layout: { bottomNavHeight: 62 },
     useSafeAreaInsets: () => ({ top: 24, bottom: 20 }), useWindowDimensions: () => ({ width: 390, height: 844 }), getMobileVisualWidth: x => x,
     useTravelTrips: () => ({ trips: [trip], profile: {}, status: "ready", refresh: noOp, syncFromGmail: noOp }),
-    useDreams: () => ({ shareInstagramLink: noOp }), getInitialTab: () => "globe",
+    useDreams: () => ({ shareInstagramLinkDurable: async () => {} }), getInitialTab: () => "globe",
     buildGlobeHistory: pure("src/components/world-window/globe-history.ts").buildGlobeHistory, flightDate: pure("src/components/world-window/trips/tripPresentation.ts").flightDate, tripsForCountry: () => [trip], buildPassportArchive: () => archive, buildPassportArrivals: () => [arrival], flightCountryKey: (_country, code) => code,
     readableDate: x => x, airlineName: x => x, BackHandler: { addEventListener: () => ({ remove: noOp }) },
     ...overrides,
@@ -137,6 +137,59 @@ const passportHost = () => load("src/screens/PassportStatsScreen.tsx", "Passport
 const countriesHost = () => load("src/screens/CountryStampCollectionScreen.tsx", "CountryStampCollectionScreen");
 const listHost = () => load("src/components/world-window/passport/PassportCollections.tsx", "CollectionList");
 const finishTripTransition = host => { let tree = host.render(); const surface = find(tree, "TripNavigationSurface"); assert(surface?.props.closing); surface.props.onClosed(); return host.render(); };
+
+const deferredShare = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+const flushShare = async () => { for (let n = 0; n < 12; n++) await Promise.resolve(); };
+
+test("A cold Instagram share opens Dreams without starting the globe, then retains a visited globe", async () => {
+  const saved = [], consumed = [];
+  const retained = deferredShare();
+  const host = appHost({ useDreams: () => ({ shareInstagramLinkDurable: (url, caption) => { saved.push({ url, caption }); return retained.promise; } }) });
+  let tree = host.render({ incomingShare: { queueId: 1, sourceUrl: "https://www.instagram.com/p/synthetic/", sharedText: "Synthetic post" }, consumeShare: id => consumed.push(id) });
+  assert.equal(find(tree, "HomeGlobeScreen"), undefined);
+  assert.equal(find(tree, "DreamsScreen").props.active, "dreams");
+  assert.equal(saved.length, 1);
+  assert.deepEqual(consumed, [], "The incoming receipt stays queued until local persistence finishes");
+  retained.resolve(); await flushShare();
+  assert.deepEqual(consumed, [1]);
+  find(tree, "DreamsScreen").props.onChange("globe"); tree = host.render();
+  assert.equal(find(tree, "HomeGlobeScreen").props.visible, true);
+  find(tree, "HomeGlobeScreen").props.onFilterYear("2026"); tree = host.render();
+  find(tree, "HomeGlobeScreen").props.onChange("dreams"); tree = host.render();
+  assert.equal(find(tree, "HomeGlobeScreen").props.visible, false);
+  assert.equal(find(tree, "HomeGlobeScreen").props.filterYear, "2026");
+  assert.equal(saved.length, 1, "Tab changes do not replay the incoming receipt");
+  host.unmount();
+});
+
+test("A failed share capture keeps the receipt and retries only on an explicit press", async () => {
+  const attempts = [], consumed = [];
+  const host = appHost({ useDreams: () => ({ shareInstagramLinkDurable: () => { const task = deferredShare(); attempts.push(task); return task.promise; } }) });
+  let tree = host.render({ incomingShare: { queueId: 1, sourceUrl: "https://www.instagram.com/p/synthetic/" }, consumeShare: id => consumed.push(id) });
+  attempts[0].reject(new Error("Device storage is unavailable. Keep Trotter open and try again.")); await flushShare();
+  tree = host.render();
+  assert.equal(attempts.length, 1);
+  assert.deepEqual(consumed, []);
+  const retry = button(tree, "Retry keeping shared post");
+  assert(retry, "Persistence failure has an actionable retry");
+  host.render(); host.render();
+  assert.equal(attempts.length, 1, "Rerenders do not retry a failed capture");
+  retry.props.onPress(); retry.props.onPress(); tree = host.render();
+  assert.equal(attempts.length, 2, "A rapid double press starts one retry");
+  assert.equal(button(tree, "Retry keeping shared post"), undefined);
+  assert.deepEqual(consumed, []);
+  attempts[1].resolve(); await flushShare();
+  assert.deepEqual(consumed, [1]);
+  host.unmount();
+});
+
+test("Late share capture cannot consume a receipt after its account shell unmounts", async () => {
+  const retained = deferredShare(), consumed = [];
+  const host = appHost({ useDreams: () => ({ shareInstagramLinkDurable: () => retained.promise }) });
+  host.render({ incomingShare: { queueId: 7, sourceUrl: "https://www.instagram.com/p/synthetic/" }, consumeShare: id => consumed.push(id) });
+  host.unmount(); retained.resolve(); await flushShare();
+  assert.deepEqual(consumed, []);
+});
 
 test("Home controls share one balanced row and preserve touch targets and texture toggle", () => {
   const host = load("src/screens/HomeGlobeScreen.tsx", "HomeGlobeScreen");

@@ -1,6 +1,6 @@
 import React from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   useFonts,
   Outfit_400Regular,
@@ -14,11 +14,12 @@ import {
   Linking,
   Platform,
   StyleSheet,
+  Text,
   View,
   type ViewStyle,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { AuthScreen } from "./src/screens/AuthScreen";
+import { AuthScreen, SessionRestoringScreen } from "./src/screens/AuthScreen";
 import { CountryStampCollectionScreen } from "./src/screens/CountryStampCollectionScreen";
 import { DreamsScreen } from "./src/screens/DreamsScreen";
 import { HomeGlobeScreen } from "./src/screens/HomeGlobeScreen";
@@ -38,7 +39,8 @@ import {
   TravelTripsProvider,
   useTravelTrips,
 } from "./src/services/travelTrips";
-import { colors } from "./src/theme/trotterTheme";
+import { colors, fonts } from "./src/theme/trotterTheme";
+import { PressFeedback } from "./src/components/world-window/motion";
 import { normalizeTravelYear } from "./src/utils/travelScope";
 import type { TripOpenOrigin } from "./src/components/world-window/trips/tripTransition";
 import { TripNavigationSurface } from "./src/components/world-window/trips/TripNavigationSurface";
@@ -159,11 +161,12 @@ export function reduceIncomingShareQueue(
 
 // Capture signed-out shares without carrying account-owned content across login.
 function AccountGate() {
-  const { authStatus, accountId } = useTravelTrips();
+  const { authStatus, accountId, accountRevision } = useTravelTrips();
   const ownerId = authStatus === "signed-in" ? accountId : undefined;
   const owner = React.useRef(ownerId);
   owner.current = ownerId;
   const initialUrlRead = React.useRef(false);
+  const [initialUrlResolved, setInitialUrlResolved] = React.useState(false);
   const delivered = React.useRef(new Set<string>());
   const [shares, dispatchShare] = React.useReducer(reduceIncomingShareQueue, {
     items: [],
@@ -198,7 +201,8 @@ function AccountGate() {
         .then((url) => {
           if (url) receive(url, true);
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => setInitialUrlResolved(true));
     }
     return () => subscription.remove();
   }, []);
@@ -206,11 +210,15 @@ function AccountGate() {
     (queueId: number) => dispatchShare({ type: "consume", queueId }),
     [],
   );
+  const pendingShare = shares.items.find((item) => item.ownerId === undefined || item.ownerId === ownerId);
+  if (authStatus === "loading" || !initialUrlResolved || (authStatus === "signed-in" && shares.ownerId !== ownerId)) {
+    return <SessionRestoringScreen sourceUrl={pendingShare?.sourceUrl} />;
+  }
   if (authStatus !== "signed-in") return <AuthScreen />;
   // Filter during render too: the owner-transition effect runs after render.
   const incomingShare = shares.items.find((item) => item.ownerId === accountId);
   return (
-    <DreamsProvider key={accountId}>
+    <DreamsProvider key={`${accountId}:${accountRevision}`}>
       <AppShell incomingShare={incomingShare} consumeShare={consumeShare} />
     </DreamsProvider>
   );
@@ -223,10 +231,10 @@ function AppShell({
   incomingShare?: QueuedShare;
   consumeShare: (queueId: number) => void;
 }) {
-  const [activeTab, setActiveTab] = React.useState<BottomNavTab>(getInitialTab);
+  const [activeTab, setActiveTab] = React.useState<BottomNavTab>(() => incomingShare ? "dreams" : getInitialTab());
   const currentTab = React.useRef(activeTab);
   currentTab.current = activeTab;
-  const [visitedTabs, setVisitedTabs] = React.useState<BottomNavTab[]>(() => [getInitialTab()]);
+  const [visitedTabs, setVisitedTabs] = React.useState<BottomNavTab[]>(() => [activeTab]);
   const [globeYear, setGlobeYear] = React.useState("All years");
   const [tripsReset, setTripsReset] = React.useState(0);
   const scopeSequence = React.useRef(0);
@@ -266,8 +274,12 @@ function AppShell({
     handlers.current.globe = handler;
   }, []);
   const { trips } = useTravelTrips();
-  const { shareInstagramLink } = useDreams();
-  const handledShare = React.useRef<number | undefined>(undefined);
+  const { shareInstagramLinkDurable } = useDreams();
+  const insets = useSafeAreaInsets();
+  const handledShare = React.useRef<{ queueId: number; status: "capturing" | "failed" | "retained" } | undefined>(undefined);
+  const shareHostMounted = React.useRef(true);
+  const [shareCaptureAttempt, setShareCaptureAttempt] = React.useState(0);
+  const [shareCaptureError, setShareCaptureError] = React.useState<{ queueId: number; message: string }>();
   const selectedTrip = trips.find((trip) => trip.id === selectedTripId);
   const visit = (tab: BottomNavTab) => {
     setVisitedTabs((visited) => visited.includes(tab) ? visited : [...visited, tab]);
@@ -339,12 +351,36 @@ function AppShell({
     visit(origin);
   };
   React.useEffect(() => {
-    if (!incomingShare || handledShare.current === incomingShare.queueId) return;
-    handledShare.current = incomingShare.queueId;
-    shareInstagramLink(incomingShare.sourceUrl, incomingShare.sharedText);
+    shareHostMounted.current = true;
+    return () => { shareHostMounted.current = false; };
+  }, []);
+  React.useEffect(() => {
+    if (!incomingShare || handledShare.current?.queueId === incomingShare.queueId) return;
+    const { queueId, sourceUrl, sharedText } = incomingShare;
+    handledShare.current = { queueId, status: "capturing" };
+    setShareCaptureError(undefined);
     changeTab("dreams");
-    consumeShare(incomingShare.queueId);
-  }, [incomingShare, consumeShare, shareInstagramLink]);
+    void (async () => {
+      try {
+        // This confirms local retention only. Dreams owns upload progress and
+        // only presents a saved receipt after the server acknowledges it.
+        await shareInstagramLinkDurable(sourceUrl, sharedText);
+        if (!shareHostMounted.current || handledShare.current?.queueId !== queueId) return;
+        handledShare.current = { queueId, status: "retained" };
+        consumeShare(queueId);
+      } catch (caught) {
+        if (!shareHostMounted.current || handledShare.current?.queueId !== queueId) return;
+        handledShare.current = { queueId, status: "failed" };
+        setShareCaptureError({ queueId, message: caught instanceof Error ? caught.message : "Your link is still here. Keep Trotter open and try again." });
+      }
+    })();
+  }, [incomingShare, consumeShare, shareInstagramLinkDurable, shareCaptureAttempt]);
+  const retryIncomingShare = () => {
+    if (!incomingShare || handledShare.current?.queueId !== incomingShare.queueId || handledShare.current.status !== "failed") return;
+    handledShare.current = undefined;
+    setShareCaptureError(undefined);
+    setShareCaptureAttempt(value => value + 1);
+  };
   React.useEffect(() => {
     if (selectedTripId && !selectedTrip) finishCloseTrip();
   }, [selectedTripId, selectedTrip]);
@@ -387,7 +423,7 @@ function AppShell({
   return (
     <View style={styles.shell}>
       <TripBackground progress={tripProgress} dragOffset={tripDragOffset}>
-      {layer("globe", baseTab === "globe",
+      {visitedTabs.includes("globe") && layer("globe", baseTab === "globe",
         <HomeGlobeScreen filterYear={globeYear} onFilterYear={setGlobeYear}
           visible={mainVisible && activeTab === "globe"}
           onBackHandlerChange={registerGlobeBack}
@@ -431,6 +467,15 @@ function AppShell({
           deferUpdates={!tripSettled || tripClosing}
           backLabel={tripOrigin.current === "passport" ? "Back to collection" : `Back to ${label(tripOrigin.current).toLowerCase()}`} />
       </TripNavigationSurface>}
+      {shareCaptureError && shareCaptureError.queueId === incomingShare?.queueId && (
+        <View accessibilityRole="alert" accessibilityLiveRegion="polite" style={[styles.shareError, { bottom: insets.bottom + 72 }]}>
+          <Text style={styles.shareErrorTitle}>Couldn’t keep this post</Text>
+          <Text style={styles.shareErrorMessage}>{shareCaptureError.message}</Text>
+          <PressFeedback accessibilityRole="button" accessibilityLabel="Retry keeping shared post" onPress={retryIncomingShare} style={styles.shareRetry}>
+            <Text style={styles.shareRetryText}>Try again</Text>
+          </PressFeedback>
+        </View>
+      )}
     </View>
   );
 }
@@ -447,6 +492,11 @@ const styles = StyleSheet.create({
         } as unknown as ViewStyle)
       : {},
   shell: { flex: 1, backgroundColor: colors.paperSoft },
+  shareError: { position: "absolute", left: 16, right: 16, padding: 16, backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.paperBorder, borderRadius: 8, gap: 6 },
+  shareErrorTitle: { color: colors.ink, fontFamily: fonts.sansSemi, fontSize: 15, lineHeight: 20 },
+  shareErrorMessage: { color: colors.mutedInk, fontFamily: fonts.sansRegular, fontSize: 13, lineHeight: 19 },
+  shareRetry: { minHeight: 44, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: 12, marginLeft: -12 },
+  shareRetryText: { color: colors.blue, fontFamily: fonts.sansSemi, fontSize: 13 },
   inactive: { opacity: 0 },
   overlay: {
     ...StyleSheet.absoluteFillObject,

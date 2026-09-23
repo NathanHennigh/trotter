@@ -427,3 +427,84 @@ test('two rapid Check mail presses create one job and retain that job before obs
   assert.equal(env.render().lastGmailSyncedAt, '2026-02-03T14:00:00Z', 'UTC server timestamps never use the device timezone');
   env.dispose();
 });
+
+test('a restored account opens before its slow trip archive finishes', async () => {
+  const archive = deferred();
+  const env = environment({ stored: JSON.stringify({ token: 'saved', apiBaseUrl: 'https://api.example.invalid' }), fetcher: async url =>
+    url.endsWith('/trips') ? archive.promise : response(200, { user_id: 1, email: 'owner@example.invalid' }) });
+  env.render(); await flush();
+  assert.equal(env.render().authStatus, 'signed-in');
+  assert.equal(env.render().accountId, 1);
+  assert.equal(env.render().status, 'loading');
+  assert.deepEqual(env.render().trips, []);
+  archive.resolve(response(200, [])); await flush();
+  assert.equal(env.render().status, 'idle');
+  assert(!env.calls.some(call => call.kind === 'oauth'));
+  env.dispose();
+});
+
+test('a failed trip request does not reject a separately verified session', async () => {
+  const env = environment({ stored: JSON.stringify({ token: 'saved', apiBaseUrl: 'https://api.example.invalid' }), fetcher: async url => {
+    if (url.endsWith('/trips')) throw new TypeError('archive offline');
+    return response(200, { user_id: 1, email: 'owner@example.invalid' });
+  } });
+  env.render(); await flush();
+  assert.equal(env.render().authStatus, 'signed-in');
+  assert.equal(env.render().accountId, 1);
+  assert.equal(env.render().status, 'error');
+  assert.match(env.render().error, /connection/);
+  assert.equal(env.travel.getStoredToken(), 'saved');
+  env.dispose();
+});
+
+test('trip success never opens account content before identity verification', async () => {
+  const identity = deferred();
+  const env = environment({ stored: JSON.stringify({ token: 'saved', apiBaseUrl: 'https://api.example.invalid' }), fetcher: async url =>
+    url.endsWith('/auth/me') ? identity.promise : response(200, []) });
+  env.render(); await flush();
+  assert.equal(env.render().authStatus, 'loading');
+  assert.equal(env.render().accountId, undefined);
+  identity.resolve(response(500, {})); await flush();
+  assert.equal(env.render().authStatus, 'signed-out');
+  assert.equal(env.render().accountId, undefined);
+  env.dispose();
+});
+
+for (const verifiedFirst of [false, true]) test(`trip 401 clears the session ${verifiedFirst ? 'after' : 'before'} identity verification`, async () => {
+  const identity = deferred(), archive = deferred();
+  const env = environment({ stored: JSON.stringify({ token: 'expired', apiBaseUrl: 'https://api.example.invalid' }), fetcher: async url =>
+    url.endsWith('/auth/me') ? identity.promise : archive.promise });
+  env.render(); await flush();
+  if (verifiedFirst) {
+    identity.resolve(response(200, { user_id: 1, email: 'owner@example.invalid' })); await flush();
+    assert.equal(env.render().authStatus, 'signed-in');
+  }
+  archive.resolve(response(401, {})); await flush();
+  assert.equal(env.render().authStatus, 'signed-out');
+  assert.equal(env.travel.getStoredToken(), undefined);
+  identity.resolve(response(200, { user_id: 1, email: 'owner@example.invalid' })); await flush();
+  assert.equal(env.render().accountId, undefined);
+  assert.match(env.render().error, /expired/);
+  env.dispose();
+});
+
+test('account revision changes only after identity verification, including same-account reauthentication', async () => {
+  const env = environment(); env.render(); await flush();
+  assert.equal(env.render().accountRevision, undefined);
+  await env.render().signIn(); await flush();
+  const first = env.render();
+  assert.equal(first.accountRevision, env.travel.getAuthRevision());
+  const verified = deferred();
+  env.fetcher(async url => url.endsWith('/auth/me') ? verified.promise : response(200, []));
+  await env.travel.storeAuthToken('renewed-same-account'); await flush();
+  assert.equal(env.render().authStatus, 'loading');
+  assert.equal(env.render().accountRevision, undefined, 'A stored token has no verified owner revision yet');
+  verified.resolve(response(200, { user_id: first.accountId, email: 'owner@example.invalid' })); await flush();
+  const renewed = env.render();
+  assert.equal(renewed.accountId, first.accountId);
+  assert(renewed.accountRevision > first.accountRevision);
+  assert.equal(renewed.accountRevision, env.travel.getAuthRevision());
+  await renewed.signOut(); await flush();
+  assert.equal(env.render().accountRevision, undefined);
+  env.dispose();
+});

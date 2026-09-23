@@ -57,6 +57,19 @@ const button = (tree, label) => nodes(tree).find(node => node.props?.label === l
 const text = tree => nodes(tree).filter(node => node.type === 'Text').map(node => node.props.children.flat().join(''));
 const item = { id: '1', tags: [], category: 'cafe', placeName: 'Synthetic cafe', summary: 'Notes', country: 'Portugal', needsReview: true, status: 'needs_review', sourceUrl: 'https://www.instagram.com/reel/synthetic' };
 
+test('session restoration has neutral feedback without presenting sign-in or a saved receipt', () => {
+  const host = screen('screens/AuthScreen.tsx', 'SessionRestoringScreen');
+  let tree = host.render({});
+  assert(text(tree).includes('Opening Trotter…'));
+  assert(!text(tree).some(value => /Welcome|Google|Gmail|Saved/.test(value)));
+  tree = host.render({ sourceUrl: item.sourceUrl });
+  assert(text(tree).includes('Opening Dreams…'));
+  assert(text(tree).includes(item.sourceUrl));
+  assert(text(tree).includes('Connecting to your account to save this post.'));
+  assert(!text(tree).some(value => /Welcome|Google|Gmail|Saved/.test(value)));
+  host.dispose();
+});
+
 test('failed logout offers cleanup retry and never a Google sign-in or archive retry', async () => {
   const wait = deferred(); let retries = 0;
   const host = screen('screens/AuthScreen.tsx', 'AuthScreen', { account: { authStatus: 'signed-out', status: 'error', signOutPending: true, error: 'Retry sign out', signOut: () => { retries++; return wait.promise; }, signIn: noop, refresh: noop } });

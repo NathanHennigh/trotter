@@ -14,6 +14,26 @@ import { WWEmblem } from "../components/world-window/WorldWindowUI";
 import { useTravelTrips } from "../services/travelTrips";
 import { colors, fonts } from "../theme/trotterTheme";
 
+export function SessionRestoringScreen({ sourceUrl }: { sourceUrl?: string }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.restoreScreen, { paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 }]}>
+      <View style={styles.brand}>
+        <WWEmblem size={18.5} color={colors.blue} />
+        <Text style={styles.wordmark}>TROTTER</Text>
+      </View>
+      <View accessibilityLiveRegion="polite" style={styles.restoreContent}>
+        <ActivityIndicator color={colors.blue} />
+        <Text style={styles.restoreTitle}>{sourceUrl ? "Opening Dreams…" : "Opening Trotter…"}</Text>
+        <Text style={styles.restoreDescription}>
+          {sourceUrl ? "Connecting to your account to save this post." : "Restoring your session."}
+        </Text>
+        {sourceUrl ? <Text numberOfLines={2} style={styles.restoreSource}>{sourceUrl}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
 export function AuthScreen() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -143,6 +163,11 @@ function GoogleMark() {
 }
 
 const styles = StyleSheet.create({
+  restoreScreen: { flex: 1, backgroundColor: colors.paperSoft, paddingHorizontal: 28, alignItems: "center" },
+  restoreContent: { flex: 1, justifyContent: "center", alignItems: "center", width: "100%", maxWidth: 340, gap: 14, paddingBottom: 64 },
+  restoreTitle: { color: colors.blue, fontFamily: fonts.display, fontSize: 30, lineHeight: 36, textAlign: "center" },
+  restoreDescription: { color: colors.mutedInk, fontFamily: fonts.sansRegular, fontSize: 14, lineHeight: 21, textAlign: "center" },
+  restoreSource: { color: colors.mutedInk, fontFamily: fonts.sansRegular, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 6 },
   screen: { flex: 1, backgroundColor: colors.paperSoft },
   content: {
     paddingHorizontal: 24,

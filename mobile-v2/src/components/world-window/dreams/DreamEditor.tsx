@@ -234,14 +234,16 @@ export function DreamEditor({
               {item.tags.length > 0 && (
                 <Text style={s.tags}>{item.tags.join(" · ")}</Text>
               )}
-              {item.needsReview && (
+              {item.needsReview && !processing && (
                 <Text style={s.review}>
-                  Review the place details before saving them.
+                  {item.placeName ? 'Some details could not be verified. Your post is saved.' : 'This post is saved, but its caption did not identify an exact place.'}
                 </Text>
               )}
               {processing && (
                 <Text style={s.review}>
-                  Reading this post. Its original link is saved.
+                  {item.uploadStatus
+                    ? 'Kept on this device. Waiting to send to Trotter.'
+                    : item.processingMessage || 'Saved. Sorting this post in the background—you can leave this screen.'}
                 </Text>
               )}
               {saved && !processing && (
@@ -320,9 +322,9 @@ export function DreamEditor({
                       }
                     />
                   )}
-                  {item.status === "failed" && (
+                  {(item.status === "failed" || item.needsReview) && (
                     <WWButton
-                      label="Retry save"
+                      label={saved ? "Retry reading post" : "Retry save"}
                       onPress={() => {
                         onRetry();
                         close();

@@ -138,6 +138,7 @@ test('expired Google coordinates cannot return through a numeric Maps URL; manua
 function service() {
   let revision = 1, token = 'synthetic-test-session'; const subscriptions = new Set(), calls = []; let response = () => Promise.resolve({ ok: true, status: 200, text: async () => '{}' });
   const api = load('services/dreams.ts', {
+    'react-native': { AppState: {} }, './dreamShareOutbox': {},
     react: { createContext: () => ({}) }, './travelTrips': { getApiBaseUrl: () => 'https://synthetic.invalid', getStoredToken: () => token, hydrateStoredToken: async () => token, getAuthRevision: () => revision, subscribeAuthToken: fn => { subscriptions.add(fn); return () => subscriptions.delete(fn); }, clearAuthToken: async () => { token = undefined; } },
   }, 'module.exports.mapItem = mapApiDreamItem;', { fetch: async (url, init) => { calls.push({ url, init }); return response(url, init); } });
   return { api, calls, respond: fn => response = fn, accountChanged() { revision++; subscriptions.forEach(fn => fn()); } };

@@ -200,12 +200,19 @@ export function DreamsScreen({
               )}
               {store.processingItems.length > 0 && (
                 <View style={s.notice}>
-                  <Text style={s.noticeText}>
-                    Reading {store.processingItems.length}{" "}
+                  <Text accessibilityLiveRegion="polite" style={s.noticeText}>
+                    Sorting {store.processingItems.length}{" "}
                     {store.processingItems.length === 1
                       ? "shared post"
                       : "shared posts"}
-                    …
+                    … You can leave this screen.
+                  </Text>
+                </View>
+              )}
+              {(store.pendingUploadItems?.length ?? 0) > 0 && (
+                <View style={s.notice}>
+                  <Text accessibilityLiveRegion="polite" style={s.noticeText}>
+                    {store.pendingUploadItems.length} {store.pendingUploadItems.length === 1 ? "post is" : "posts are"} waiting to send. Kept on this device until uploaded.
                   </Text>
                 </View>
               )}
@@ -271,9 +278,10 @@ export function DreamsScreen({
           visible={visible}
           onCloseRequestChange={registerCaptureBack}
           onClose={() => setCapture(false)}
-          onSave={(url, caption) =>
-            Boolean(store.shareInstagramLink(url, caption))
-          }
+          onSave={async (url, caption) => {
+            await store.shareInstagramLinkDurable(url, caption);
+            return true;
+          }}
         />
       )}
     </View>
@@ -590,7 +598,7 @@ function CapturePlace({
   onCloseRequestChange,
 }: {
   onClose: () => void;
-  onSave: (url: string, caption?: string) => boolean;
+  onSave: (url: string, caption?: string) => boolean | Promise<boolean>;
   visible: boolean;
   onCloseRequestChange?: (handler: (() => void) | null) => void;
 }) {
@@ -598,9 +606,13 @@ function CapturePlace({
     [url, setUrl] = React.useState(""),
     [caption, setCaption] = React.useState(""),
     [discarding, setDiscarding] = React.useState(false),
-    [error, setError] = React.useState(false);
+    [saving, setSaving] = React.useState(false),
+    [error, setError] = React.useState<string>();
+  const savingLock = React.useRef(false), mounted = React.useRef(true);
+  React.useEffect(() => () => { mounted.current = false; }, []);
   const reducedMotion = useReducedMotion();
   const requestClose = () => {
+    if (savingLock.current) return;
     if (discarding) setDiscarding(false);
     else if (url.trim() || caption.trim()) setDiscarding(true);
     else onClose();
@@ -657,8 +669,9 @@ function CapturePlace({
             value={url}
             onChangeText={(value) => {
               setUrl(value);
-              setError(false);
+              setError(undefined);
             }}
+            editable={!saving}
             placeholder="https://www.instagram.com/reel/…"
             placeholderTextColor={colors.mutedInk}
             accessibilityLabel="Instagram link"
@@ -668,6 +681,7 @@ function CapturePlace({
           <TextInput
             value={caption}
             onChangeText={setCaption}
+            editable={!saving}
             multiline
             placeholder="Add the original caption to help identify the place"
             placeholderTextColor={colors.mutedInk}
@@ -676,16 +690,27 @@ function CapturePlace({
           />
           {error && (
             <Text accessibilityRole="alert" style={s.error}>
-              Paste a valid Instagram post or reel link.
+              {error}
             </Text>
           )}
           <View style={{ marginTop: 20 }}>
             <WWButton
-              label="Save place"
-              disabled={!url.trim()}
-              onPress={() => {
-                if (onSave(url, caption)) onClose();
-                else setError(true);
+              label={saving ? "Keeping post…" : "Save place"}
+              disabled={!url.trim() || saving}
+              onPress={async () => {
+                if (savingLock.current) return;
+                savingLock.current = true; setSaving(true); setError(undefined);
+                try {
+                  const kept = await onSave(url, caption);
+                  if (!mounted.current) return;
+                  if (kept) onClose();
+                  else setError('Paste a valid Instagram post or reel link.');
+                } catch (caught) {
+                  if (mounted.current) setError(caught instanceof Error ? caught.message : 'This post could not be kept. Please try again.');
+                } finally {
+                  savingLock.current = false;
+                  if (mounted.current) setSaving(false);
+                }
               }}
             />
           </View>

@@ -215,3 +215,30 @@ test('capture draft also survives a hidden tab and requires deliberate discard',
   assert.equal(closes,0);action(tree,'Keep editing').props.onPress();tree=h.render();assert(action(tree,'Instagram link').props.value.includes('/draft'));
   action(tree,'Close').props.onPress();tree=h.render();action(tree,'Discard').props.onPress();assert.equal(closes,1);h.dispose();
 });
+
+test('capture waits for durable receipt, prevents duplicate taps, and preserves the draft on write failure', async () => {
+  let finish, calls=0, closes=0;
+  const h=host(screen,'CapturePlace'); const props={visible:true,onClose:()=>closes++,onSave:()=>{
+    calls++; return new Promise((resolve,reject)=>finish={resolve,reject});
+  }};
+  let tree=h.render(props); action(tree,'Instagram link').props.onChangeText('https://instagram.com/reel/kept');
+  tree=h.render(); const submit=action(tree,'Save place').props.onPress;
+  const pending=submit(); void submit(); tree=h.render();
+  assert.equal(calls,1); assert.equal(closes,0); assert(action(tree,'Keeping post…').props.disabled);
+  finish.reject(new Error('Device storage is unavailable.')); await pending; tree=h.render();
+  assert.equal(closes,0); assert.equal(action(tree,'Instagram link').props.value,'https://instagram.com/reel/kept');
+  assert(text(tree).includes('Device storage is unavailable.'));
+  const retry=action(tree,'Save place').props.onPress(); finish.resolve(true); await retry;
+  assert.equal(closes,1); h.dispose();
+});
+
+test('processing copy distinguishes an unsent local post from a save being sorted on the server', () => {
+  const h=host(editor,'DreamEditor');
+  let tree=h.render(editorProps({item:{...item,id:'dream-item-local',status:'created',uploadStatus:'queued',needsReview:false}}));
+  assert(text(tree).some(value=>value.includes('Waiting to send to Trotter')));
+  tree=h.render(editorProps({item:{...item,status:'processing',needsReview:false}}));
+  assert(text(tree).some(value=>value.includes('Sorting this post in the background')));
+  tree=h.render(editorProps({item:{...item,status:'needs_review',needsReview:true,placeName:undefined}}));
+  assert(action(tree,'Retry reading post')); assert(!text(tree).some(value=>value.includes('Reading this post')));
+  h.dispose();
+});

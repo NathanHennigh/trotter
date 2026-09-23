@@ -1,5 +1,7 @@
 import React from 'react';
-import { clearAuthToken, getApiBaseUrl, getStoredToken, hydrateStoredToken, getAuthRevision, subscribeAuthToken } from './travelTrips';
+import { AppState } from 'react-native';
+import { clearAuthToken, getApiBaseUrl, getStoredToken, hydrateStoredToken, getAuthRevision, subscribeAuthToken, useTravelTrips } from './travelTrips';
+import { canonicalDreamShareUrl, dreamShareOutbox, type PendingDreamShare, type DreamShareOutboxOwner } from './dreamShareOutbox';
 
 export type DreamItemCategory =
   | 'restaurant'
@@ -94,6 +96,7 @@ type ApiDreamItem = {
   location_user_confirmed?: boolean;
   location_message?: string | null;
   location_checked_at?: string | null;
+  processing_message?: string | null;
   status: DreamItemStatus;
   created_at: string;
   updated_at?: string | null;
@@ -130,6 +133,9 @@ export type DreamItem = {
   locationExpiresAt?: string;
   locationUserConfirmed?: boolean;
   status: DreamItemStatus;
+  /** Present only while the device still has an upload receipt. */
+  uploadStatus?: 'queued' | 'sending' | 'failed';
+  processingMessage?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -174,68 +180,108 @@ type DreamsContextValue = ReturnType<typeof useDreamsState>;
 const DreamsContext = React.createContext<DreamsContextValue | null>(null);
 
 function useDreamsState() {
+  const { accountId, authStatus } = useTravelTrips();
+  const owner = React.useMemo<DreamShareOutboxOwner | undefined>(() => authStatus === 'signed-in' && accountId
+    ? { apiBaseUrl: getApiBaseUrl(), ownerId: accountId } : undefined, [accountId, authStatus]);
   const [items, setItems] = React.useState<DreamItem[]>(emptyItems);
   const [liveDreams, setLiveDreams] = React.useState<Dream[] | undefined>();
   const [source, setSource] = React.useState<'local' | 'api'>('local');
   const [status, setStatus] = React.useState<'idle' | 'loading' | 'refreshing' | 'error'>('idle');
   const [error, setError] = React.useState<string | undefined>();
   const itemsRef = React.useRef(items);
-  const inFlightUrlsRef = React.useRef(new Set<string>());
   const mounted = React.useRef(true);
+  const ownerRevision = React.useRef(getAuthRevision());
   const refreshSequence = React.useRef(0);
   const activeRefresh = React.useRef<{ revision: number; promise: Promise<void> } | undefined>(undefined);
   const mutationIds = React.useRef(new Set<string>());
   const pendingSequence = React.useRef(0);
+  const pendingReceipts = React.useRef<PendingDreamShare[]>([]);
+  const persistingUrls = React.useRef(new Set<string>());
+  const recentlyAccepted = React.useRef(new Map<string, DreamItem>());
+  const activeUpload = React.useRef<string | undefined>(undefined);
+  const uploadRunning = React.useRef(false);
+  const uploadRequested = React.useRef(false);
+  const forceUploadRetry = React.useRef(false);
+  const uploadTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const kickUploads = React.useRef<(retry?: boolean) => void>(() => {});
+  const currentOwner = React.useCallback(() => mounted.current && !!owner && ownerRevision.current === getAuthRevision(), [owner]);
+  const updateItems = React.useCallback((update: (current: DreamItem[]) => DreamItem[]) => {
+    const next = update(itemsRef.current);
+    itemsRef.current = next;
+    setItems(next);
+  }, []);
+  const showPending = React.useCallback((entries: PendingDreamShare[]) => {
+    pendingReceipts.current = entries;
+    updateItems(current => {
+      const remote = current.filter(item => /^\d+$/.test(item.id)).map(item => {
+        const pending = entries.find(entry => entry.sourceUrl === normalizeSourceUrl(item.sourceUrl));
+        return { ...item, uploadStatus: pending ? (activeUpload.current === pending.id ? 'sending' : pending.status) : undefined } as DreamItem;
+      });
+      const remoteUrls = new Set(remote.map(item => normalizeSourceUrl(item.sourceUrl)));
+      const queued = entries.filter(entry => !remoteUrls.has(entry.sourceUrl)).map(entry => pendingDreamItem(entry, activeUpload.current === entry.id));
+      const queuedUrls = new Set(entries.map(entry => entry.sourceUrl));
+      const preserving = current.filter(item => !/^\d+$/.test(item.id)
+        && (persistingUrls.current.has(item.sourceUrl) || (item.id.startsWith('dream-item-preview-') && item.uploadStatus === 'failed'))
+        && !queuedUrls.has(item.sourceUrl));
+      return [...queued, ...preserving, ...remote];
+    });
+  }, [updateItems]);
   React.useEffect(() => {
     mounted.current = true;
     const unsubscribe = subscribeAuthToken(() => {
       refreshSequence.current += 1;
-      inFlightUrlsRef.current.clear();
+      clearTimeout(uploadTimer.current);
       mutationIds.current.clear();
+      pendingReceipts.current = [];
+      persistingUrls.current.clear();
+      recentlyAccepted.current.clear();
       activeRefresh.current = undefined;
       itemsRef.current = [];
       setItems([]); setLiveDreams(undefined); setError(undefined); setStatus('idle');
     });
-    return () => { mounted.current = false; refreshSequence.current += 1; unsubscribe(); };
+    return () => { mounted.current = false; refreshSequence.current += 1; clearTimeout(uploadTimer.current); unsubscribe(); };
   }, []);
 
   const itemDreams = React.useMemo(() => buildDreams(items), [items]);
   const dreams = React.useMemo(() => mergeDreams(liveDreams, itemDreams), [liveDreams, itemDreams]);
   const needsReviewItems = React.useMemo(() => items.filter((item) => item.needsReview), [items]);
-  const processingItems = React.useMemo(() => items.filter((item) => item.status === 'processing' || item.status === 'created'), [items]);
-  const locatingItems = React.useMemo(() => items.filter((item) => item.locationStatus === 'queued' || item.locationStatus === 'running'
-    || (item.locationProvider === 'google_places' && item.locationStatus === 'needs_review')), [items]);
+  const pendingUploadItems = React.useMemo(() => items.filter(item => item.uploadStatus), [items]);
+  const processingItems = React.useMemo(() => items.filter((item) => !item.uploadStatus && (item.status === 'processing' || item.status === 'created')), [items]);
+  const locatingItems = React.useMemo(() => items.filter((item) => item.locationStatus === 'queued' || item.locationStatus === 'running'), [items]);
 
-  React.useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
-
-  const refresh = React.useCallback((mode: 'loading' | 'refreshing' = 'refreshing'): Promise<void> => {
+  const refresh = React.useCallback((mode: 'loading' | 'refreshing' | 'quiet' = 'refreshing'): Promise<void> => {
+    if (!currentOwner()) return Promise.resolve();
+    if (mode === 'refreshing') kickUploads.current(true);
     const revision = getAuthRevision();
     if (activeRefresh.current?.revision === revision) return activeRefresh.current.promise;
     const run = async () => {
       const sequence = ++refreshSequence.current;
-      setStatus(mode);
+      if (mode !== 'quiet') setStatus(mode);
       try {
         // A failing endpoint must not leave its sibling running behind the next
         // poll. Both requests are bounded and this refresh owns both until settled.
         const [dreamsResult, itemsResult] = await Promise.allSettled([dreamsApiFetch<ApiDream[]>('/dreams'), dreamsApiFetch<ApiDreamItem[]>('/dream-items')]);
-        if (dreamsResult.status === 'rejected') throw dreamsResult.reason;
         if (itemsResult.status === 'rejected') throw itemsResult.reason;
-        const apiDreams = dreamsResult.value, apiItems = itemsResult.value;
+        const apiItems = itemsResult.value;
         if (!mounted.current || sequence !== refreshSequence.current || revision !== getAuthRevision()) return;
-        const mappedDreams = apiDreams.map(mapApiDream);
         const mappedItems = apiItems.map(mapApiDreamItem);
-        setLiveDreams(mappedDreams);
-        setItems(current => [...current.filter(item => item.id.startsWith('dream-item-') && !mappedItems.some(remote => remote.sourceUrl === item.sourceUrl)), ...mappedItems]);
+        setLiveDreams(dreamsResult.status === 'fulfilled' ? dreamsResult.value.map(mapApiDream) : undefined);
+        for (const remote of mappedItems) recentlyAccepted.current.delete(remote.id);
+        updateItems(current => [
+          ...current.filter(item => !/^\d+$/.test(item.id) && !mappedItems.some(remote => normalizeSourceUrl(remote.sourceUrl) === item.sourceUrl)),
+          ...[...recentlyAccepted.current.values()].filter(item => !mappedItems.some(remote => remote.id === item.id)),
+          ...mappedItems,
+        ]);
+        showPending(pendingReceipts.current);
         setSource('api');
-        setError(undefined);
-        setStatus('idle');
+        if (mode !== 'quiet') { setError(undefined); setStatus('idle'); }
       } catch (caught) {
         if (!mounted.current || sequence !== refreshSequence.current || revision !== getAuthRevision()) return;
         setSource((current) => current === 'api' ? 'api' : 'local');
-        setError(caught instanceof Error ? caught.message : String(caught));
-        setStatus('error');
+        if (mode !== 'quiet') {
+          setError(caught instanceof Error ? caught.message : String(caught));
+          setStatus('error');
+        }
       }
     };
     const task = { revision, promise: Promise.resolve() };
@@ -244,7 +290,7 @@ function useDreamsState() {
     });
     activeRefresh.current = task;
     return task.promise;
-  }, []);
+  }, [currentOwner, updateItems, showPending]);
 
   React.useEffect(() => {
     refresh('loading');
@@ -255,67 +301,133 @@ function useDreamsState() {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
-      await refresh();
+      if (AppState.currentState === 'active') await refresh('quiet');
       if (!disposed) timer = setTimeout(() => void poll(), 5000);
     };
     timer = setTimeout(() => void poll(), 5000);
     return () => { disposed = true; clearTimeout(timer); };
   }, [processingItems.length, locatingItems.length, refresh]);
 
-  const shareInstagramLink = React.useCallback((sourceUrl: string, caption?: string) => {
-    const normalizedUrl = normalizeSourceUrl(sourceUrl);
-    if (!isInstagramUrl(normalizedUrl)) {
-      setError('Paste a valid Instagram post or reel link.');
-      setStatus('error');
-      return undefined;
-    }
-    const existing = itemsRef.current.find((item) => item.sourceUrl === normalizedUrl);
-    if (existing && existing.status !== 'failed') return existing;
-    if (inFlightUrlsRef.current.has(normalizedUrl)) {
-      const inFlight = itemsRef.current.find((item) => item.sourceUrl === normalizedUrl);
-      return inFlight;
-    }
-    inFlightUrlsRef.current.add(normalizedUrl);
+  const drainUploads = React.useCallback((retry = false) => {
+    if (!owner || !currentOwner()) return;
+    if (retry) forceUploadRetry.current = true;
+    if (uploadRunning.current) { uploadRequested.current = true; return; }
+    uploadRunning.current = true;
+    clearTimeout(uploadTimer.current);
+    void (async () => {
+      let storageFailed = false;
+      try {
+        let forceIds = new Set<string>();
+        // Each network call has a deadline; one uploader owns this account queue.
+        for (let count = 0; count < 100 && currentOwner(); count++) {
+          uploadRequested.current = false;
+          const entries = await dreamShareOutbox.list(owner);
+          if (!currentOwner()) return;
+          showPending(entries);
+          if (forceUploadRetry.current) { forceIds = new Set(entries.map(entry => entry.id)); forceUploadRetry.current = false; }
+          const entry = entries.find(value => !mutationIds.current.has(`dream-item-${value.id}`) && !mutationIds.current.has(value.retryItemId ?? '')
+            && (value.status === 'queued' || forceIds.has(value.id) || (value.attemptCount < 4 && uploadRetryAt(value) <= Date.now())));
+          if (!entry || AppState.currentState !== 'active') break;
+          forceIds.delete(entry.id);
+          activeUpload.current = entry.id;
+          let attempt: PendingDreamShare | undefined;
+          try {
+            attempt = await dreamShareOutbox.beginAttempt(owner, entry);
+            if (!attempt || !currentOwner()) continue;
+            showPending(entries.map(value => value.id === attempt!.id ? attempt! : value));
+            const saved = await sendPendingDreamShare(attempt, itemsRef.current.find(item => normalizeSourceUrl(item.sourceUrl) === attempt!.sourceUrl));
+            if (!currentOwner()) return;
+            // Capture success directly becomes a server item, even when list GETs fail.
+            refreshSequence.current += 1;
+            recentlyAccepted.current.set(saved.id, saved);
+            updateItems(current => [saved, ...current.filter(item => item.id !== saved.id && normalizeSourceUrl(item.sourceUrl) !== attempt!.sourceUrl)]);
+            setSource('api'); setStatus('idle'); setError(undefined);
+            await dreamShareOutbox.acknowledge(owner, attempt);
+            if (!currentOwner()) return;
+            void refresh('quiet');
+          } catch (caught) {
+            if (!currentOwner()) return;
+            if (attempt) {
+              try { await dreamShareOutbox.markFailed(owner, attempt); }
+              catch { storageFailed = true; }
+            } else storageFailed = true;
+            if (currentOwner()) {
+              setError(caught instanceof Error ? caught.message : String(caught));
+              setStatus('error');
+            }
+          } finally { activeUpload.current = undefined; }
+          if (storageFailed) break;
+        }
+        if (!currentOwner()) return;
+        const entries = await dreamShareOutbox.list(owner);
+        if (!currentOwner()) return;
+        showPending(entries);
+        const retryTimes = entries.filter(entry => entry.status === 'failed' && entry.attemptCount < 4).map(uploadRetryAt);
+        if (!storageFailed && AppState.currentState === 'active' && retryTimes.length) {
+          uploadTimer.current = setTimeout(() => kickUploads.current(), Math.max(500, Math.min(...retryTimes) - Date.now()));
+        }
+      } catch (caught) {
+        storageFailed = true;
+        if (currentOwner()) { setError(caught instanceof Error ? caught.message : String(caught)); setStatus('error'); }
+      } finally {
+        uploadRunning.current = false;
+        if (!storageFailed && currentOwner() && (uploadRequested.current || forceUploadRetry.current)) kickUploads.current();
+      }
+    })();
+  }, [owner, currentOwner, showPending, updateItems, refresh]);
+  kickUploads.current = drainUploads;
 
-    const next: DreamItem = {
-      category: 'unknown',
-      summary: 'Trotter is reading the Instagram post and looking for place details.',
-      tags: [],
-      needsReview: false,
-      status: 'processing',
-      id: `dream-item-${Date.now()}-${++pendingSequence.current}`,
-      dreamId: 'dream-processing',
-      sourcePlatform: 'instagram',
-      sourceUrl: normalizedUrl,
-      caption: caption?.trim() || undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    setError(undefined);
-    setStatus('refreshing');
-    const revision = getAuthRevision();
-    setItems((current) => [next, ...current.filter(item => item.id !== existing?.id)]);
-    shareInstagramLinkRemote(normalizedUrl, caption)
-      .then(() => { if (mounted.current && revision === getAuthRevision()) return refresh('refreshing'); })
-      .catch((caught) => {
-        if (!mounted.current || revision !== getAuthRevision()) return;
-        setError(caught instanceof Error ? caught.message : String(caught));
-        setStatus('error');
-        setItems((current) => current.map((item) => item.id === next.id ? {
-          ...item,
-          summary: 'This place could not be saved. Your original link is kept so you can retry.',
-          status: 'failed',
-          updatedAt: new Date().toISOString(),
-        } : item));
-      })
-      .finally(() => {
-        inFlightUrlsRef.current.delete(normalizedUrl);
-      });
+  React.useEffect(() => {
+    drainUploads();
+    const subscription = AppState.addEventListener('change', next => {
+      if (next === 'active') { drainUploads(true); void refresh('quiet'); }
+      else clearTimeout(uploadTimer.current);
+    });
+    return () => subscription.remove();
+  }, [drainUploads, refresh]);
+
+  const shareInstagramLinkDurable = React.useCallback(async (sourceUrl: string, caption?: string): Promise<void> => {
+    const normalizedUrl = canonicalDreamShareUrl(sourceUrl);
+    if (!normalizedUrl) throw new Error('Paste a valid Instagram post or reel link.');
+    if (!owner || !currentOwner()) throw new Error('Sign in to save this place.');
+    const existing = itemsRef.current.find(item => normalizeSourceUrl(item.sourceUrl) === normalizedUrl);
+    if (existing && mutationIds.current.has(existing.id)) throw new Error('This place is still saving. Wait for it to finish before retrying.');
+    if (existing && /^\d+$/.test(existing.id) && !existing.uploadStatus && !['failed', 'needs_review'].includes(existing.status)) return;
+    persistingUrls.current.add(normalizedUrl);
+    try {
+      const entry = await dreamShareOutbox.enqueue(owner, { sourceUrl: normalizedUrl, sharedText: caption,
+        retryItemId: existing && /^\d+$/.test(existing.id) && ['failed', 'needs_review'].includes(existing.status) ? existing.id : undefined });
+      if (!currentOwner()) throw new Error('Your account changed.');
+      showPending([...pendingReceipts.current.filter(value => value.sourceUrl !== normalizedUrl), entry]);
+      setError(undefined); setStatus('idle');
+      drainUploads();
+    } finally { persistingUrls.current.delete(normalizedUrl); }
+  }, [owner, currentOwner, showPending, drainUploads]);
+
+  // Inline capture/editor compatibility. Native delivery awaits the durable method.
+  const shareInstagramLink = React.useCallback((sourceUrl: string, caption?: string) => {
+    const normalizedUrl = canonicalDreamShareUrl(sourceUrl);
+    if (!normalizedUrl || !currentOwner()) { setError('Paste a valid Instagram post or reel link while signed in.'); setStatus('error'); return undefined; }
+    const existing = itemsRef.current.find(item => normalizeSourceUrl(item.sourceUrl) === normalizedUrl);
+    const next = existing ?? pendingDreamItem({ id: `preview-${Date.now()}-${++pendingSequence.current}`, generation: 1, sourceUrl: normalizedUrl,
+      sharedText: caption, status: 'queued', attemptCount: 0, queuedAt: Date.now(), updatedAt: Date.now() });
+    if (!existing) updateItems(current => [next, ...current]);
+    void shareInstagramLinkDurable(normalizedUrl, caption).catch(caught => {
+      if (!currentOwner()) return;
+      setError(caught instanceof Error ? caught.message : String(caught)); setStatus('error');
+      updateItems(current => current.map(item => item.id === next.id ? { ...item, status: /^\d+$/.test(item.id) ? item.status : 'failed',
+        uploadStatus: 'failed', summary: 'This link could not be kept on this device. Retry saving it before closing the app.' } : item));
+    });
     return next;
-  }, [refresh]);
+  }, [currentOwner, updateItems, shareInstagramLinkDurable]);
 
   const updateItem = React.useCallback(async (id: string, patch: Partial<DreamItem>) => {
     if (!/^\d+$/.test(id)) throw new Error('Wait for this place to finish saving before editing.');
+    const sourceUrl = normalizeSourceUrl(itemsRef.current.find(item => item.id === id)?.sourceUrl ?? '');
+    if (pendingReceipts.current.some(entry => entry.retryItemId === id || entry.sourceUrl === sourceUrl)
+      || persistingUrls.current.has(sourceUrl)) {
+      throw new Error('This post is being queued for reading. Wait for it to finish before editing.');
+    }
     if (mutationIds.current.has(id)) throw new Error('This place is still saving. Wait for it to finish before making another change.');
     const revision = getAuthRevision();
     mutationIds.current.add(id);
@@ -329,7 +441,8 @@ function useDreamsState() {
       if (!mounted.current || revision !== getAuthRevision()) return;
       refreshSequence.current += 1;
       const updated = mapApiDreamItem(data as ApiDreamItem);
-      setItems(current => current.map(item => item.id === id ? updated : item));
+      recentlyAccepted.current.set(updated.id, updated);
+      updateItems(current => current.map(item => item.id === id ? updated : item));
       setLiveDreams(undefined);
       setStatus('idle'); setError(undefined);
     } catch (caught) {
@@ -338,7 +451,7 @@ function useDreamsState() {
       }
       throw caught;
     } finally { if (revision === getAuthRevision()) mutationIds.current.delete(id); }
-  }, []);
+  }, [updateItems]);
 
   const confirmItem = React.useCallback((id: string) => {
     return updateItem(id, {
@@ -350,17 +463,36 @@ function useDreamsState() {
 
   const deleteItem = React.useCallback(async (id: string) => {
     if (mutationIds.current.has(id)) throw new Error('This place is still saving. Wait for it to finish before making another change.');
+    const item = itemsRef.current.find(value => value.id === id);
+    const receipt = pendingReceipts.current.find(value => value.sourceUrl === normalizeSourceUrl(item?.sourceUrl ?? ''));
+    if (receipt && activeUpload.current === receipt.id) throw new Error('This place is being sent. Wait for it to finish before deleting it.');
+    if (item && persistingUrls.current.has(item.sourceUrl)) throw new Error('This place is still saving. Wait for it to finish before deleting it.');
     const revision = getAuthRevision();
     mutationIds.current.add(id);
+    const receiptItemId = receipt ? `dream-item-${receipt.id}` : undefined;
+    if (receiptItemId) mutationIds.current.add(receiptItemId);
     refreshSequence.current += 1;
     try {
-      if (/^\d+$/.test(id)) {
-        const response = await dreamsAuthenticatedFetch(`/dream-items/${id}`, { method: 'DELETE' });
-        if (!response.ok) throw new Error(readError(await readJson(response), 'This place could not be deleted.'));
+      let remoteId = /^\d+$/.test(id) ? id : receipt?.retryItemId;
+      if (!remoteId && receipt && receipt.attemptCount > 0) {
+        // A timed-out POST may already have committed. Reconcile its idempotent
+        // receipt before deletion rather than leaving an orphan on the server.
+        const accepted = await shareInstagramLinkRemote(receipt.sourceUrl, receipt.sharedText);
+        remoteId = String(accepted.dream_item_id);
+      }
+      if (remoteId) {
+        const response = await dreamsAuthenticatedFetch(`/dream-items/${remoteId}`, { method: 'DELETE' });
+        if (!response.ok && response.status !== 404) throw new Error(readError(await readJson(response), 'This place could not be deleted.'));
+      }
+      if (owner && receipt) {
+        const removed = await dreamShareOutbox.acknowledge(owner, receipt);
+        if (!removed) throw new Error('This share changed while deleting it. Please try again.');
       }
       if (!mounted.current || revision !== getAuthRevision()) return;
       refreshSequence.current += 1;
-      setItems((current) => current.filter((item) => item.id !== id));
+      recentlyAccepted.current.delete(remoteId ?? id);
+      pendingReceipts.current = pendingReceipts.current.filter(value => value.id !== receipt?.id);
+      updateItems((current) => current.filter((item) => item.id !== id && item.id !== remoteId));
       setLiveDreams(undefined);
       setStatus('idle'); setError(undefined);
     } catch (caught) {
@@ -368,12 +500,22 @@ function useDreamsState() {
         setStatus('error'); setError(caught instanceof Error ? caught.message : String(caught));
       }
       throw caught;
-    } finally { if (revision === getAuthRevision()) mutationIds.current.delete(id); }
-  }, []);
+    } finally {
+      if (revision === getAuthRevision()) {
+        mutationIds.current.delete(id);
+        if (receiptItemId) mutationIds.current.delete(receiptItemId);
+      }
+    }
+  }, [owner, updateItems]);
 
   const locationRequest = React.useCallback(async (path: string, ids: string[], body: object = {}) => {
     if (!ids.length) return;
     if (ids.some(id => !/^\d+$/.test(id))) throw new Error('Wait for these places to finish saving first.');
+    const sourceUrls = new Set(itemsRef.current.filter(item => ids.includes(item.id)).map(item => normalizeSourceUrl(item.sourceUrl)));
+    if (pendingReceipts.current.some(entry => (entry.retryItemId && ids.includes(entry.retryItemId)) || sourceUrls.has(entry.sourceUrl))
+      || [...sourceUrls].some(sourceUrl => persistingUrls.current.has(sourceUrl))) {
+      throw new Error('This post is being queued for reading. Wait for it to finish before changing its location.');
+    }
     if (ids.some(id => mutationIds.current.has(id))) throw new Error('A place is still saving. Please try again shortly.');
     const revision = getAuthRevision();
     ids.forEach(id => mutationIds.current.add(id));
@@ -389,7 +531,8 @@ function useDreamsState() {
       const records = (data && typeof data === 'object' && 'items' in data)
         ? (data as { items: ApiDreamItem[] }).items : [data as ApiDreamItem];
       const updates = new Map(records.map(record => { const item = mapApiDreamItem(record); return [item.id, item] as const; }));
-      setItems(current => current.map(item => updates.get(item.id) ?? item));
+      updates.forEach(item => recentlyAccepted.current.set(item.id, item));
+      updateItems(current => current.map(item => updates.get(item.id) ?? item));
       setStatus('idle'); setError(undefined);
     } catch (caught) {
       if (mounted.current && revision === getAuthRevision()) {
@@ -397,7 +540,7 @@ function useDreamsState() {
       }
       throw caught;
     } finally { if (revision === getAuthRevision()) ids.forEach(id => mutationIds.current.delete(id)); }
-  }, []);
+  }, [updateItems]);
   const locateItem = React.useCallback((id: string) => locationRequest(`/dream-items/${id}/locate`, [id]), [locationRequest]);
   const confirmLocation = React.useCallback((id: string, candidateId: string) => locationRequest(`/dream-items/${id}/location-confirm`, [id], { candidate_id: candidateId }), [locationRequest]);
   const locateMissing = React.useCallback(async (ids: string[]) => {
@@ -414,6 +557,7 @@ function useDreamsState() {
     dreams,
     items,
     needsReviewItems,
+    pendingUploadItems,
     processingItems,
     locatingItems,
     source,
@@ -421,6 +565,7 @@ function useDreamsState() {
     error,
     refresh,
     shareInstagramLink,
+    shareInstagramLinkDurable,
     updateItem,
     confirmItem,
     deleteItem,
@@ -457,7 +602,43 @@ export async function fetchDreamLocationDetails(id: string, signal?: AbortSignal
   };
 }
 
-async function shareInstagramLinkRemote(sourceUrl: string, caption?: string) {
+const uploadRetryAt = (entry: PendingDreamShare) => (entry.failedAt ?? entry.lastAttemptAt ?? 0) + Math.min(60000, 5000 * 2 ** Math.min(entry.attemptCount - 1, 4));
+
+function pendingDreamItem(entry: PendingDreamShare, sending = false): DreamItem {
+  return {
+    id: `dream-item-${entry.id}`, dreamId: 'dream-pending-upload', sourcePlatform: 'instagram',
+    sourceUrl: entry.sourceUrl, caption: entry.sharedText, category: 'unknown', tags: [], needsReview: false,
+    status: entry.status === 'failed' ? 'failed' : 'created', uploadStatus: sending ? 'sending' : entry.status,
+    summary: entry.status === 'failed' ? 'Your link is saved on this device. Trotter will retry sending it when you reconnect.' : 'Your link is saved on this device and is waiting to be sent.',
+    createdAt: new Date(entry.queuedAt).toISOString(), updatedAt: new Date(entry.updatedAt).toISOString(),
+  };
+}
+
+type DreamShareAcknowledgement = { dream_item_id: number; dream_id: number; status: DreamItemStatus; processing_message?: string };
+
+async function sendPendingDreamShare(entry: PendingDreamShare, existing?: DreamItem): Promise<DreamItem> {
+  if (entry.retryItemId) {
+    const response = await dreamsAuthenticatedFetch(`/dream-items/${entry.retryItemId}/parse`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ caption: entry.sharedText }),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(readError(data, 'This post could not be queued for reading.'));
+    const parsed = data as ApiDreamItem;
+    if (String(parsed.id) !== entry.retryItemId || !['created', 'processing', 'parsed', 'needs_review', 'confirmed', 'failed'].includes(parsed.status)) {
+      throw new Error('The server did not confirm this retry. Your link is kept for retry.');
+    }
+    return mapApiDreamItem(parsed);
+  }
+  const acknowledged = await shareInstagramLinkRemote(entry.sourceUrl, entry.sharedText);
+  const needsReview = acknowledged.status === 'needs_review' || acknowledged.status === 'failed';
+  return { ...(existing ?? pendingDreamItem(entry)), id: String(acknowledged.dream_item_id), dreamId: String(acknowledged.dream_id),
+    sourceUrl: entry.sourceUrl, status: acknowledged.status, needsReview, uploadStatus: undefined,
+    processingMessage: acknowledged.processing_message,
+    summary: acknowledged.processing_message || (needsReview ? 'Saved. Add a caption or place details to help sort this post.' : 'Saved. Trotter is sorting this post on the server.'),
+    updatedAt: new Date().toISOString() };
+}
+
+async function shareInstagramLinkRemote(sourceUrl: string, caption?: string): Promise<DreamShareAcknowledgement> {
   const response = await dreamsAuthenticatedFetch('/dreams/share', {
     method: 'POST',
     headers: {
@@ -467,6 +648,13 @@ async function shareInstagramLinkRemote(sourceUrl: string, caption?: string) {
   });
   const data = await readJson(response);
   if (!response.ok) throw new Error(readError(data, `Dream save failed: ${response.status}`));
+  const receipt = data as DreamShareAcknowledgement & { item_id?: number };
+  const itemId = receipt.dream_item_id ?? receipt.item_id;
+  if (!Number.isSafeInteger(itemId) || itemId! <= 0 || !Number.isSafeInteger(receipt.dream_id)
+    || !['created', 'processing', 'parsed', 'needs_review', 'confirmed', 'failed'].includes(receipt.status)) {
+    throw new Error('The server did not confirm this share. Your link is kept for retry.');
+  }
+  return { ...receipt, dream_item_id: itemId! };
 }
 
 type DreamsResponse = Pick<Response, 'status' | 'ok' | 'text'>;
@@ -592,6 +780,7 @@ function mapApiDreamItem(item: ApiDreamItem): DreamItem {
     locationMessage: item.location_message ?? undefined,
     locationCheckedAt: item.location_checked_at ?? undefined,
     status: item.status,
+    processingMessage: item.processing_message ?? undefined,
     createdAt: item.created_at,
     updatedAt: item.updated_at ?? item.created_at,
   };
@@ -659,25 +848,12 @@ function buildDreams(items: DreamItem[]): Dream[] {
 }
 
 function normalizeSourceUrl(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return 'https://www.instagram.com/';
-  const extracted = extractInstagramUrl(trimmed);
-  const source = extracted ?? trimmed;
-  return source.startsWith('http') ? source : `https://${source}`;
+  return canonicalDreamShareUrl(value) ?? value.trim();
 }
 
 function extractInstagramUrl(value?: string) {
   if (!value) return undefined;
   return value.match(/https?:\/\/(?:www\.)?instagram\.com\/[^\s]+/i)?.[0]?.replace(/[),.;]+$/, '');
-}
-
-function isInstagramUrl(value: string) {
-  try {
-    const parsed = new URL(value);
-    return /(^|\.)instagram\.com$/i.test(parsed.hostname) && /^\/(reel|reels|p|tv)\//i.test(parsed.pathname);
-  } catch {
-    return false;
-  }
 }
 
 function dreamIdFor(country?: string, city?: string) {

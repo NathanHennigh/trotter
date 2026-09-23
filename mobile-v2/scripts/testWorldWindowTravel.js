@@ -43,9 +43,9 @@ test('all flights including connections and return survive chronological present
 test('route map includes every known leg and identifies missing geometry without dropping flights',()=>{const points={IAH:{code:'IAH',city:'Houston',lat:29.9,lon:-95.3},ATL:{code:'ATL',city:'Atlanta',lat:33.6,lon:-84.4},MCO:{code:'MCO',city:'Orlando',lat:28.4,lon:-81.3}};const flights=[segment('one','IAH','MCO','21',{depPoint:points.IAH,arrPoint:points.MCO}),segment('two','MCO','ATL','23',{depPoint:points.MCO,arrPoint:points.ATL}),segment('three','ATL','IAH','23',{depPoint:points.ATL,arrPoint:points.IAH}),segment('missing','IAH','JFK','24')];const map=trip.tripMapData(flights);assert.equal(map.lines.length,3);assert.equal(map.points.length,3);assert.deepEqual(map.lines[2],{id:'three',from:'ATL',to:'IAH'});assert.equal(flights.length,4);});
 
 const response=(status,body)=>({status,ok:status>=200&&status<300,text:async()=>JSON.stringify(body)});
-const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
-function serviceEnvironment() {
-  let token = 'account-a', revision = 1, fetcher = async () => response(200, []), cursor = 0, effects = [], slots = [], listeners = new Set();
+const flush=async()=>{for(let n=0;n<120;n++)await Promise.resolve();};
+function serviceEnvironment(options = {}) {
+  let token = 'account-a', revision = 1, accountId = options.accountId ?? 11, fetcher = async () => response(200, []), cursor = 0, effects = [], slots = [], listeners = new Set();
   let now = 0, nextTimer = 0;
   const calls = [], timers = new Map();
   const setTimer = (fn, ms) => { const id = ++nextTimer; timers.set(id, { fn, due: now + ms, ms }); return id; };
@@ -70,13 +70,24 @@ function serviceEnvironment() {
     useCallback(fn, deps) { return this.useMemo(() => fn, deps); },
     useEffect(fn, deps) { const i = cursor++; if (!slots[i] || !same(slots[i].deps, deps)) { slots[i]?.cleanup?.(); slots[i] = { deps }; effects.push(() => { slots[i].cleanup = fn(); }); } },
   };
+  const storage = options.storage ?? new Map();
+  const storageAdapter = { failWrite: false, getItem: async key => storage.get(key) ?? null,
+    async setItem(key, value) { if (this.failWrite) throw Error('storage full'); storage.set(key, value); }, removeItem: async key => storage.delete(key) };
+  const TestDate = class extends Date { constructor(...args) { super(...(args.length ? args : [Date.parse('2026-09-23T12:00:00Z') + now])); } static now() { return Date.parse('2026-09-23T12:00:00Z') + now; } };
+  const outbox = load('services/dreamShareOutbox.ts', { '@react-native-async-storage/async-storage': storageAdapter }, '', { Date: TestDate });
+  const appListeners = new Set();
+  const AppState = { currentState: options.appState ?? 'active', addEventListener: (_name, fn) => { appListeners.add(fn); return { remove: () => appListeners.delete(fn) }; } };
   const changeToken = value => { token = value; revision++; listeners.forEach(fn => fn()); };
   const auth = { getApiBaseUrl: () => 'https://api.example.invalid', getStoredToken: () => token, hydrateStoredToken: async () => token, getAuthRevision: () => revision,
+    useTravelTrips: () => ({ accountId, authStatus: token ? 'signed-in' : 'signed-out' }),
     subscribeAuthToken: fn => { listeners.add(fn); return () => listeners.delete(fn); }, clearAuthToken: async () => changeToken(undefined) };
-  const module = load('services/dreams.ts', { react, './travelTrips': auth }, 'module.exports.testState=useDreamsState;module.exports.testFetch=dreamsAuthenticatedFetch;', {
+  const module = load('services/dreams.ts', { react, './travelTrips': auth, './dreamShareOutbox': outbox, 'react-native': { AppState } }, 'module.exports.testState=useDreamsState;module.exports.testFetch=dreamsAuthenticatedFetch;', {
     fetch: async (url, init) => { calls.push({ url, init }); return fetcher(url, init); }, setTimeout: setTimer, clearTimeout: id => timers.delete(id),
+    Date: TestDate,
   });
-  return { module, calls, clock, changeToken, fetcher: fn => fetcher = fn,
+  return { module, calls, clock, changeToken, storage, storageAdapter, outbox: outbox.dreamShareOutbox,
+    owner: { apiBaseUrl: auth.getApiBaseUrl(), ownerId: accountId },
+    foreground(value = 'active') { AppState.currentState = value; appListeners.forEach(fn => fn(value)); }, fetcher: fn => fetcher = fn,
     render() { cursor = 0; const state = module.testState(); const pending = effects; effects = []; pending.forEach(fn => fn()); return state; },
     dispose() { slots.forEach(slot => slot?.cleanup?.()); },
   };
@@ -124,15 +135,16 @@ test('legacy candidates wait for automatic resolution, while malformed coordinat
   state=env.render(); assert.equal(dreams.exactMapPoint(state.items[0]).lat,38.7); assert.equal(locations.canFindLocation(state.items[0]),false); env.dispose();
 });
 
-test('waiting Google matches keep polling until the scheduler automatically resolves them', async () => {
+test('terminal Google review results stop polling, and an explicit refresh can discover a later resolution', async () => {
   const env=serviceEnvironment();
   env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1,{location_status:'needs_review',location_provider:'google_places'})]:[]));
   env.render(); await flush(); let state=env.render();
-  assert.equal(state.locatingItems.length,1); assert(locations.isFindingLocation(state.items[0]));
-  assert.equal(locations.canFindLocation(state.items[0]),false);
+  assert.equal(state.locatingItems.length,0);
+  const calls = env.calls.length;
+  await env.clock.advance(10000); assert.equal(env.calls.length, calls, 'Review is not an active server job');
   env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1,{location_status:'resolved',location_provider:'google_places',
     location_place_id:'automatic',location_expires_at:'2099-01-01',location_user_confirmed:false,latitude:38.7,longitude:-9.1})]:[]));
-  await env.clock.advance(5000); await flush(); state=env.render();
+  await state.refresh(); await flush(); state=env.render();
   assert.equal(state.locatingItems.length,0); assert.equal(dreams.exactMapPoint(state.items[0]).lat,38.7);
   assert(!env.calls.some(call=>call.init?.method==='POST')); env.dispose();
 });
@@ -230,13 +242,191 @@ test('duplicate concurrent writes are blocked and account changes abort pending 
   assert.deepEqual(env.render().items, []); env.dispose();
 });
 
-test('a failed Dreams endpoint does not release its refresh while the sibling request is pending', async () => {
+test('a failed board endpoint does not release a refresh early or discard a successful items response', async () => {
   const env = serviceEnvironment(), sibling = deferred();
   env.fetcher(async url => url.endsWith('/dream-items') ? sibling.promise : response(503, { detail: 'Synthetic unavailable endpoint' }));
   const first = env.render().refresh(); await flush();
   const second = env.render().refresh(); assert.equal(first, second); assert.equal(env.calls.length, 2);
   await env.clock.advance(10000); assert.equal(env.calls.length, 2);
-  sibling.resolve(response(200, [])); await first;
-  assert.equal(env.render().status, 'error'); assert.match(env.render().error, /unavailable endpoint/);
+  sibling.resolve(response(200, [apiItem(1)])); await first;
+  assert.equal(env.render().status, 'idle'); assert.equal(env.render().error, undefined);
+  assert.equal(env.render().items[0].id, '1');
   env.dispose();
+});
+
+const shareAck = (id, status = 'created') => response(200, { dream_item_id: id, dream_id: 1, status });
+const sharePosts = env => env.calls.filter(call => call.url.endsWith('/dreams/share'));
+
+test('durable share resolves after disk commit, before network acknowledgement, and failed GETs cannot strand it', async () => {
+  const env = serviceEnvironment(); env.render(); await flush();
+  const disk = deferred(), network = deferred(), write = env.storageAdapter.setItem;
+  let firstWrite = true, received = false;
+  env.storageAdapter.setItem = async function(key, value) { if (firstWrite) { firstWrite = false; await disk.promise; } return write.call(this, key, value); };
+  env.fetcher((url, init) => init?.method === 'POST' ? network.promise : Promise.resolve(response(503, { detail: 'Lists unavailable' })));
+  const receiving = env.render().shareInstagramLinkDurable('https://www.instagram.com/reel/shared/?igsh=abc', 'A lovely cafe').then(() => { received = true; });
+  await flush(); assert.equal(received, false); assert.equal(sharePosts(env).length, 0);
+  disk.resolve(); await receiving; await flush();
+  assert.equal(received, true); assert.equal(sharePosts(env).length, 1);
+  let state = env.render(); assert.equal(state.pendingUploadItems.length, 1); assert.equal(state.processingItems.length, 0);
+  assert.equal((await env.outbox.list(env.owner))[0].sharedText, 'A lovely cafe');
+  network.resolve(shareAck(42)); await flush(); state = env.render();
+  assert.equal(state.items.length, 1); assert.equal(state.items[0].id, '42'); assert.equal(state.items[0].status, 'created');
+  assert.equal(state.pendingUploadItems.length, 0); assert.equal(state.processingItems.length, 1);
+  assert.deepEqual(await env.outbox.list(env.owner), []); assert.equal(state.status, 'idle'); env.dispose();
+});
+
+test('offline shares keep their caption through bounded retries, cold restore, and a foreground retry', async () => {
+  const env = serviceEnvironment(); env.render(); await flush(); env.fetcher(async () => response(503, { detail: 'Offline' }));
+  await env.render().shareInstagramLinkDurable('https://instagram.com/p/offline', 'Useful caption'); await flush();
+  assert.equal(sharePosts(env).length, 1); assert.equal(env.render().pendingUploadItems[0].uploadStatus, 'failed');
+  assert.equal(env.render().processingItems.length, 0);
+  await env.clock.advance(5000); assert.equal(sharePosts(env).length, 2);
+  await env.clock.advance(10000); assert.equal(sharePosts(env).length, 3);
+  await env.clock.advance(20000); assert.equal(sharePosts(env).length, 4);
+  await env.clock.advance(300000); assert.equal(sharePosts(env).length, 4, 'Automatic retries stop rather than spin forever');
+  const storage = env.storage; env.dispose();
+  const cold = serviceEnvironment({ storage, appState: 'background' }); cold.render(); await flush();
+  assert.equal(cold.render().pendingUploadItems[0].caption, 'Useful caption'); assert.equal(sharePosts(cold).length, 0);
+  cold.fetcher(async (url, init) => init?.method === 'POST' ? shareAck(81, 'needs_review') : response(503, {}));
+  cold.foreground(); await flush();
+  assert.equal(sharePosts(cold).length, 1); assert.equal(cold.render().items[0].id, '81');
+  assert.equal(cold.render().items[0].status, 'needs_review'); assert.equal(cold.render().processingItems.length, 0);
+  assert.deepEqual(await cold.outbox.list(cold.owner), []); cold.dispose();
+});
+
+test('late upload acknowledgement cannot cross an account change; only the same verified owner restores it', async () => {
+  const env = serviceEnvironment(); env.render(); await flush(); const network = deferred();
+  env.fetcher((url, init) => init?.method === 'POST' ? network.promise : Promise.resolve(response(200, [])));
+  await env.render().shareInstagramLinkDurable('https://instagram.com/reel/ownerA', 'Private caption'); await flush();
+  env.changeToken('unverified-replacement'); network.resolve(shareAck(31)); await flush();
+  assert.deepEqual(env.render().items, []);
+  await assert.rejects(env.render().shareInstagramLinkDurable('https://instagram.com/reel/notVerified'), /Sign in/);
+  const storage = env.storage; env.dispose();
+  const other = serviceEnvironment({ storage, accountId: 22 }); other.render(); await flush();
+  assert.deepEqual(other.render().items, []); assert.equal(sharePosts(other).length, 0); other.dispose();
+  const verifiedSame = serviceEnvironment({ storage, accountId: 11 });
+  verifiedSame.fetcher(async (url, init) => init?.method === 'POST' ? shareAck(31) : response(200, []));
+  verifiedSame.render(); await flush();
+  assert.equal(sharePosts(verifiedSame).length, 1); assert.equal(verifiedSame.render().items[0].id, '31');
+  assert.deepEqual(await verifiedSame.outbox.list(verifiedSame.owner), []); verifiedSame.dispose();
+});
+
+test('simultaneous native delivery variants enqueue and POST one canonical Instagram link', async () => {
+  const env = serviceEnvironment(); env.render(); await flush(); const network = deferred();
+  env.fetcher((url, init) => init?.method === 'POST' ? network.promise : Promise.resolve(response(200, [])));
+  const state = env.render();
+  await Promise.all([state.shareInstagramLinkDurable('https://www.instagram.com/reel/duplicate/?igsh=one', 'Caption'),
+    state.shareInstagramLinkDurable('https://instagram.com/reel/duplicate#other', 'Caption')]);
+  await flush(); assert.equal(sharePosts(env).length, 1); assert.equal((await env.outbox.list(env.owner)).length, 1);
+  network.resolve(shareAck(77)); await flush(); assert.equal(env.render().items.length, 1);
+  assert.deepEqual(await env.outbox.list(env.owner), []); env.dispose();
+});
+
+test('an older list response cannot resurrect a share placeholder or delete its accepted server receipt', async () => {
+  const env = serviceEnvironment(); env.render(); await flush(); const older = deferred(), network = deferred();
+  env.fetcher((url, init) => init?.method === 'POST' ? network.promise : older.promise);
+  const refresh = env.render().refresh();
+  await env.render().shareInstagramLinkDurable('https://instagram.com/p/newer'); await flush();
+  network.resolve(shareAck(95)); await flush(); assert.equal(env.render().items[0].id, '95');
+  older.resolve(response(200, [])); await refresh; await flush();
+  assert.deepEqual(env.render().items.map(item => item.id), ['95']); assert.equal(env.render().pendingUploadItems.length, 0);
+  env.fetcher(async () => response(200, [])); await env.render().refresh();
+  assert.deepEqual(env.render().items.map(item => item.id), ['95'], 'A lagging list preserves an acknowledged ID until it observes it'); env.dispose();
+});
+
+test('retrying a saved review item persists its intent and uses the parse endpoint with its caption', async () => {
+  const env = serviceEnvironment(); env.fetcher(async url => response(200, url.endsWith('/dream-items') ? [apiItem(13)] : []));
+  env.render(); await flush(); const parse = deferred();
+  env.fetcher((url, init) => url.endsWith('/13/parse') ? parse.promise : Promise.resolve(response(503, {})));
+  await env.render().shareInstagramLinkDurable('https://instagram.com/reel/13', 'A clearer place name'); await flush();
+  assert.equal(sharePosts(env).length, 0);
+  const call = env.calls.find(call => call.url.endsWith('/13/parse')); assert(call);
+  assert.deepEqual(JSON.parse(call.init.body), { caption: 'A clearer place name' });
+  assert.equal((await env.outbox.list(env.owner))[0].retryItemId, '13');
+  parse.resolve(response(200, apiItem(13, { status: 'processing', needs_review: false, processing_message: 'Finding places' })));
+  await flush(); const state = env.render(); assert.equal(state.items[0].id, '13');
+  assert.equal(state.items[0].processingMessage, 'Finding places'); assert.equal(state.processingItems.length, 1);
+  assert.deepEqual(await env.outbox.list(env.owner), []); env.dispose();
+});
+
+test('deleting an unsent receipt cancels durable upload, while an active upload cannot be deleted', async () => {
+  const env = serviceEnvironment({ appState: 'background' }); env.render(); await flush();
+  await env.render().shareInstagramLinkDurable('https://instagram.com/p/cancel'); await flush();
+  const item = env.render().items[0]; await env.render().deleteItem(item.id);
+  assert.deepEqual(await env.outbox.list(env.owner), []); assert.equal(sharePosts(env).length, 0);
+  env.foreground(); await flush(); assert.equal(sharePosts(env).length, 0);
+  const network = deferred(); env.fetcher((url, init) => init?.method === 'POST' ? network.promise : Promise.resolve(response(200, [])));
+  await env.render().shareInstagramLinkDurable('https://instagram.com/p/sending'); await flush();
+  await assert.rejects(env.render().deleteItem(env.render().items[0].id), /being sent/);
+  assert.equal((await env.outbox.list(env.owner)).length, 1);
+  network.resolve(shareAck(101)); await flush(); assert.equal(env.render().items[0].id, '101'); env.dispose();
+});
+
+test('storage rejection keeps a native receipt unconsumed and never starts its POST', async () => {
+  const env = serviceEnvironment(); env.render(); await flush(); env.storageAdapter.failWrite = true;
+  await assert.rejects(env.render().shareInstagramLinkDurable('https://instagram.com/p/diskFull'), /storage full/);
+  assert.equal(sharePosts(env).length, 0); assert.deepEqual(await env.outbox.list(env.owner), []);
+  env.storageAdapter.failWrite = false;
+  env.fetcher(async (url, init) => init?.method === 'POST' ? shareAck(102) : response(200, []));
+  await env.render().shareInstagramLinkDurable('https://instagram.com/p/diskFull'); await flush();
+  assert.equal(sharePosts(env).length, 1); assert.equal(env.render().items[0].id, '102'); env.dispose();
+});
+
+test('editing and retrying a saved post exclude each other, so a late parse cannot erase confirmed edits', async () => {
+  const env = serviceEnvironment(); env.fetcher(async url => response(200, url.endsWith('/dream-items') ? [apiItem(13)] : []));
+  env.render(); await flush(); const parse = deferred();
+  env.fetcher(() => parse.promise);
+  await env.render().shareInstagramLinkDurable('https://instagram.com/reel/13', 'A clearer caption'); await flush();
+  await assert.rejects(env.render().updateItem('13', { placeName: 'My chosen place', needsReview: false }), /queued for reading/);
+  parse.resolve(response(200, apiItem(13, { status: 'needs_review' }))); await flush();
+  const edit = deferred(); env.fetcher(() => edit.promise);
+  const save = env.render().updateItem('13', { placeName: 'My chosen place', needsReview: false });
+  await assert.rejects(env.render().shareInstagramLinkDurable('https://instagram.com/reel/13'), /still saving/);
+  edit.resolve(response(200, apiItem(13, { place_name: 'My chosen place', status: 'confirmed', needs_review: false })));
+  await save; assert.equal(env.render().items[0].placeName, 'My chosen place'); assert.equal(env.render().items[0].status, 'confirmed'); env.dispose();
+});
+
+test('a caption received during the first upload is sent in a second durable generation', async () => {
+  const env = serviceEnvironment(); env.render(); await flush(); const first = deferred(), second = deferred(); let posts = 0;
+  env.fetcher((url, init) => init?.method === 'POST' ? (++posts === 1 ? first.promise : second.promise) : Promise.resolve(response(503, {})));
+  await env.render().shareInstagramLinkDurable('https://instagram.com/p/captionLater'); await flush();
+  await env.render().shareInstagramLinkDurable('https://instagram.com/p/captionLater', 'The cafe is in Porto'); await flush();
+  first.resolve(shareAck(80)); await flush();
+  assert.equal(posts, 2); assert.equal(JSON.parse(sharePosts(env)[1].init.body).shared_text, 'The cafe is in Porto');
+  assert.equal((await env.outbox.list(env.owner))[0].sharedText, 'The cafe is in Porto');
+  second.resolve(shareAck(80)); await flush(); assert.deepEqual(await env.outbox.list(env.owner), []); env.dispose();
+});
+
+test('a queued retry whose server item is already gone can still be discarded', async () => {
+  const env = serviceEnvironment(); env.fetcher(async url => response(200, url.endsWith('/dream-items') ? [apiItem(13)] : []));
+  env.render(); await flush(); env.fetcher(async () => response(404, { detail: 'Dream item not found' }));
+  await env.render().shareInstagramLinkDurable('https://instagram.com/reel/13'); await flush();
+  assert.equal(env.render().pendingUploadItems.length, 1);
+  await env.render().deleteItem('13');
+  assert.deepEqual(await env.outbox.list(env.owner), []); assert.deepEqual(env.render().items, []); env.dispose();
+});
+
+test('a list exposing the first share before its ACK cannot unlock edits or location mutations prematurely', async () => {
+  const env = serviceEnvironment(); env.render(); await flush(); const network = deferred();
+  const visibleItem = apiItem(312, { source_url: 'https://www.instagram.com/reel/firstPending/?igsh=list', status: 'needs_review' });
+  env.fetcher(async (url, init) => {
+    if (url.endsWith('/dreams/share')) return network.promise;
+    if (url.endsWith('/312/review')) return response(200, { ...visibleItem, place_name: 'My confirmed cafe', status: 'confirmed', needs_review: false });
+    return response(200, url.endsWith('/dream-items') ? [visibleItem] : []);
+  });
+  await env.render().shareInstagramLinkDurable('https://instagram.com/reel/firstPending'); await flush();
+  assert.equal((await env.outbox.list(env.owner))[0].retryItemId, undefined, 'This is the original share, not a parse retry');
+  await env.render().refresh('quiet'); await flush();
+  const exposed = env.render(); assert.equal(exposed.items[0].id, '312'); assert.equal(exposed.items[0].uploadStatus, 'sending');
+  const callsBefore = env.calls.length;
+  await assert.rejects(exposed.updateItem('312', { placeName: 'My confirmed cafe', needsReview: false }), /queued for reading/);
+  await assert.rejects(exposed.locateItem('312'), /queued for reading/);
+  await assert.rejects(exposed.confirmLocation('312', 'candidate'), /queued for reading/);
+  await assert.rejects(exposed.locateMissing(['312']), /queued for reading/);
+  assert.equal(env.calls.length, callsBefore, 'No edit or location POST can race the outstanding share ACK');
+  network.resolve(shareAck(312)); await flush();
+  assert.deepEqual(await env.outbox.list(env.owner), []);
+  await env.render().updateItem('312', { placeName: 'My confirmed cafe', needsReview: false }); await flush();
+  assert.equal(env.render().items[0].placeName, 'My confirmed cafe'); assert.equal(env.render().items[0].status, 'confirmed');
+  assert.equal(env.render().pendingUploadItems.length, 0); env.dispose();
 });
