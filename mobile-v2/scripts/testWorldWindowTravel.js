@@ -430,3 +430,44 @@ test('a list exposing the first share before its ACK cannot unlock edits or loca
   assert.equal(env.render().items[0].placeName, 'My confirmed cafe'); assert.equal(env.render().items[0].status, 'confirmed');
   assert.equal(env.render().pendingUploadItems.length, 0); env.dispose();
 });
+
+test('terminal duplicate ACKs show saved copy and quietly recover their details without overlapping or background requests', async () => {
+  for (const terminal of ['parsed', 'confirmed']) {
+    const env = serviceEnvironment(); env.render(); await flush();
+    env.fetcher(async (url, init) => init?.method === 'POST' ? shareAck(401, terminal) : response(503, { detail: 'Lists temporarily unavailable' }));
+    await env.render().shareInstagramLinkDurable('https://instagram.com/p/alreadySaved'); await flush();
+    let state = env.render();
+    assert.equal(state.items[0].status, terminal); assert.equal(state.items[0].summary, 'Saved to Dreams. Refresh to load details.');
+    assert.equal(state.processingItems.length, 0); assert.equal(state.pendingUploadItems.length, 0); assert.equal(state.status, 'idle');
+    assert.deepEqual(await env.outbox.list(env.owner), []);
+    const calls = env.calls.length;
+    await env.clock.advance(5000); assert.equal(env.calls.length, calls + 2, 'Receipt details retry even though server sorting is finished');
+    assert.equal(env.render().status, 'idle', 'Receipt recovery stays quiet');
+    env.foreground('background'); const beforeBackground = env.calls.length;
+    await env.clock.advance(10000); assert.equal(env.calls.length, beforeBackground);
+    const recovered = deferred();
+    env.fetcher(async url => url.endsWith('/dream-items') ? recovered.promise : response(200, []));
+    env.foreground(); await flush(); const duringRecovery = env.calls.length;
+    await env.clock.advance(10000); assert.equal(env.calls.length, duringRecovery, 'A slow receipt refresh shares the existing request pair');
+    recovered.resolve(response(200, [apiItem(401, { source_url: 'https://instagram.com/p/alreadySaved', status: terminal,
+      needs_review: false, place_name: 'Recovered cafe', summary: 'Full saved place details' })]));
+    await flush(); state = env.render();
+    assert.equal(state.items[0].placeName, 'Recovered cafe'); assert.equal(state.items[0].summary, 'Full saved place details');
+    assert.equal(env.clock.pending().filter(ms => ms === 5000).length, 0);
+    const afterRecovery = env.calls.length; await env.clock.advance(10000);
+    assert.equal(env.calls.length, afterRecovery, 'A terminal record stops polling once the list has observed it'); env.dispose();
+  }
+});
+
+test('terminal ACK preserves known details that arrived from a list while the share was pending', async () => {
+  const env = serviceEnvironment(); env.render(); await flush(); const network = deferred(); let listAvailable = true;
+  const known = apiItem(402, { source_url: 'https://instagram.com/p/knownDetails', status: 'parsed', needs_review: false,
+    summary: 'Known cafe notes', place_name: 'Already sorted cafe' });
+  env.fetcher(async (url, init) => init?.method === 'POST' ? network.promise
+    : listAvailable ? response(200, url.endsWith('/dream-items') ? [known] : []) : response(503, {}));
+  await env.render().shareInstagramLinkDurable('https://instagram.com/p/knownDetails'); await flush();
+  await env.render().refresh('quiet'); listAvailable = false;
+  network.resolve(shareAck(402, 'parsed')); await flush();
+  assert.equal(env.render().items[0].summary, 'Known cafe notes'); assert.equal(env.render().items[0].placeName, 'Already sorted cafe');
+  assert.equal(env.render().processingItems.length, 0); env.dispose();
+});

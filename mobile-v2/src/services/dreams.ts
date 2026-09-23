@@ -248,6 +248,7 @@ function useDreamsState() {
   const pendingUploadItems = React.useMemo(() => items.filter(item => item.uploadStatus), [items]);
   const processingItems = React.useMemo(() => items.filter((item) => !item.uploadStatus && (item.status === 'processing' || item.status === 'created')), [items]);
   const locatingItems = React.useMemo(() => items.filter((item) => item.locationStatus === 'queued' || item.locationStatus === 'running'), [items]);
+  const awaitingReceiptDetails = recentlyAccepted.current.size;
 
   const refresh = React.useCallback((mode: 'loading' | 'refreshing' | 'quiet' = 'refreshing'): Promise<void> => {
     if (!currentOwner()) return Promise.resolve();
@@ -297,7 +298,7 @@ function useDreamsState() {
   }, [refresh]);
 
   React.useEffect(() => {
-    if (!processingItems.length && !locatingItems.length) return;
+    if (!processingItems.length && !locatingItems.length && !awaitingReceiptDetails) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -306,7 +307,7 @@ function useDreamsState() {
     };
     timer = setTimeout(() => void poll(), 5000);
     return () => { disposed = true; clearTimeout(timer); };
-  }, [processingItems.length, locatingItems.length, refresh]);
+  }, [processingItems.length, locatingItems.length, awaitingReceiptDetails, refresh]);
 
   const drainUploads = React.useCallback((retry = false) => {
     if (!owner || !currentOwner()) return;
@@ -335,7 +336,7 @@ function useDreamsState() {
             attempt = await dreamShareOutbox.beginAttempt(owner, entry);
             if (!attempt || !currentOwner()) continue;
             showPending(entries.map(value => value.id === attempt!.id ? attempt! : value));
-            const saved = await sendPendingDreamShare(attempt, itemsRef.current.find(item => normalizeSourceUrl(item.sourceUrl) === attempt!.sourceUrl));
+            const saved = await sendPendingDreamShare(attempt, () => itemsRef.current.find(item => normalizeSourceUrl(item.sourceUrl) === attempt!.sourceUrl));
             if (!currentOwner()) return;
             // Capture success directly becomes a server item, even when list GETs fail.
             refreshSequence.current += 1;
@@ -616,7 +617,7 @@ function pendingDreamItem(entry: PendingDreamShare, sending = false): DreamItem 
 
 type DreamShareAcknowledgement = { dream_item_id: number; dream_id: number; status: DreamItemStatus; processing_message?: string };
 
-async function sendPendingDreamShare(entry: PendingDreamShare, existing?: DreamItem): Promise<DreamItem> {
+async function sendPendingDreamShare(entry: PendingDreamShare, getExisting: () => DreamItem | undefined): Promise<DreamItem> {
   if (entry.retryItemId) {
     const response = await dreamsAuthenticatedFetch(`/dream-items/${entry.retryItemId}/parse`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ caption: entry.sharedText }),
@@ -630,11 +631,17 @@ async function sendPendingDreamShare(entry: PendingDreamShare, existing?: DreamI
     return mapApiDreamItem(parsed);
   }
   const acknowledged = await shareInstagramLinkRemote(entry.sourceUrl, entry.sharedText);
+  // The list may have exposed full details while this capture request was pending.
+  const existing = getExisting();
   const needsReview = acknowledged.status === 'needs_review' || acknowledged.status === 'failed';
+  const sorting = acknowledged.status === 'created' || acknowledged.status === 'processing';
+  const knownSummary = existing && /^\d+$/.test(existing.id) && !['created', 'processing'].includes(existing.status) ? existing.summary.trim() : undefined;
+  const summary = sorting ? acknowledged.processing_message || 'Saved. Trotter is sorting this post on the server.'
+    : knownSummary || (needsReview ? 'Saved. Add a caption or place details to help sort this post.' : 'Saved to Dreams. Refresh to load details.');
   return { ...(existing ?? pendingDreamItem(entry)), id: String(acknowledged.dream_item_id), dreamId: String(acknowledged.dream_id),
     sourceUrl: entry.sourceUrl, status: acknowledged.status, needsReview, uploadStatus: undefined,
     processingMessage: acknowledged.processing_message,
-    summary: acknowledged.processing_message || (needsReview ? 'Saved. Add a caption or place details to help sort this post.' : 'Saved. Trotter is sorting this post on the server.'),
+    summary,
     updatedAt: new Date().toISOString() };
 }
 
