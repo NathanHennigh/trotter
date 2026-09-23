@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import get_db
 from app.main import app
-from app.models import Dream, DreamItem, DreamLocation, DreamGoogleIdentity, User
+from app.models import Dream, DreamItem, DreamLocation, DreamGoogleIdentity, DreamEnrichmentJob, User
 from app.routers.auth import get_current_user
 from app.services.dream_parser import DreamParseItem, DreamParseResponse
 
@@ -27,6 +27,7 @@ def test_db():
     DreamItem.__table__.create(engine)
     DreamLocation.__table__.create(engine)
     DreamGoogleIdentity.__table__.create(engine)
+    DreamEnrichmentJob.__table__.create(engine)
     Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override_get_db():
@@ -41,6 +42,7 @@ def test_db():
     yield session
     session.close()
     app.dependency_overrides.pop(get_db, None)
+    DreamEnrichmentJob.__table__.drop(engine)
     DreamGoogleIdentity.__table__.drop(engine)
     DreamLocation.__table__.drop(engine)
     DreamItem.__table__.drop(engine)
@@ -67,6 +69,7 @@ def client():
 
 @pytest.fixture(autouse=True)
 def default_dream_enrichment_mocks(monkeypatch):
+    monkeypatch.setattr("app.routers.dreams.notify_enrichment", lambda _: None)
     def fake_parse(caption, source_url=None):
         if "Casa Dani" in caption or "Madrid" in caption:
             return DreamParseResponse(
@@ -102,6 +105,19 @@ def default_dream_enrichment_mocks(monkeypatch):
     monkeypatch.setattr("app.routers.dreams.search_google_place", lambda *args, **kwargs: None)
 
 
+
+def finish_enrichment(test_db, item_id):
+    from app.services.dream_enrichment import resolve_enrichment_job
+    factory = sessionmaker(bind=test_db.get_bind(), autoflush=False)
+    test_db.expire_all()
+    job = test_db.query(DreamEnrichmentJob).filter_by(item_id=item_id).one()
+    job_id = job.id
+    test_db.commit()
+    result = resolve_enrichment_job(job_id, session_factory=factory)
+    test_db.expire_all()
+    return result
+
+
 def test_share_requires_auth():
     app.dependency_overrides.pop(get_current_user, None)
     c = TestClient(app, raise_server_exceptions=False)
@@ -122,7 +138,7 @@ def test_share_creates_unsorted_review_item(client, test_user, test_db):
     assert response.status_code == 200
     data = response.json()
     assert data["duplicate"] is False
-    assert data["status"] == "needs_review"
+    assert data["status"] == "processing"
 
     item = test_db.query(DreamItem).filter(DreamItem.id == data["dream_item_id"]).one()
     assert item.source_url == "https://instagram.com/reel/abc123"
@@ -204,6 +220,7 @@ def test_dream_thumbnail_uses_stable_authenticated_endpoint(client, test_user, t
 
 def test_review_location_change_invalidates_old_pin_but_keeps_provenance(client, test_user, test_db):
     created = client.post("/dreams/share", json={"source_url": "https://instagram.com/reel/moved-pin", "shared_text": "Casa Dani Madrid"}).json()
+    assert finish_enrichment(test_db, created["dream_item_id"]) == "completed"
     item = test_db.query(DreamItem).filter(DreamItem.id == created["dream_item_id"]).one()
     old_metadata = {"place_match": {"raw": {"location": {"latitude": 40.4, "longitude": -3.7}}}, "instagram_metadata": {"caption": "Original source"}}
     item.raw_metadata_json = old_metadata
@@ -520,6 +537,9 @@ def test_parse_item_applies_parser_result_and_regroups(client, test_user, test_d
 
     assert response.status_code == 200
     data = response.json()
+    assert data["status"] == "processing"
+    assert finish_enrichment(test_db, created["dream_item_id"]) == "completed"
+    data = client.get("/dream-items").json()[0]
     assert data["status"] == "parsed"
     assert data["needs_review"] is False
     assert data["place_name"] == "Casa Dani"
@@ -572,6 +592,8 @@ def test_parse_item_without_caption_fetches_metadata(client, test_user, test_db,
     response = client.post(f"/dream-items/{created['dream_item_id']}/parse")
 
     assert response.status_code == 200
+    assert response.json()["status"] == "processing"
+    assert finish_enrichment(test_db, created["dream_item_id"]) == "completed"
     item = test_db.query(DreamItem).filter(DreamItem.id == created["dream_item_id"]).one()
     assert item.caption == "Casa Dani in Madrid, Spain. Best tortilla."
     assert item.raw_metadata_json["instagram_metadata"]["caption"] == item.caption
@@ -637,6 +659,8 @@ def test_duplicate_url_enrichment_uses_caption_fallback_when_model_is_down(clien
 
     assert response.status_code == 200
     assert response.json()["duplicate"] is True
+    monkeypatch.setenv("DREAM_ENRICHMENT_MAX_ATTEMPTS", "1")
+    assert finish_enrichment(test_db, created["dream_item_id"]) == "failed"
     item = test_db.query(DreamItem).filter(DreamItem.id == created["dream_item_id"]).one()
     assert item.place_name == "Kuan Nom Saow Cafe"
     assert item.city == "Krabi"
@@ -698,6 +722,8 @@ def test_import_instagram_batch_creates_dream_items_and_groups_foreign_by_countr
     assert response.status_code == 200
     data = response.json()
     assert data["imported"] == 1
+    assert data["results"][0]["status"] == "processing"
+    assert finish_enrichment(test_db, data["results"][0]["dream_item_id"]) == "completed"
     item = test_db.query(DreamItem).one()
     assert item.place_name == "Casa Toro"
     assert item.dream.title == "Mexico"
@@ -762,6 +788,7 @@ def test_import_instagram_batch_queues_location_without_provider_regrouping(clie
     )
 
     assert response.status_code == 200
+    assert finish_enrichment(test_db, response.json()["results"][0]["dream_item_id"]) == "completed"
     item = test_db.query(DreamItem).one()
     assert "Onera" in item.google_maps_url
     assert item.region_or_neighborhood is None

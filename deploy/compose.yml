@@ -38,6 +38,9 @@ x-backend-environment: &backend-environment
   DREAM_LOCATION_ENABLED: ${DREAM_LOCATION_ENABLED:-true}
   DREAM_LOCATION_BATCH_SIZE: ${DREAM_LOCATION_BATCH_SIZE:-25}
   DREAM_LOCATION_MAX_ATTEMPTS: ${DREAM_LOCATION_MAX_ATTEMPTS:-5}
+  DREAM_ENRICHMENT_ENABLED: ${DREAM_ENRICHMENT_ENABLED:-true}
+  DREAM_ENRICHMENT_BATCH_SIZE: ${DREAM_ENRICHMENT_BATCH_SIZE:-25}
+  DREAM_ENRICHMENT_MAX_ATTEMPTS: ${DREAM_ENRICHMENT_MAX_ATTEMPTS:-3}
   GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
   GOOGLE_PLACES_CACHE_URL: redis://places-cache:6379/0
   VENICE_API_KEY_FILE: /run/secrets/venice_api_key
@@ -200,6 +203,24 @@ services:
       redis:
         condition: service_healthy
     stop_grace_period: 2m
+    logging: *default-logging
+
+  worker-dreams:
+    image: trotter-backend:local
+    restart: unless-stopped
+    environment: *backend-environment
+    secrets: *backend-secrets
+    command: ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=INFO", "--queues=dream_enrichment", "--concurrency=2", "--prefetch-multiplier=1", "--hostname=dreams@%h"]
+    volumes:
+      - trotter_data:/var/lib/trotter
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    stop_grace_period: 5m
     logging: *default-logging
 
   beat:

@@ -309,6 +309,30 @@ class DreamItem(Base):
     user = relationship("User", back_populates="dream_items")
     dream = relationship("Dream", back_populates="items")
     location = relationship("DreamLocation", uselist=False, back_populates="item", cascade="all, delete-orphan")
+    enrichment = relationship("DreamEnrichmentJob", uselist=False, back_populates="item", cascade="all, delete-orphan")
+
+
+class DreamEnrichmentJob(Base):
+    """Durable caption work. Provider calls run after the claiming transaction closes."""
+    __tablename__ = "dream_enrichment_jobs"
+    __table_args__ = (
+        CheckConstraint("status IN ('queued', 'running', 'completed', 'failed', 'cancelled')", name="ck_dream_enrichment_status"),
+    )
+    id = Column(BigInteger().with_variant(Integer, 'sqlite'), primary_key=True)
+    item_id = Column(BigInteger, ForeignKey("dream_items.id", ondelete="CASCADE"), nullable=False, unique=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    fingerprint = Column(String(64), nullable=False)
+    generation = Column(Integer, nullable=False, default=1, server_default="1")
+    status = Column(String(32), nullable=False, default="queued", server_default="queued", index=True)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    lease_token = Column(String(36), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_dispatched_at = Column(DateTime(timezone=True), nullable=True)
+    message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    item = relationship("DreamItem", back_populates="enrichment")
 
 
 class DreamLocation(Base):

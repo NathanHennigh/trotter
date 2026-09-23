@@ -1,0 +1,26 @@
+# Background Dreams sorting
+
+Migration `0012_dream_enrichment_jobs` adds one durable job per Dream item. It does not rewrite any existing item, location, Google identity, account, or trip. Keep the additive table when rolling back code; its downgrade deliberately refuses to delete pending work.
+
+`POST /dreams/share`, `/dreams/import-instagram-batch`, and `/dream-items/{id}/parse` commit capture and queued work before returning. They do not fetch Instagram, run a model, cache a thumbnail, or call a location provider. Share and parse retain their existing response shapes and HTTP 200 status; newly queued saves return `status: "processing"`. Batch results describe captured saves, not finished extraction. Each batch entry commits independently so an interrupted request can safely be retried using URL deduplication.
+
+The mobile Sort action can submit one `POST /dreams/sort` request with `{"item_ids": [1, 2]}` (maximum 1000). Its response is `{"queued": 2, "processing": 2, "item_ids": [1, 2], "skipped": 0}`. `queued` counts newly queued jobs; `processing` and `item_ids` include already active jobs. Missing or cross-owner IDs reject the entire request with 404. Confirmed, manually edited, and manually pinned items are skipped. Clients should show a short acknowledgement and poll the existing authenticated item lists; `processing_message` adds optional explanatory text. Closing the app does not stop sorting.
+
+Workers claim a five-minute lease, close the transaction, then fetch metadata and parse. Applying the result reacquires locks and checks the lease token, generation, and fingerprint of all editable content. An intervening review, pin confirmation, new parse generation, deletion, or direct content change supersedes the result. Existing notes and tags are retained. The location queue is populated only after a usable extraction result commits. Google content policy remains in the existing location service; the enrichment job table contains no Google provider content.
+
+The `dream_enrichment` Celery queue has a separate `worker-dreams` service with concurrency two. Per-task soft/hard limits are 210/240 seconds, below the 300-second lease. A ten-second scheduler tick recovers lost broker notifications and expired worker leases. Failures retry after 30 then 60 seconds, at most three attempts by default; exhausted work becomes a reviewable save instead of remaining in processing. Provider and broker exception strings are never persisted in job metadata. Repeated Sort can explicitly retry a terminal job.
+
+Recovery discovers up to 25 legacy Instagram saves per tick without a job: abandoned `created`/`processing` items, unresolved `needs_review`/`failed` URL saves lacking a place, city, and country, and `parsed` saves with no country. The last group repairs older extraction results that retained a place but lost an explicit country and remained unsorted. Each gets a job once; terminal rows prevent endless automatic rescanning. Confirmed, manually pinned, and user-edited records remain protected, with cancelled markers preventing protected rows from starving later discovery batches. Enrichment is not automatically rerun on every already sorted save.
+
+All validated model items are retained under `raw_metadata_json.parser_raw.items`, including multi-place captions, without provider error payloads. The current schema and UI still have one Dream card per source URL and use the first parsed item. Creating separate cards for all venues remains separate work; this change does not silently discard the remaining parsed items.
+
+If a model omits the country, one explicit country from the deterministic parser's known-country list can fill it. Multi-country captions, directly negated country mentions, and known city/country conflicts are left alone. This never invents a city or replaces a model-provided country.
+
+Roll out with a verified PostgreSQL backup, run `alembic upgrade head`, then start the updated API, `worker-dreams`, existing location worker, and exactly one updated beat. The new API requires migration 0012 before serving Dreams requests. Retain the previous image for code rollback without restoring or deleting user data. Configuration: `DREAM_ENRICHMENT_ENABLED` (default true), `DREAM_ENRICHMENT_BATCH_SIZE` (25, capped at 100), and `DREAM_ENRICHMENT_MAX_ATTEMPTS` (3, capped at 5). Disabling workers intentionally leaves durable work queued until they resume.
+
+```text
+celery -A app.celery_app.celery_app worker --queues=dream_enrichment --concurrency=2 --prefetch-multiplier=1 --hostname=dreams@%h
+celery -A app.celery_app.celery_app beat
+```
+
+Local validation covers no-provider capture, batch interruption, duplicate delivery, expired leases, lost notifications, bounded discovery/retry, edit/delete races, owner scoping, multiple parsed-item retention, and additive migration preservation.

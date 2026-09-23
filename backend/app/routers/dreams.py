@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from urllib.parse import parse_qs, unquote, urlparse, urlunparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, selectinload
@@ -41,6 +41,8 @@ from ..services.instagram_metadata import InstagramMetadataError, fetch_instagra
 from ..services.dream_locations import (
     confirm_candidate, enqueue_location, location_coordinates, location_maps_url, public_location,
 )
+from ..services.dream_enrichment import cancel_enrichment, enqueue_enrichment
+from ..tasks.dream_enrichment_tasks import notify_enrichment
 from .auth import get_current_user
 
 google_map_capable = ContextVar("dreams_google_map_capable", default=False)
@@ -149,6 +151,10 @@ class LocateMissingRequest(BaseModel):
     item_ids: Optional[list[int]] = Field(default=None, max_length=1000)
 
 
+class SortDreamsRequest(BaseModel):
+    item_ids: list[int] = Field(min_length=1, max_length=1000)
+
+
 class ConfirmLocationRequest(BaseModel):
     candidate_id: str = Field(min_length=1, max_length=4096)
 
@@ -186,6 +192,7 @@ class DreamItemOut(BaseModel):
     location_expires_at: Optional[datetime] = None
     location_user_confirmed: bool = False
     status: str
+    processing_message: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -604,6 +611,7 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         longitude=longitude,
         coordinate_precision=coordinate_precision,
         status=item.status,
+        processing_message=item.enrichment.message if item.enrichment else None,
         created_at=item.created_at,
         updated_at=item.updated_at,
     )
@@ -648,45 +656,6 @@ def get_dream_item_thumbnail(
     item.raw_metadata_json = {**raw, "instagram_metadata": metadata}
     db.commit()
     return Response(content=content, media_type=content_type, headers={"Cache-Control": "private, max-age=604800"})
-
-
-def enrich_dream_item_from_url(db: Session, item: DreamItem, current_user: User) -> str | None:
-    note = None
-    try:
-        caption, metadata = resolve_caption_for_parse(item.source_url, item.caption)
-        item.caption = caption
-        item.raw_metadata_json = {
-            **(item.raw_metadata_json or {}),
-            "instagram_metadata": metadata,
-        }
-        if metadata.get("thumbnail_url"):
-            try:
-                cache_thumbnail(item.id, metadata["thumbnail_url"])
-            except DreamThumbnailError:
-                pass
-        parsed = parse_caption_with_fallback_model(caption, item.source_url)
-    except HTTPException as exc:
-        note = str(exc.detail)
-        parsed = fallback_needs_review_response(item.source_url, error=note)
-    except DreamParserError as exc:
-        note = str(exc)
-        parsed = deterministic_caption_fallback(caption, item.source_url, error=note)
-
-    item.raw_metadata_json = {
-        **(item.raw_metadata_json or {}),
-        "parser_provider": parsed.provider,
-        "parser_model": parsed.model,
-        **({"parser_note": note} if note else {}),
-        **({"parser_raw": parsed.raw} if parsed.raw else {}),
-    }
-    apply_parsed_item_to_dream_item(db, item, parsed.items[0], current_user.id)
-    if item.place_name and not item.google_maps_url:
-        item.google_maps_url = build_google_maps_search_url(
-            item.place_name, item.city, item.country, item.region_or_neighborhood,
-        )
-    enqueue_location(db, item)
-    item.updated_at = datetime.utcnow()
-    return note
 
 
 def deterministic_caption_fallback(
@@ -807,145 +776,109 @@ def parse_travel_caption_batch(
     )
 
 
+def capture_dream(db: Session, payload: ShareDreamRequest, user_id: int):
+    source_url = normalize_source_url(payload.source_url)
+    # Lock the owner before checking absent item/group rows. This serializes
+    # simultaneous duplicate shares and grouping without a long provider call.
+    db.query(User).filter(User.id == user_id).with_for_update(key_share=True).one()
+    item = db.query(DreamItem).filter_by(user_id=user_id, source_url=source_url).with_for_update().first()
+    if item:
+        job = None
+        if item.status in {"created", "processing", "needs_review", "failed"} and not (item.place_name or item.city or item.country):
+            job, _ = enqueue_enrichment(db, item)
+        return item, True, job
+    parsed = draft_parse(payload.shared_text, payload.caption, source_url)
+    dream_city, dream_country, dream_region = dream_group_location(parsed["city"], parsed["country"])
+    dream = get_or_create_dream(db, user_id, dream_city, dream_country, dream_region)
+    item = DreamItem(
+        user_id=user_id, dream_id=dream.id, source_platform=payload.source_platform,
+        source_url=source_url, caption=parsed["caption"], category=parsed["category"],
+        place_name=parsed["place_name"], city=parsed["city"], country=parsed["country"],
+        summary=parsed["summary"], tags_json=parsed["tags_json"], confidence=parsed["confidence"],
+        needs_review=parsed["needs_review"], needs_google_places_lookup=parsed["needs_google_places_lookup"],
+        status=parsed["status"], raw_metadata_json={"shared_text": payload.shared_text},
+    )
+    if item.place_name:
+        item.google_maps_url = build_google_maps_search_url(item.place_name, item.city, item.country)
+    db.add(item)
+    db.flush()
+    job, _ = enqueue_enrichment(db, item)
+    return item, False, job
+
+
 @router.post("/dreams/share", response_model=ShareDreamResponse)
 def share_to_dreams(
     payload: ShareDreamRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ShareDreamResponse:
-    source_url = normalize_source_url(payload.source_url)
-    existing = (
-        db.query(DreamItem)
-        .filter(DreamItem.user_id == current_user.id, DreamItem.source_url == source_url)
-        .with_for_update()
-        .first()
-    )
-    if existing:
-        if (
-            existing.status in {"needs_review", "failed"}
-            and not existing.place_name
-            and not existing.city
-            and not existing.country
-            and (not existing.caption or is_url_only_text(existing.caption, existing.source_url))
-        ):
-            enrich_dream_item_from_url(db, existing, current_user)
-            db.commit()
-            db.refresh(existing)
-        enqueue_location(db, existing)
-        db.commit()
-        return ShareDreamResponse(
-            dream_item_id=existing.id,
-            dream_id=existing.dream_id,
-            status=existing.status,
-            duplicate=True,
-        )
-
-    parsed = draft_parse(payload.shared_text, payload.caption, source_url)
-    dream_city, dream_country, dream_region = dream_group_location(parsed["city"], parsed["country"])
-    dream = get_or_create_dream(db, current_user.id, dream_city, dream_country, dream_region)
-    item = DreamItem(
-        user_id=current_user.id,
-        dream_id=dream.id,
-        source_platform=payload.source_platform,
-        source_url=source_url,
-        caption=parsed["caption"],
-        category=parsed["category"],
-        place_name=parsed["place_name"],
-        city=parsed["city"],
-        country=parsed["country"],
-        summary=parsed["summary"],
-        tags_json=parsed["tags_json"],
-        confidence=parsed["confidence"],
-        needs_review=parsed["needs_review"],
-        needs_google_places_lookup=parsed["needs_google_places_lookup"],
-        status=parsed["status"],
-        raw_metadata_json={"shared_text": payload.shared_text},
-    )
-    db.add(item)
-    db.flush()
-    enrich_dream_item_from_url(db, item, current_user)
+    item, duplicate, job = capture_dream(db, payload, current_user.id)
+    # Capture IDs before commit expiry so the wakeup cannot start a new transaction.
+    job_id = job.id if job else None
+    result = ShareDreamResponse(dream_item_id=item.id, dream_id=item.dream_id, status=item.status, duplicate=duplicate)
     db.commit()
-    db.refresh(item)
-    return ShareDreamResponse(dream_item_id=item.id, dream_id=item.dream_id, status=item.status)
+    if job_id:
+        background_tasks.add_task(notify_enrichment, [job_id])
+    return result
 
 
 @router.post("/dreams/import-instagram-batch", response_model=ImportInstagramBatchResponse)
 def import_instagram_batch(
     payload: ImportInstagramBatchRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ImportInstagramBatchResponse:
     urls = batch_source_urls(ParseTravelCaptionBatchRequest(source_urls=payload.source_urls, links_text=payload.links_text))
+    if len(urls) > 1000:
+        raise HTTPException(status_code=422, detail="Import at most 1000 links at a time")
     results: list[ImportInstagramBatchResult] = []
-    duplicate_count = 0
-
+    jobs = []
     for source_url in urls:
-        existing = (
-            db.query(DreamItem)
-            .filter(DreamItem.user_id == current_user.id, DreamItem.source_url == source_url)
-            .with_for_update()
-            .first()
-        )
-        if existing:
-            enqueue_location(db, existing)
-            duplicate_count += 1
-            results.append(
-                ImportInstagramBatchResult(
-                    source_url=source_url,
-                    dream_item_id=existing.id,
-                    dream_id=existing.dream_id,
-                    status=existing.status,
-                    duplicate=True,
-                    place_name=existing.place_name,
-                    city=existing.city,
-                    country=existing.country,
-                    region=existing.region_or_neighborhood,
-                    google_maps_url=existing.google_maps_url,
-                    needs_review=existing.needs_review,
-                    note="duplicate",
-                )
-            )
-            continue
+        item, duplicate, job = capture_dream(db, ShareDreamRequest(source_url=source_url), current_user.id)
+        results.append(ImportInstagramBatchResult(
+            source_url=source_url, dream_item_id=item.id, dream_id=item.dream_id,
+            status=item.status, duplicate=duplicate, place_name=item.place_name, city=item.city,
+            country=item.country, region=item.region_or_neighborhood,
+            google_maps_url=item.google_maps_url, needs_review=item.needs_review,
+            note="duplicate" if duplicate else None,
+        ))
+        if job:
+            jobs.append(job.id)
+        # Each captured URL survives a later item failure or request interruption.
+        db.commit()
+    if jobs:
+        background_tasks.add_task(notify_enrichment, jobs)
+    duplicate_count = sum(result.duplicate for result in results)
+    return ImportInstagramBatchResponse(total=len(results), imported=len(results) - duplicate_count,
+                                         duplicates=duplicate_count, results=results)
 
-        dream = get_or_create_dream(db, current_user.id, None, None, None)
-        item = DreamItem(
-            user_id=current_user.id,
-            dream_id=dream.id,
-            source_platform="instagram",
-            source_url=source_url,
-            category="unknown",
-            summary=source_url,
-            needs_review=True,
-            status="needs_review",
-            raw_metadata_json={"imported_from": "instagram_batch"},
-        )
-        db.add(item)
-        db.flush()
-        note = enrich_dream_item_from_url(db, item, current_user)
-        db.flush()
-        results.append(
-            ImportInstagramBatchResult(
-                source_url=source_url,
-                dream_item_id=item.id,
-                dream_id=item.dream_id,
-                status=item.status,
-                place_name=item.place_name,
-                city=item.city,
-                country=item.country,
-                region=item.region_or_neighborhood,
-                google_maps_url=item.google_maps_url,
-                needs_review=item.needs_review,
-                note=note,
-            )
-        )
 
+@router.post("/dreams/sort")
+def sort_dreams(
+    payload: SortDreamsRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ids = sorted(set(payload.item_ids))
+    items = db.query(DreamItem).filter(DreamItem.user_id == current_user.id, DreamItem.id.in_(ids)).order_by(
+        DreamItem.id).with_for_update().all()
+    if len(items) != len(ids):
+        raise HTTPException(status_code=404, detail="Dream item not found")
+    queued, jobs, processing_ids = 0, [], []
+    for item in items:
+        row, added = enqueue_enrichment(db, item, force=True)
+        if row and row.status in {"queued", "running"}:
+            jobs.append(row.id)
+            processing_ids.append(item.id)
+        queued += int(added)
     db.commit()
-    return ImportInstagramBatchResponse(
-        total=len(results),
-        imported=len(results) - duplicate_count,
-        duplicates=duplicate_count,
-        results=results,
-    )
+    if jobs:
+        background_tasks.add_task(notify_enrichment, jobs)
+    return {"queued": queued, "processing": len(processing_ids), "item_ids": processing_ids,
+            "skipped": len(ids) - len(processing_ids)}
 
 
 @router.get("/dreams", response_model=list[DreamOut])
@@ -990,7 +923,7 @@ def list_dream_items(
     items = (
         db.query(DreamItem)
         .filter(DreamItem.dream_id == dream_id, DreamItem.user_id == current_user.id)
-        .options(selectinload(DreamItem.location).selectinload(DreamLocation.google_identity))
+        .options(selectinload(DreamItem.enrichment), selectinload(DreamItem.location).selectinload(DreamLocation.google_identity))
         .order_by(DreamItem.created_at.desc())
         .all()
     )
@@ -1003,7 +936,7 @@ def list_items(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[DreamItemOut]:
-    query = db.query(DreamItem).options(selectinload(DreamItem.location).selectinload(DreamLocation.google_identity)).filter(DreamItem.user_id == current_user.id)
+    query = db.query(DreamItem).options(selectinload(DreamItem.enrichment), selectinload(DreamItem.location).selectinload(DreamLocation.google_identity)).filter(DreamItem.user_id == current_user.id)
     if item_status:
         if item_status == "needs_review":
             query = query.filter(DreamItem.needs_review.is_(True))
@@ -1015,6 +948,7 @@ def list_items(
 @router.post("/dream-items/{item_id}/parse", response_model=DreamItemOut)
 def parse_item(
     item_id: int,
+    background_tasks: BackgroundTasks,
     payload: ParseDreamItemRequest | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -1022,44 +956,19 @@ def parse_item(
     item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dream item not found")
-
-    caption = payload.caption if payload and payload.caption else item.caption
-    if is_url_only_text(caption, item.source_url):
-        caption = None
-    if not caption:
-        raw_text = item.raw_metadata_json.get("shared_text") if item.raw_metadata_json else None
-        caption = None if is_url_only_text(raw_text, item.source_url) else raw_text
-    if not caption:
-        caption, metadata = resolve_caption_for_parse(item.source_url, None)
-        item.raw_metadata_json = {
-            **(item.raw_metadata_json or {}),
-            "instagram_metadata": metadata,
-        }
-
-    try:
-        parsed = parse_caption_with_fallback_model(caption, item.source_url)
-    except DreamParserError as exc:
-        item.status = "needs_review"
-        item.needs_review = True
-        item.raw_metadata_json = {
-            **(item.raw_metadata_json or {}),
-            "parser_error": str(exc),
-        }
-        item.updated_at = datetime.utcnow()
-        db.commit()
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
-    item.caption = caption
-    item.raw_metadata_json = {
-        **(item.raw_metadata_json or {}),
-        "parser_provider": parsed.provider,
-        "parser_model": parsed.model,
-    }
-    apply_parsed_item_to_dream_item(db, item, parsed.items[0], current_user.id)
-    enqueue_location(db, item)
+    # Confirmed or manually edited saves retain all of the user's choices.
+    if item.status != "confirmed" and not (item.raw_metadata_json or {}).get("dream_user_edited"):
+        if payload and payload.caption:
+            item.caption = payload.caption
+        row, _ = enqueue_enrichment(db, item, force=True)
+        job_id = row.id if row else None
+    else:
+        job_id = None
+    result = dream_item_out(item)
     db.commit()
-    db.refresh(item)
-    return dream_item_out(item)
+    if job_id:
+        background_tasks.add_task(notify_enrichment, [job_id])
+    return result
 
 
 @router.post("/dream-items/{item_id}/review", response_model=DreamItemOut)
@@ -1072,6 +981,8 @@ def review_item(
     item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dream item not found")
+
+    cancel_enrichment(db, item, user_edited=True)
 
     if payload.edits:
         edits = payload.edits.model_dump(exclude_unset=True)
@@ -1212,6 +1123,7 @@ async def confirm_item_location(item_id: int, payload: ConfirmLocationRequest,
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except LookupError:
         raise HTTPException(status_code=404, detail="Dream item not found")
+    cancel_enrichment(db, item, user_edited=True)
     db.commit()
     db.refresh(item)
     return dream_item_out(item)

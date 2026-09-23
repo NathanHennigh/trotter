@@ -206,7 +206,7 @@ def test_higher_ranked_wrong_country_does_not_override_a_later_valid_match(monke
         {"types": ["premise", "point_of_interest"]},
         {"types": ["parking", "point_of_interest", "establishment"]},
         {"types": ["public_bathroom"]},
-        {"types": ["hotel", "lodging"]},
+        {"types": ["hotel", "lodging"], "displayName": {"text": "Casa Toro Hotel"}},
         {"pureServiceAreaBusiness": True},
         {"businessStatus": "CLOSED_PERMANENTLY"},
         {"movedPlaceId": "replacement"},
@@ -424,6 +424,46 @@ def test_short_single_word_brand_is_not_matched_to_a_long_descriptor(monkeypatch
     assert lookup(place_name="Garden Cafe").status == "not_found"
 
 
+def test_short_exact_multiword_brand_with_venue_descriptors_and_verified_city_alias(monkeypatch):
+    singleton(monkeypatch, place(
+        displayName={"text": "La Nube Hotel, Restaurant and Rooftop Bar"},
+        types=["hotel", "restaurant", "bar", "point_of_interest", "establishment"],
+        addressComponents=[component("locality", "Marrakesh"), component("country", "Morocco", "MA")],
+    ))
+    result = lookup(place_name="La Nube", city="Marrakech", country="Morocco", category="restaurant")
+    assert result.status == "resolved"
+
+
+@pytest.mark.parametrize("suffix", ["North Shore", "2", "New Branch", "Rooftop Alternative"])
+def test_short_brand_descriptor_match_never_drops_branch_identity(monkeypatch, suffix):
+    singleton(monkeypatch, place(displayName={"text": f"La Nube Hotel Restaurant and {suffix}"}))
+    assert lookup(place_name="La Nube").status == "not_found"
+
+
+@pytest.mark.parametrize("updates", [
+    {"city": "Different City"}, {"category": "unknown"}, {"category": "hotel"},
+])
+def test_short_exact_brand_descriptor_match_requires_geography_and_compatible_category(monkeypatch, updates):
+    singleton(monkeypatch, place(displayName={"text": "La Nube Restaurant and Rooftop Bar"}))
+    assert lookup(place_name="La Nube", **updates).status == "not_found"
+
+
+@pytest.mark.parametrize("kind", ["locality", "administrative_area_level_1"])
+def test_vietnamese_city_spelling_works_in_locality_and_admin_components(monkeypatch, kind):
+    singleton(monkeypatch, place(
+        addressComponents=[component(kind, "Hà Nội"), component("country", "Vietnam", "VN")],
+    ))
+    assert lookup(city="Hanoi", country="Vietnam").status == "resolved"
+
+
+@pytest.mark.parametrize("city,actual", [("Marrakech", "Marrakesh"), ("Hanoi", "Hà Nội")])
+def test_city_spelling_aliases_do_not_apply_in_another_country(monkeypatch, city, actual):
+    singleton(monkeypatch, place(
+        addressComponents=[component("locality", actual), component("country", "Mexico", "MX")],
+    ))
+    assert lookup(city=city).status == "not_found"
+
+
 @pytest.mark.parametrize("county", ["North Krabi District", "Krabiville", "Other"])
 def test_admin_matching_is_not_a_substring(monkeypatch, county):
     singleton(
@@ -460,6 +500,46 @@ def test_country_alias_region_and_accent_match(monkeypatch):
 def test_exact_venue_in_matching_city_does_not_require_category_approval(monkeypatch, updates):
     singleton(monkeypatch)
     assert lookup(**updates).status == "resolved"
+
+
+@pytest.mark.parametrize("wanted,actual,city,country,kind,locality,category,types", [
+    ("Regnum The Crown", "Regnum The Crown", "Antalya", "Türkiye", "administrative_area_level_1", "Antalya", "restaurant", ["hotel", "lodging"]),
+    ("Chapa Express", "Chapa Express Train", "Hanoi", "Vietnam", "administrative_area_level_1", "Hà Nội", "attraction", ["travel_agency", "transportation_service"]),
+    ("Casa Toro", "Casa Toro", "Oaxaca", "Mexico", "locality", "Oaxaca", "cafe", ["hotel", "lodging"]),
+])
+def test_strong_identity_and_verified_geography_outweigh_inferred_category(
+    monkeypatch, wanted, actual, city, country, kind, locality, category, types,
+):
+    # Synthetic IDs, addresses and coordinates; no retained provider payloads.
+    singleton(monkeypatch, place(displayName={"text": actual}, types=types, addressComponents=[
+        component(kind, locality), component("country", country),
+    ]))
+    assert lookup(place_name=wanted, city=city, country=country, category=category).status == "resolved"
+
+
+@pytest.mark.parametrize("wanted,actual,category,types", [
+    ("Garden Cafe", "Garden Cafe", "cafe", ["hotel"]),
+    ("The Hotel", "The Hotel", "hotel", ["cafe"]),
+    ("Casa Toro", "Casa Toro Hotel", "cafe", ["hotel"]),
+    ("Casa Toro", "Casa Toro Riverside", "cafe", ["hotel"]),
+    ("Chapa Express", "Chapa Express VIP Train", "attraction", ["transportation_service"]),
+    ("Chapa Express", "Chapa Express Train", "attraction", ["hotel"]),
+    ("Chapa Express", "Chapa Express Train", "attraction", ["train_station"]),
+])
+def test_category_conflict_still_rejects_weak_partial_or_wrong_kind_identity(monkeypatch, wanted, actual, category, types):
+    singleton(monkeypatch, place(displayName={"text": actual}, types=types))
+    assert lookup(place_name=wanted, category=category).status == "not_found"
+
+
+@pytest.mark.parametrize("components,region", [
+    ([component("locality", "Other City"), component("country", "Mexico", "MX")], None),
+    ([component("locality", "Oaxaca"), component("country", "Spain", "ES")], None),
+    ([component("locality", "Oaxaca"), component("country", "Mexico", "MX"), component("neighborhood", "South Shore")], "North Shore"),
+    ([component("country", "Mexico", "MX")], None),
+])
+def test_category_override_never_relaxes_missing_or_conflicting_geography(monkeypatch, components, region):
+    singleton(monkeypatch, place(types=["hotel", "lodging"], addressComponents=components))
+    assert lookup(region=region).status == "not_found"
 
 
 @pytest.mark.parametrize("name", ["Starbucks", "Starbucks Reserve", "Hilton Garden Inn"])

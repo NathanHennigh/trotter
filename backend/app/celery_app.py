@@ -10,7 +10,7 @@ def create_celery_app() -> Celery:
 		"travelstrava",
 		broker=broker_url,
 		backend=backend_url,
-		include=["app.tasks.example", "app.tasks.import_tasks", "app.tasks.dream_location_tasks"],
+		include=["app.tasks.example", "app.tasks.import_tasks", "app.tasks.dream_location_tasks", "app.tasks.dream_enrichment_tasks"],
 	)
 
 	app.conf.update(
@@ -21,11 +21,18 @@ def create_celery_app() -> Celery:
 		enable_utc=True,
 		task_always_eager=os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower() in ("1", "true", "yes"),
 		task_eager_propagates=True,
-		task_routes={"app.tasks.dream_location_tasks.*": {"queue": "dream_locations"}},
+		task_routes={
+			"app.tasks.dream_location_tasks.*": {"queue": "dream_locations"},
+			"app.tasks.dream_enrichment_tasks.*": {"queue": "dream_enrichment"},
+		},
 		beat_schedule={
 			"dream-location-discovery": {
 				"task": "app.tasks.dream_location_tasks.discover_dream_locations",
 				"schedule": 60.0,
+			},
+			"dream-enrichment-discovery": {
+				"task": "app.tasks.dream_enrichment_tasks.discover_dream_enrichment",
+				"schedule": 10.0,
 			},
 		},
 	)

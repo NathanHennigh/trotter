@@ -375,6 +375,18 @@ def _brand_similarity(wanted: str, actual: str) -> float:
     """
     left, right = _brand_words(wanted), _brand_words(actual)
     core = "".join(left)
+    # A short multiword brand can be exact while the full Google display name
+    # adds venue descriptions. Do not fuzzy-match short names or discard an
+    # arbitrary suffix: branch names and locations remain identity evidence.
+    wanted_words, actual_words = _normal(wanted).split(), _normal(actual).split()
+    descriptors = _VENUE_WORDS | {"and", "rooftop", "terrace", "lounge", "spa", "boutique", "lodging"}
+    if (
+        len(left) >= 2
+        and len(core) >= 6
+        and actual_words[:len(wanted_words)] == wanted_words
+        and all(word in descriptors for word in actual_words[len(wanted_words):])
+    ):
+        return 1.0
     if len(left) < 2 or len(core) < 8 or not right:
         return 0
     if re.findall(r"\d+", _normal(wanted)) != re.findall(r"\d+", _normal(actual)):
@@ -431,6 +443,33 @@ def _region_conflicts(wanted: str, components: dict[str, set[str]]) -> bool:
     return False
 
 
+def _google_locality(value: str, country: str) -> str:
+    normalized = _locality(value, country)
+    # Verified alternate spellings in Google's English/address components.
+    # Keep these scoped to the country; fuzzy city matching can select a
+    # different branch, and removing spaces globally merges unrelated names.
+    country_key = _country(country)
+    if country_key in {"morocco", "ma"} and normalized == "marrakech":
+        return "marrakesh"
+    if country_key == "vn" and normalized == "ha noi":
+        return "hanoi"
+    return normalized
+
+
+def _same_transport_brand(wanted: str, actual: str, types: set[str]) -> bool:
+    # A transport operator may append the literal service label "Train" to its
+    # brand. Normalize that one label only for transport listings; arbitrary
+    # prefix matches, route names and branch qualifiers are not exact identity.
+    if not types & {"transportation_service", "travel_agency"}:
+        return False
+    def words(value: str) -> list[str]:
+        parts = _normal(value).split()
+        return parts[:-1] if parts and parts[-1] == "train" else parts
+    left, right = words(wanted), words(actual)
+    brand = [word for word in left if word not in _VENUE_WORDS]
+    return left == right and len(brand) >= 2 and len("".join(brand)) >= 8
+
+
 def _match(
     candidate: GoogleCandidate, name: str, city: str, country: str, region: str, category: str
 ):
@@ -445,10 +484,10 @@ def _match(
     if _region_conflicts(region, components):
         return None
     score = _name_score(name, candidate.name)
-    wanted_city = _locality(city, country)
+    wanted_city = _google_locality(city, country)
     city_values = {value for kind in _LOCAL_TYPES for value in components.get(kind, set())}
     city_exact = bool(
-        wanted_city and any(_locality(value, country) == wanted_city for value in city_values)
+        wanted_city and any(_google_locality(value, country) == wanted_city for value in city_values)
     )
     admin_values = {
         value
@@ -456,10 +495,8 @@ def _match(
         if kind.startswith("administrative_area_level_")
         for value in values
     }
-    administrative = any(_same_admin(city, value) for value in admin_values)
+    administrative = any(_same_admin(wanted_city, _google_locality(value, country)) for value in admin_values)
     allowed, category_exact = _category_match(category, candidate._types)
-    if not allowed:
-        return None
     geography_verified = city_exact or administrative
     brand_score = _brand_similarity(name, candidate.name)
     distinctive_exact = (
@@ -467,6 +504,12 @@ def _match(
         and len(_brand_words(name)) >= 2
         and len("".join(_brand_words(name))) >= 8
     )
+    # The saved category is inferred from a caption and may be wrong. It helps
+    # disambiguate fuzzy/partial names, but cannot veto a distinctive exact
+    # identity with verified geography. This never changes the saved category.
+    strong_identity = distinctive_exact or _same_transport_brand(name, candidate.name, candidate._types)
+    if not allowed and not (geography_verified and strong_identity):
+        return None
     local_script_match = (
         not geography_verified
         and distinctive_exact
