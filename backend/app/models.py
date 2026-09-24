@@ -277,10 +277,27 @@ class Dream(Base):
     items = relationship("DreamItem", back_populates="dream", cascade="all, delete-orphan")
 
 
+class DreamSourcePost(Base):
+    """One saved source; its independently editable places remain DreamItems."""
+    __tablename__ = "dream_source_posts"
+    __table_args__ = (UniqueConstraint("user_id", "source_url", name="uq_dream_source_user_url"),)
+    id = Column(BigInteger().with_variant(Integer, 'sqlite'), primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_url = Column(Text, nullable=False)
+    source_platform = Column(String(32), nullable=False, default="instagram")
+    caption = Column(Text, nullable=True)
+    raw_metadata_json = Column(JSON, nullable=True)
+    removed_place_keys = Column(JSON, nullable=False, default=list, server_default="[]")
+    generation = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    items = relationship("DreamItem", back_populates="source_post", passive_deletes=True)
+
+
 class DreamItem(Base):
     __tablename__ = "dream_items"
     __table_args__ = (
-        UniqueConstraint("user_id", "source_url", name="uq_dream_item_user_source_url"),
+        UniqueConstraint("user_id", "source_url", "source_place_key", name="uq_dream_item_user_source_place"),
     )
 
     id = Column(BigInteger().with_variant(Integer, 'sqlite'), primary_key=True)
@@ -288,6 +305,9 @@ class DreamItem(Base):
     dream_id = Column(BigInteger, ForeignKey("dreams.id", ondelete="CASCADE"), nullable=False)
     source_platform = Column(String(32), nullable=False, default="instagram")
     source_url = Column(Text, nullable=False)
+    source_post_id = Column(BigInteger, ForeignKey("dream_source_posts.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_place_key = Column(String(64), nullable=False, default="primary", server_default="primary")
+    source_place_index = Column(Integer, nullable=False, default=0, server_default="0")
     caption = Column(Text, nullable=True)
     raw_metadata_json = Column(JSON, nullable=True)
     category = Column(String(32), nullable=False, default="unknown")
@@ -308,6 +328,7 @@ class DreamItem(Base):
 
     user = relationship("User", back_populates="dream_items")
     dream = relationship("Dream", back_populates="items")
+    source_post = relationship("DreamSourcePost", back_populates="items")
     location = relationship("DreamLocation", uselist=False, back_populates="item", cascade="all, delete-orphan")
     enrichment = relationship("DreamEnrichmentJob", uselist=False, back_populates="item", cascade="all, delete-orphan")
 
@@ -322,6 +343,7 @@ class DreamEnrichmentJob(Base):
     item_id = Column(BigInteger, ForeignKey("dream_items.id", ondelete="CASCADE"), nullable=False, unique=True)
     user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     fingerprint = Column(String(64), nullable=False)
+    source_generation = Column(Integer, nullable=True)
     generation = Column(Integer, nullable=False, default=1, server_default="1")
     status = Column(String(32), nullable=False, default="queued", server_default="queued", index=True)
     attempts = Column(Integer, nullable=False, default=0, server_default="0")

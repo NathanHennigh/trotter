@@ -17,7 +17,7 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session, selectinload
 
 from ..db import get_db
-from ..models import Dream, DreamItem, DreamLocation, User
+from ..models import Dream, DreamItem, DreamLocation, DreamSourcePost, User
 from ..services.dream_parser import (
     DreamParserError,
     DreamParseItem,
@@ -164,6 +164,9 @@ class DreamItemOut(BaseModel):
     dream_id: int
     source_platform: str
     source_url: str
+    source_post_id: Optional[int] = None
+    source_place_count: int = 1
+    source_place_index: int = 0
     caption: Optional[str] = None
     category: str
     place_name: Optional[str] = None
@@ -579,6 +582,7 @@ def dream_item_coordinates(item: DreamItem) -> tuple[Optional[float], Optional[f
 
 
 def dream_item_out(item: DreamItem) -> DreamItemOut:
+    from ..services.dream_source_places import source_fields
     raw = item.raw_metadata_json or {}
     metadata = raw.get("instagram_metadata") if isinstance(raw, dict) else None
     thumbnail_url = f"/dream-items/{item.id}/thumbnail" if isinstance(metadata, dict) and metadata.get("thumbnail_url") else None
@@ -592,6 +596,7 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         dream_id=item.dream_id,
         source_platform=item.source_platform,
         source_url=item.source_url,
+        **source_fields(item),
         caption=item.caption,
         category=item.category,
         place_name=item.place_name,
@@ -628,6 +633,12 @@ def get_dream_item_thumbnail(
         raise HTTPException(status_code=404, detail="Dream item not found")
 
     cached = read_cached_thumbnail(item.id)
+    if not cached and item.source_post:
+        for sibling in item.source_post.items:
+            if sibling.id != item.id:
+                cached = read_cached_thumbnail(sibling.id)
+                if cached:
+                    break
     if cached:
         content, content_type = cached
         return Response(content=content, media_type=content_type, headers={"Cache-Control": "private, max-age=604800"})
@@ -781,7 +792,8 @@ def capture_dream(db: Session, payload: ShareDreamRequest, user_id: int):
     # Lock the owner before checking absent item/group rows. This serializes
     # simultaneous duplicate shares and grouping without a long provider call.
     db.query(User).filter(User.id == user_id).with_for_update(key_share=True).one()
-    item = db.query(DreamItem).filter_by(user_id=user_id, source_url=source_url).with_for_update().first()
+    item = db.query(DreamItem).filter_by(user_id=user_id, source_url=source_url).order_by(
+        (DreamItem.source_place_key == "primary").desc(), DreamItem.source_place_index, DreamItem.id).with_for_update().first()
     if item:
         job = None
         added_text = False
@@ -822,6 +834,13 @@ def capture_dream(db: Session, payload: ShareDreamRequest, user_id: int):
         item.google_maps_url = build_google_maps_search_url(item.place_name, item.city, item.country)
     db.add(item)
     db.flush()
+    # Re-sharing after removing every place explicitly starts a fresh source.
+    # A normal replay with remaining siblings never clears removal tombstones.
+    old_source = db.query(DreamSourcePost).filter_by(user_id=user_id, source_url=source_url).first()
+    if old_source:
+        old_source.removed_place_keys = []
+        item.source_post = old_source
+        item.source_post_id = old_source.id
     job, _ = enqueue_enrichment(db, item)
     return item, False, job
 
@@ -882,13 +901,18 @@ def sort_dreams(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    db.query(User).filter_by(id=current_user.id).with_for_update(key_share=True).first()
     ids = sorted(set(payload.item_ids))
     items = db.query(DreamItem).filter(DreamItem.user_id == current_user.id, DreamItem.id.in_(ids)).order_by(
         DreamItem.id).with_for_update().all()
     if len(items) != len(ids):
         raise HTTPException(status_code=404, detail="Dream item not found")
     queued, jobs, processing_ids = 0, [], []
+    seen_sources = set()
     for item in items:
+        if item.source_url in seen_sources:
+            continue
+        seen_sources.add(item.source_url)
         row, added = enqueue_enrichment(db, item, force=True)
         if row and row.status in {"queued", "running"}:
             jobs.append(row.id)
@@ -943,8 +967,8 @@ def list_dream_items(
     items = (
         db.query(DreamItem)
         .filter(DreamItem.dream_id == dream_id, DreamItem.user_id == current_user.id)
-        .options(selectinload(DreamItem.enrichment), selectinload(DreamItem.location).selectinload(DreamLocation.google_identity))
-        .order_by(DreamItem.created_at.desc())
+        .options(selectinload(DreamItem.source_post).selectinload(DreamSourcePost.items), selectinload(DreamItem.enrichment), selectinload(DreamItem.location).selectinload(DreamLocation.google_identity))
+        .order_by(DreamItem.created_at.desc(), DreamItem.source_place_index, DreamItem.id)
         .all()
     )
     return [dream_item_out(item) for item in items]
@@ -956,13 +980,13 @@ def list_items(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[DreamItemOut]:
-    query = db.query(DreamItem).options(selectinload(DreamItem.enrichment), selectinload(DreamItem.location).selectinload(DreamLocation.google_identity)).filter(DreamItem.user_id == current_user.id)
+    query = db.query(DreamItem).options(selectinload(DreamItem.source_post).selectinload(DreamSourcePost.items), selectinload(DreamItem.enrichment), selectinload(DreamItem.location).selectinload(DreamLocation.google_identity)).filter(DreamItem.user_id == current_user.id)
     if item_status:
         if item_status == "needs_review":
             query = query.filter(DreamItem.needs_review.is_(True))
         else:
             query = query.filter(DreamItem.status == item_status)
-    return [dream_item_out(item) for item in query.order_by(DreamItem.created_at.desc()).all()]
+    return [dream_item_out(item) for item in query.order_by(DreamItem.created_at.desc(), DreamItem.source_place_index, DreamItem.id).all()]
 
 
 @router.post("/dream-items/{item_id}/parse", response_model=DreamItemOut)
@@ -973,6 +997,7 @@ def parse_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> DreamItemOut:
+    db.query(User).filter_by(id=current_user.id).with_for_update(key_share=True).first()
     item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dream item not found")
@@ -998,6 +1023,7 @@ def review_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> DreamItemOut:
+    db.query(User).filter_by(id=current_user.id).with_for_update(key_share=True).first()
     item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dream item not found")
@@ -1080,9 +1106,12 @@ def delete_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
+    db.query(User).filter_by(id=current_user.id).with_for_update(key_share=True).first()
     item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dream item not found")
+    from ..services.dream_source_places import remember_removed_place
+    remember_removed_place(db, item)
     db.delete(item)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -1124,6 +1153,7 @@ async def get_item_location_details(item_id: int, response: Response,
 @router.post("/dream-items/{item_id}/location-confirm", response_model=DreamItemOut)
 async def confirm_item_location(item_id: int, payload: ConfirmLocationRequest,
                           current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db.query(User).filter_by(id=current_user.id).with_for_update(key_share=True).first()
     item = db.query(DreamItem).filter_by(id=item_id, user_id=current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=404, detail="Dream item not found")

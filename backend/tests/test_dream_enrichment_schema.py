@@ -38,7 +38,7 @@ def test_migration_preserves_all_original_tables_and_matches_model():
         assert schemas == {key: after[key] for key in schemas}
         assert set(after) - set(schemas) == {"dream_enrichment_jobs"}
     assert {(column["name"], column["nullable"]) for column in inspect(engine).get_columns("dream_enrichment_jobs")} == {
-        (column.name, column.nullable) for column in DreamEnrichmentJob.__table__.columns}
+        (column.name, column.nullable) for column in DreamEnrichmentJob.__table__.columns if column.name != "source_generation"}
 
 
 def test_postgresql_ddl_and_nondestructive_downgrade():

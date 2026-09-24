@@ -76,7 +76,7 @@ def test_parse_caption_with_venice_uses_schema_and_sanitizes_metadata(monkeypatc
     assert result.provider == "venice"
     assert result.items[0].place_name == "Casa Dani"
     assert result.items[0].needs_review is False
-    assert result.raw["prompt_version"] == "dream-places-v2"
+    assert result.raw["prompt_version"] == "dream-places-v3"
     assert result.raw["attempts"] == 1
     assert result.raw["latency_ms"] >= 0
     assert result.raw["request_id"] == "chatcmpl-test"

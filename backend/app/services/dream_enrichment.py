@@ -47,11 +47,15 @@ def enqueue_enrichment(db: Session, item: DreamItem, *, force=False, now=None):
     identity = fingerprint(item)
     if row and row.fingerprint == identity and (row.status in ACTIVE or not force):
         return row, False
+    from .dream_source_places import ensure_source
+    source = ensure_source(db, item)
     if not row:
         row = DreamEnrichmentJob(item_id=item.id, user_id=item.user_id, generation=0, created_at=now)
         db.add(row)
         item.enrichment = row
     row.generation += 1
+    source.generation += 1
+    row.source_generation = source.generation
     row.fingerprint, row.status, row.attempts = identity, "queued", 0
     row.lease_token = row.lease_expires_at = row.last_dispatched_at = None
     row.next_attempt_at = row.updated_at = now
@@ -82,6 +86,7 @@ def discover_enrichment(db: Session, *, limit=25, now=None):
     query = db.query(DreamItem).outerjoin(DreamEnrichmentJob, DreamEnrichmentJob.item_id == DreamItem.id).filter(
         DreamEnrichmentJob.id.is_(None),
         DreamItem.source_platform == "instagram",
+        DreamItem.source_place_key == "primary",
         or_(
             DreamItem.status.in_(["processing", "created"]),
             and_(DreamItem.status.in_(["needs_review", "failed"]),
@@ -139,6 +144,9 @@ def claim_enrichment(db: Session, job_id: int, *, now=None):
     db.refresh(row)
     if row.status not in ACTIVE:
         return None
+    if row.source_generation is not None and item.source_post and row.source_generation != item.source_post.generation:
+        cancel_enrichment(db, item, now=now)
+        return None
     if item.status != "processing" or fingerprint(item) != row.fingerprint:
         cancel_enrichment(db, item, now=now)
         return None
@@ -160,6 +168,7 @@ def claim_enrichment(db: Session, job_id: int, *, now=None):
         return None
     return {"job_id": row.id, "item_id": item.id, "user_id": item.user_id,
             "generation": row.generation, "token": token, "fingerprint": row.fingerprint,
+            "source_generation": row.source_generation,
             "source_url": item.source_url, "caption": item.caption,
             "shared_text": (item.raw_metadata_json or {}).get("shared_text")}
 
@@ -190,12 +199,11 @@ def read_source(claim):
 
 def _apply_result(db, item, result):
     from ..routers import dreams
-    previous_caption = item.caption
-    old_summary = item.summary
-    generated_summaries = {item.source_url, "Saved from Instagram", "Saved Instagram link",
-                           dreams.summarize(previous_caption or ""),
-                           dreams.summarize((item.raw_metadata_json or {}).get("shared_text") or "")}
-    old_tags = list(item.tags_json or [])
+    from .dream_source_places import legacy_extracted_key, provisional_draft, reconcile_places
+    was_draft = provisional_draft(item)
+    original_key = legacy_extracted_key(item)
+    if original_key:
+        item.raw_metadata_json = {**(item.raw_metadata_json or {}), "source_extracted_key": original_key}
     item.caption = result["caption"] or item.caption
     parsed = result["parsed"]
     # A missing model field must not discard one explicit, uncontested country.
@@ -222,14 +230,11 @@ def _apply_result(db, item, result):
                               "parser_raw": {"items": [entry.model_dump() for entry in parsed.items]}}
     if metadata:
         item.raw_metadata_json = {**item.raw_metadata_json, "instagram_metadata": metadata}
-    dreams.apply_parsed_item_to_dream_item(db, item, parsed.items[0], item.user_id)
-    if old_summary and old_summary not in generated_summaries:
-        item.summary = old_summary
-    item.tags_json = list(dict.fromkeys([*old_tags, *(item.tags_json or [])]))
-    if item.place_name and not item.google_maps_url:
-        item.google_maps_url = dreams.build_google_maps_search_url(
-            item.place_name, item.city, item.country, item.region_or_neighborhood)
-    enqueue_location(db, item)
+    reconcile_places(db, item, parsed, anchor_is_draft=was_draft)
+    if item.status == "processing":
+        # A later extraction may omit an existing place. Keep that card rather
+        # than deleting it or leaving its finished work looking perpetually busy.
+        item.status = "needs_review" if item.needs_review else "parsed"
 
 
 def resolve_enrichment_job(job_id, *, session_factory=None, reader=None, now=None):
@@ -254,6 +259,10 @@ def resolve_enrichment_job(job_id, *, session_factory=None, reader=None, now=Non
         item = db.query(DreamItem).filter_by(id=claim["item_id"], user_id=claim["user_id"]).with_for_update().first()
         row = db.query(DreamEnrichmentJob).filter_by(id=job_id, user_id=claim["user_id"]).with_for_update().first()
         if not item or not row or row.lease_token != claim["token"] or row.generation != claim["generation"]:
+            return "superseded"
+        if claim.get("source_generation") is not None and item.source_post and claim["source_generation"] != item.source_post.generation:
+            cancel_enrichment(db, item, now=finished)
+            db.commit()
             return "superseded"
         if item.status != "processing" or fingerprint(item) != claim["fingerprint"]:
             cancel_enrichment(db, item, now=finished)

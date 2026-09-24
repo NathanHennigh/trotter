@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import get_db
 from app.main import app
-from app.models import Dream, DreamItem, DreamLocation, DreamGoogleIdentity, DreamEnrichmentJob, User
+from app.models import Dream, DreamItem, DreamLocation, DreamGoogleIdentity, DreamEnrichmentJob, DreamSourcePost, User
 from app.routers.auth import get_current_user
 from app.services.dream_parser import DreamParseItem, DreamParseResponse
 
@@ -24,6 +24,7 @@ def test_db():
     )
     User.__table__.create(engine)
     Dream.__table__.create(engine)
+    DreamSourcePost.__table__.create(engine)
     DreamItem.__table__.create(engine)
     DreamLocation.__table__.create(engine)
     DreamGoogleIdentity.__table__.create(engine)
@@ -46,6 +47,7 @@ def test_db():
     DreamGoogleIdentity.__table__.drop(engine)
     DreamLocation.__table__.drop(engine)
     DreamItem.__table__.drop(engine)
+    DreamSourcePost.__table__.drop(engine)
     Dream.__table__.drop(engine)
     User.__table__.drop(engine)
 

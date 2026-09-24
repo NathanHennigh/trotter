@@ -14,7 +14,7 @@ from datetime import timedelta
 from urllib.parse import urlencode
 
 from redis import Redis
-from ..models import DreamGoogleIdentity, DreamItem, DreamLocation
+from ..models import DreamGoogleIdentity, DreamItem, DreamLocation, User
 
 PROVIDER = "google_places"
 CACHE_SECONDS = 29 * 24 * 60 * 60
@@ -269,6 +269,9 @@ async def confirm_google_candidate(db, item_id, user_id, candidate_id, *, fetche
     candidate = candidate.model_dump() if hasattr(candidate, "model_dump") else candidate
     if candidate.get("id") != candidate_id:
         raise ValueError("The location identity changed. Find the place again.")
+    # The provider call released the original transaction. Reacquire the same
+    # owner-before-item order as review and multi-place reconciliation.
+    db.query(User).filter_by(id=user_id).with_for_update(key_share=True).first()
     item = db.query(DreamItem).filter_by(id=item_id, user_id=user_id).with_for_update().first()
     if not item:
         raise LookupError("Saved place not found")

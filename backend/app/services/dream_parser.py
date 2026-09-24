@@ -23,7 +23,7 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_ATTEMPTS = 2
 DEFAULT_MAX_COMPLETION_TOKENS = 2400
 DEFAULT_MAX_CAPTION_CHARS = 20_000
-PROMPT_VERSION = "dream-places-v2"
+PROMPT_VERSION = "dream-places-v3"
 
 TRANSIENT_HTTP_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
 
@@ -50,6 +50,9 @@ Return one JSON object that exactly matches the supplied response schema. Do not
 Extraction rules:
 - Return one item for every distinct named travel place in source order.
 - A list of venues must produce a separate item for each venue that is actually named.
+- Preserve geography local to each named venue; different places in one reel may be in different cities or countries.
+- Cities or regions mentioned only as comparisons or alternatives (for example, "while everyone flocks to Sa Pa, try Ta Xua") are not the saved places' location. In that example use Ta Xua, never Sa Pa.
+- A comparison destination is not itself a place to save unless the caption also explicitly recommends visiting a named place there.
 - Never invent an exact place name or infer one from a general travel theme.
 - Preserve proper names as written, apart from obvious whitespace cleanup.
 - A city, country, region, neighborhood, or broad destination is not a place_name.
