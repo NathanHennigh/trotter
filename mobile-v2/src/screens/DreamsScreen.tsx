@@ -28,10 +28,7 @@ import {
 } from "../components/world-window/WorldWindowUI";
 import { CountryPostcard } from "../components/world-window/dreams/CountryPostcard";
 import { DreamEditor } from "../components/world-window/dreams/DreamEditor";
-import {
-  DreamPhoto,
-  PlaceSymbol,
-} from "../components/world-window/dreams/DreamPhoto";
+import { DreamPhoto } from "../components/world-window/dreams/DreamPhoto";
 import {
   dreamLocationType,
   dreamPlaceLabel,
@@ -48,9 +45,9 @@ import {
   safeWebUrl,
 } from "../components/world-window/dreams/dreamPresentation";
 import { countryRegion } from "../components/world-window/dreams/countryRegion";
-import { dreamCopy } from "../components/world-window/dreams/dreamCopy";
+import { dreamCardTitle, dreamCardMeta, dreamInboxSummary } from "../components/world-window/dreams/dreamCardPresentation";
 import { dreamProcessingState, dreamProcessingSummary } from "../components/world-window/dreams/dreamProcessing";
-import { canFindLocation, isFindingLocation, locationNote } from "../components/world-window/dreams/locationPresentation";
+import { canFindLocation, isFindingLocation } from "../components/world-window/dreams/locationPresentation";
 import { DreamPlacesMap } from "../components/world-window/dreams/DreamPlacesMap";
 import type { MapPoint } from "../components/world-window/trips/tripPresentation";
 import type { BottomNavTab } from "../data/trotterMock";
@@ -79,7 +76,6 @@ export function DreamsScreen({
       key: string;
       title: string;
     }>(),
-    [review, setReview] = React.useState(false),
     [capture, setCapture] = React.useState(false),
     [selectedMode, setSelectedMode] = React.useState<"view" | "edit">("view"),
     [returningCountry, setReturningCountry] = React.useState<string>(),
@@ -88,7 +84,7 @@ export function DreamsScreen({
   const [nativeReceipt, setNativeReceipt] = React.useState<NativeDreamShareReceipt>();
   React.useEffect(() => {
     if (!openSource) return;
-    setSourceUrl(openSource.url); setCountry(undefined); setReview(false);
+    setSourceUrl(openSource.url); setCountry(undefined);
     setSelectedId(undefined); setCapture(false); setNativeReceipt(undefined);
   }, [openSource?.requestId]);
   const editorBack = React.useRef<(() => void) | null>(null),
@@ -99,7 +95,8 @@ export function DreamsScreen({
   const registerCaptureBack = React.useCallback((handler: (() => void) | null) => { captureBack.current = handler; }, []);
   const homeOffset = React.useRef(0),
     selected = store.items.find((item) => item.id === selectedId);
-  const boards = React.useMemo(() => countryBoards(store.items), [store.items]);
+  const boards = React.useMemo(() => countryBoards(store.items).filter(board => board.key !== "unsorted"), [store.items]);
+  const unsortedItems = React.useMemo(() => store.items.filter(item => countryKey(item.country) === "unsorted"), [store.items]);
   const sourceCounts = React.useMemo(() => sourcePlaceCounts(store.items), [store.items]);
   const sourceItems = React.useMemo(() => sourceUrl ? placesFromSource(store.items, sourceUrl) : [], [store.items, sourceUrl]);
   const sourceItemsRef = React.useRef(sourceItems); sourceItemsRef.current = sourceItems;
@@ -143,25 +140,17 @@ export function DreamsScreen({
       store.items.filter((item) => countryKey(item.country) === country?.key),
     [store.items, country?.key],
   );
-  const reviews = React.useMemo(
-    () =>
-      store.items.filter(
-        (item) => item.needsReview || item.status === "failed",
-      ),
-    [store.items],
-  );
   const back = () => {
     if (sourceUrl) { setSourceUrl(undefined); return; }
     setReturningCountry(country?.key);
     setCountry(undefined);
-    setReview(false);
   };
   React.useEffect(() => {
     const goBack = () => {
       if (!visible) return false;
       if (capture && captureBack.current) { captureBack.current(); return true; }
       if (selected && editorBack.current) { editorBack.current(); return true; }
-      if (!country && !review && !sourceUrl) return false;
+      if (!country && !sourceUrl) return false;
       if (countryBack.current) countryBack.current(); else back();
       return true;
     };
@@ -169,7 +158,7 @@ export function DreamsScreen({
     const handler = !onBackHandlerChange && visible
       ? BackHandler.addEventListener("hardwareBackPress", goBack) : undefined;
     return () => { handler?.remove(); onBackHandlerChange?.(null); };
-  }, [country, review, sourceUrl, visible, selected, capture, onBackHandlerChange]);
+  }, [country, sourceUrl, visible, selected, capture, onBackHandlerChange]);
   const loading = store.status === "loading" || store.status === "refreshing";
   const actions = (
     <Pressable
@@ -183,15 +172,12 @@ export function DreamsScreen({
   );
   return (
     <View style={[s.screen, { paddingTop: insets.top }]}>
-      {country || review || sourceUrl ? (
+      {country || sourceUrl ? (
         <CountryPlaces
-          key={sourceUrl || country?.key || "review"}
-          title={sourceUrl ? "From this reel" : review ? "To review" : country?.title || "Saved places"}
-          items={sourceUrl ? sourceItems : review ? reviews : countryItems}
-          review={!sourceUrl && review}
+          key={sourceUrl || country?.key}
+          title={sourceUrl ? "From this reel" : country?.title || "Saved places"}
+          items={sourceUrl ? sourceItems : countryItems}
           sourceUrl={sourceUrl}
-          sourceCounts={sourceCounts}
-          onShowSource={setSourceUrl}
           sourceReceipt={sourceUrl && nativeReceipt && dreamSourceKey(sourceUrl) === dreamSourceKey(nativeReceipt.sourceUrl) ? nativeReceipt : undefined}
           onRetryShare={nativeReceipt ? () => void retryNativeDreamShare(nativeReceipt.id).catch(() => {}) : undefined}
           topInset={0}
@@ -231,37 +217,17 @@ export function DreamsScreen({
           ListHeaderComponent={
             <>
               <WWHeader title="Dreams" action={actions} />
-              {reviews.length > 0 && (
-                <View style={s.homeMeta}>
-                  {reviews.length > 0 && (
-                    <Pressable
-                      onPress={() => setReview(true)}
-                      accessibilityRole="button"
-                      style={s.reviewButton}
-                    >
-                      <Text style={s.reviewText}>Review {reviews.length}</Text>
-                      <WWIcon name="chevron" size={13} color={colors.red} />
-                    </Pressable>
-                  )}
-                </View>
-              )}
-              {store.processingItems.length > 0 && (
-                <View style={s.notice}>
-                  <Text accessibilityLiveRegion="polite" style={s.noticeText}>
-                    Sorting {store.processingItems.length}{" "}
-                    {store.processingItems.length === 1
-                      ? "shared post"
-                      : "shared posts"}
-                    … You can leave this screen.
-                  </Text>
-                </View>
-              )}
-              {(store.pendingUploadItems?.length ?? 0) > 0 && (
-                <View style={s.notice}>
-                  <Text accessibilityLiveRegion="polite" style={s.noticeText}>
-                    {store.pendingUploadItems.length} {store.pendingUploadItems.length === 1 ? "post is" : "posts are"} waiting to send. Kept on this device until uploaded.
-                  </Text>
-                </View>
+              {unsortedItems.length > 0 && (
+                <Pressable accessibilityRole="button" accessibilityLabel={`Unsorted, ${unsortedItems.length} saves. ${dreamInboxSummary(unsortedItems)}`}
+                  onPress={() => { setReturningCountry(undefined); setCountry({ key: "unsorted", title: "Unsorted" }); }}
+                  style={s.inbox}>
+                  <View style={s.inboxPhoto}><DreamPhoto item={unsortedItems[0]} compact /></View>
+                  <View style={s.placeCopy}>
+                    <View style={s.inboxTitleLine}><Text style={s.inboxTitle}>Unsorted</Text><Text style={s.inboxCount}>{unsortedItems.length}</Text></View>
+                    <Text accessibilityLiveRegion="polite" style={s.inboxSummary} numberOfLines={2}>{dreamInboxSummary(unsortedItems)}</Text>
+                  </View>
+                  <WWIcon name="chevron" size={16} color={colors.mutedInk} />
+                </Pressable>
               )}
               {store.error && (
                 <ErrorLine
@@ -280,7 +246,7 @@ export function DreamsScreen({
               onPress={() => { setReturningCountry(undefined); setCountry({ key: item.key, title: item.title }); }}
             />
           )}
-          ListEmptyComponent={
+          ListEmptyComponent={unsortedItems.length ? null : (
             <WWEmpty
               title={
                 loading ? "Loading your saved places…" : "Your next places"
@@ -299,7 +265,7 @@ export function DreamsScreen({
                 ) : undefined
               }
             />
-          }
+          )}
         />
       )}
       <BottomNav active={active} onChange={onChange} />
@@ -311,6 +277,8 @@ export function DreamsScreen({
           onCloseRequestChange={registerEditorBack}
           item={selected}
           points={pointsByCountry.get(countryKey(selected.country)) ?? []}
+          sourceCount={sourceCounts.get(dreamSourceKey(selected.sourceUrl)) ?? 1}
+          onShowSource={() => { setSourceUrl(selected.sourceUrl); setSelectedId(undefined); }}
           onClose={() => setSelectedId(undefined)}
           onSave={store.updateItem}
           onDelete={store.deleteItem}
@@ -336,20 +304,18 @@ export function DreamsScreen({
 }
 
 function CountryPlaces({
-  title, items, review, topInset, bottomInset, loading, error, onBack, onRefresh,
+  title, items, topInset, bottomInset, loading, error, onBack, onRefresh,
   onSelect, onLocateMissing, motion, active = true, onBackRequestChange,
-  sourceUrl, sourceCounts, onShowSource,
+  sourceUrl,
   sourceReceipt, onRetryShare,
 }: {
-  title: string; items: DreamItem[]; review: boolean; topInset: number;
+  title: string; items: DreamItem[]; topInset: number;
   bottomInset: number; loading: boolean; error?: string; onBack: () => void;
   onRefresh: () => void; onSelect: (id: string, mode?: "view" | "edit") => void;
   onLocateMissing: (ids: string[]) => Promise<void>; motion: boolean;
   active?: boolean;
   onBackRequestChange?: (handler: (() => void) | null) => void;
   sourceUrl?: string;
-  sourceCounts: Map<string, number>;
-  onShowSource: (sourceUrl: string) => void;
   sourceReceipt?: NativeDreamShareReceipt;
   onRetryShare?: () => void;
 }) {
@@ -358,7 +324,7 @@ function CountryPlaces({
   const [query, setQuery] = React.useState(""), [city, setCity] = React.useState(""),
     [category, setCategory] = React.useState<DreamFilter>("All"),
     [searching, setSearching] = React.useState(false),
-    [opened, setOpened] = React.useState<string>(), [selected, setSelected] = React.useState<string>(),
+    [selected, setSelected] = React.useState<string>(),
     [queueing, setQueueing] = React.useState(false), [leaving, setLeaving] = React.useState(false);
   const queueLock = React.useRef(false), mounted = React.useRef(true), exitLock = React.useRef(false);
   const list = React.useRef<FlatList<DreamItem>>(null);
@@ -375,7 +341,7 @@ function CountryPlaces({
   }, [paper, motion]);
   React.useEffect(() => {
     mounted.current = true;
-    Animated.timing(paper, { toValue: 1, duration: motion && !review ? 160 : 0, easing: paperEase, useNativeDriver: true }).start();
+    Animated.timing(paper, { toValue: 1, duration: motion ? 160 : 0, easing: paperEase, useNativeDriver: true }).start();
     return () => { mounted.current = false; paper.stopAnimation(); };
   }, []);
   React.useEffect(() => {
@@ -398,7 +364,7 @@ function CountryPlaces({
       : (a.city || "").localeCompare(b.city || "") || (a.placeName || "").localeCompare(b.placeName || "")),
     [items, query, city, category, sourceUrl]);
   const points = React.useMemo(() => visible.map(exactMapPoint).filter((point): point is MapPoint => Boolean(point)), [visible]);
-  const unsorted = !sourceUrl && !review && countryKey(title) === "unsorted";
+  const unsorted = !sourceUrl && countryKey(title) === "unsorted";
   const selectedPlace = visible.find(item => item.id === selected);
   const previewSize = fitDisplayFont(selectedPlace?.placeName || "Saved place", 21, getMobileVisualWidth(width) - 136, fontScale);
   const cityCounts = React.useMemo(() => {
@@ -418,8 +384,7 @@ function CountryPlaces({
   React.useEffect(() => {
     if (city && !cities.includes(city)) setCity("");
     if (selected && !visible.some(item => item.id === selected)) setSelected(undefined);
-    if (opened && !visible.some(item => item.id === opened)) setOpened(undefined);
-  }, [city, cities, visible, selected, opened]);
+  }, [city, cities, visible, selected]);
   return (
     <View style={[s.countryScreen, { paddingTop: topInset }]} pointerEvents={leaving ? "none" : "auto"}>
       <Animated.View style={[s.countryHeader, { backfaceVisibility: "hidden", transform: [
@@ -492,7 +457,7 @@ function CountryPlaces({
               onPress={() => void Linking.openURL(safeWebUrl(sourceUrl)!).catch(() => {})}>
               <Text style={s.actionText}>Original reel ↗</Text>
             </Pressable>}
-            {!review && (region || points.length > 0) && (!sourceReceipt || items.length > 0 || sourceReceipt.status === "saved") && <View style={s.mapPaper}>
+            {(region || points.length > 0) && (!sourceReceipt || items.length > 0 || sourceReceipt.status === "saved") && <View style={s.mapPaper}>
               <DreamPlacesMap overview={region} points={points} fitKey={`${title}-${city}-${category}-${query}`}
                 height={248} selectedId={selected} onSelect={setSelected} />
               <View style={s.mapFoot}>
@@ -524,143 +489,47 @@ function CountryPlaces({
             {error && <ErrorLine error={error} onRetry={onRefresh} />}
           </>}
           renderItem={({ item, index }) => <View>
-            {(index === 0 || item.city !== visible[index - 1].city) && <View style={s.cityDivider}>
+            {!unsorted && (index === 0 || item.city !== visible[index - 1].city) && <View style={s.cityDivider}>
               <Text style={s.cityHeading}>{item.city || "Saved places"}</Text><View style={s.cityRule} />
               <Text style={s.cityCount}>{cityCounts.get(item.city) ?? 0}</Text>
             </View>}
-            <PlaceRow item={item} expanded={opened === item.id}
-              sourceCount={sourceCounts.get(dreamSourceKey(item.sourceUrl)) ?? 1}
-              onShowSource={sourceUrl ? undefined : () => onShowSource(item.sourceUrl)}
-              onPress={() => { setOpened(opened === item.id ? undefined : item.id); setSelected(opened !== item.id && exactMapPoint(item) ? item.id : undefined); }}
-              onEdit={() => onSelect(item.id, "edit")}
+            <PlaceRow item={item}
+              onPress={() => onSelect(item.id, "view")}
               onShowMap={() => {
                 if (!exactMapPoint(item)) { onSelect(item.id, "view"); return; }
                 setSelected(item.id); list.current?.scrollToOffset({ offset: 0, animated: motion });
               }} />
           </View>}
-          ListEmptyComponent={sourceReceipt && sourceReceipt.status !== "saved" && !items.length ? null : <WWEmpty title={items.length ? "No matching places" : review ? "All caught up" : "No saved places here"}
+          ListEmptyComponent={sourceReceipt && sourceReceipt.status !== "saved" && !items.length ? null : <WWEmpty title={items.length ? "No matching places" : "No saved places here"}
             body={items.length ? "Try another category, city or search." : undefined} />}
         />
       </Animated.View>
     </View>
   );
-}function PlaceRow({
-  item,
-  onPress,
-  expanded,
-  onEdit,
-  onShowMap,
-  sourceCount,
-  onShowSource,
-}: {
+}
+function PlaceRow({ item, onPress, onShowMap }: {
   item: DreamItem;
   onPress: () => void;
-  expanded: boolean;
-  onEdit: () => void;
   onShowMap: () => void;
-  sourceCount: number;
-  onShowSource?: () => void;
 }) {
   const state = dreamProcessingState(item);
-  const processing = state?.kind === "sorting" || state?.kind === "upload";
-  const copy = React.useMemo(() => dreamCopy(item), [item]);
-  const [showOriginal, setShowOriginal] = React.useState(false);
+  const title = dreamCardTitle(item);
+  const point = exactMapPoint(item);
   return (
-    <View style={[s.placePaper, expanded && s.placePaperOpen]}>
-      <Pressable
-        onPress={onPress}
-        accessibilityRole="button"
-        accessibilityState={{ expanded }}
-        style={({ pressed }) => [
-          s.place,
-          pressed && { backgroundColor: colors.paperDeep },
-        ]}
-      >
-        <View style={[s.thumbnail, !item.thumbnailUrl && s.symbolThumbnail]}>
-          <DreamPhoto item={item} compact />
-        </View>
+    <View style={s.placePaper}>
+      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Details for ${title}`}
+        accessibilityHint={state?.detail} style={s.place}>
+        <View style={s.thumbnail}><DreamPhoto item={item} compact /></View>
         <View style={s.placeCopy}>
-          <View style={s.placeCategory}>
-            <Text style={s.placeType}>{dreamLocationType(item)}</Text>
-          </View>
-          <Text style={s.placeTitle} numberOfLines={2}>
-            {item.coordinatePrecision === "area" ? dreamPlaceLabel(item) : item.placeName || item.city || "Saved inspiration"}
-          </Text>
-          <Text style={s.placeCity} numberOfLines={1}>
-            {[item.city, item.regionOrNeighborhood]
-              .filter(Boolean)
-              .join(" · ") ||
-              item.country ||
-              "Location to review"}
-          </Text>
-          {state ? (
-            <Text style={s.status}>
-              {state.label}
-            </Text>
-          ) : (
-            locationNote(item) && <Text style={s.pinNote}>{locationNote(item)}</Text>
-          )}
+          <Text style={s.placeTitle} numberOfLines={2}>{title}</Text>
+          <Text style={s.placeCity} numberOfLines={2}>{dreamCardMeta(item)}</Text>
+          {state && <Text style={[s.status, (state.kind === "unreadable" || state.kind === "failed") && s.statusError]} numberOfLines={2}>{state.label}</Text>}
         </View>
-        <WWIcon
-          name={expanded ? "close" : "plus"}
-          size={17}
-          color={colors.mutedInk}
-        />
       </Pressable>
-      {expanded && (
-        <View style={s.placeBody}>
-          {state && <Text accessibilityLiveRegion="polite" style={s.placeSummary}>{state.detail}</Text>}
-          {item.thumbnailUrl && (
-            <View style={s.expandedPhoto}>
-              <DreamPhoto item={item} />
-            </View>
-          )}
-          {copy.summary ? <Text style={s.placeSummary}>{copy.summary}</Text> : null}
-          {copy.original && <View>
-            <Pressable style={s.placeAction} accessibilityRole="button"
-              accessibilityState={{ expanded: showOriginal }} onPress={() => setShowOriginal(!showOriginal)}>
-              <Text style={s.actionText}>{showOriginal ? "Hide original text" : "Original post text"}</Text>
-            </Pressable>
-            {showOriginal && <Text selectable style={s.placeSummary}>{copy.original}</Text>}
-          </View>}
-          {(item.coordinatePrecision !== "area" && item.locationAddress) || item.regionOrNeighborhood ? (
-            <View style={s.addressLine}>
-              <WWIcon name="pin" size={15} />
-              <Text style={s.addressText}>
-                {(item.coordinatePrecision !== "area" && item.locationAddress) || [item.regionOrNeighborhood, item.city]
-                  .filter(Boolean)
-                  .join(", ")}
-              </Text>
-            </View>
-          ) : null}
-          <View style={s.placeActions}>
-            <Pressable accessibilityRole="button" onPress={onShowMap} style={s.placeAction}>
-              <Text style={s.actionText}>
-                {exactMapPoint(item) ? "Show on map" : "Location details"}
-              </Text>
-            </Pressable>
-            {sourceCount > 1 && onShowSource && <Pressable accessibilityRole="button" onPress={onShowSource} style={s.placeAction}>
-              <Text style={s.actionText}>All {sourceCount} places from this reel</Text>
-            </Pressable>}
-            {safeWebUrl(item.sourceUrl) && (
-              <Pressable
-                accessibilityRole="link"
-                onPress={() =>
-                  void Linking.openURL(safeWebUrl(item.sourceUrl)!).catch(
-                    () => {},
-                  )
-                }
-                style={s.placeAction}
-              >
-                <Text style={s.actionText}>Source ↗</Text>
-              </Pressable>
-            )}
-            {!processing && /^\d+$/.test(item.id) && <Pressable accessibilityRole="button" onPress={onEdit} style={s.placeAction}>
-              <Text style={s.actionText}>Edit</Text>
-            </Pressable>}
-          </View>
-        </View>
-      )}
+      {point && <Pressable accessibilityRole="button" accessibilityLabel={`Show ${title} on map`}
+        accessibilityHint="Reveals this place on the country map" onPress={onShowMap} style={s.pinButton}>
+        <WWIcon name="pin" size={19} color={colors.blue} />
+      </Pressable>}
     </View>
   );
 }
@@ -824,23 +693,15 @@ const s = StyleSheet.create({
     borderColor: colors.paperBorder,
     borderRadius: 22,
   },
-  homeMeta: {
-    marginHorizontal: 24,
-    marginTop: -9,
-    marginBottom: 23,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
+  inbox: { marginHorizontal: 24, marginTop: -2, marginBottom: 22, padding: 12,
+    flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderColor: colors.paperBorder,
+    borderRadius: 4, backgroundColor: colors.paperSheet },
+  inboxPhoto: { width: 42, height: 50, borderWidth: 1, borderColor: colors.paperBorder, overflow: "hidden" },
+  inboxTitleLine: { flexDirection: "row", alignItems: "baseline", gap: 8 },
+  inboxTitle: { fontFamily: fonts.display, fontSize: 22, lineHeight: 26, color: colors.ink, includeFontPadding: false },
+  inboxCount: { fontFamily: fonts.sansSemi, fontSize: 12, color: colors.mutedInk },
+  inboxSummary: { fontFamily: fonts.sansRegular, fontSize: 11, lineHeight: 17, color: colors.mutedInk, marginTop: 3 },
   meta: { fontFamily: fonts.sansRegular, fontSize: 11, color: colors.mutedInk },
-  reviewButton: {
-    minHeight: 35,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  reviewText: { fontFamily: fonts.sansSemi, fontSize: 11, color: colors.red },
   notice: {
     marginHorizontal: 24,
     marginBottom: 18,
@@ -999,62 +860,33 @@ const s = StyleSheet.create({
   },
   placePaper: {
     marginHorizontal: 24,
-    marginBottom: 9,
-    borderWidth: 1,
-    borderColor: "#d2d4c3",
-    backgroundColor: colors.paperPhoto,
-    shadowColor: "#284e62",
-    shadowOpacity: 0.03,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 1,
-  },
-  placePaperOpen: { borderColor: "#9eb1a8" },
-  listHeading: {
-    marginHorizontal: 24,
+    marginBottom: 10,
     flexDirection: "row",
-    justifyContent: "space-between",
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.paperBorder,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.paperBorder,
+    backgroundColor: colors.paperPhoto,
   },
-  sectionLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    letterSpacing: 1,
-    color: colors.blue,
-  },
-  listCount: { fontFamily: fonts.mono, fontSize: 9, color: colors.mutedInk },
   place: {
-    paddingVertical: 13,
-    paddingHorizontal: 12,
-    minHeight: 96,
+    flex: 1,
+    paddingVertical: 12,
+    paddingLeft: 11,
+    paddingRight: 10,
+    minHeight: 112,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
   },
   thumbnail: {
-    width: 56,
-    height: 65,
-    padding: 4,
+    width: 78,
+    height: 88,
     borderWidth: 1,
-    borderColor: "#d0d2bf",
+    borderColor: colors.paperBorder,
     backgroundColor: colors.paperPhoto,
-    transform: [{ rotate: "-2deg" }],
     overflow: "hidden",
   },
-  symbolThumbnail: {
-    padding: 0,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    transform: [{ rotate: "0deg" }],
-  },
+  pinButton: { width: 44, minHeight: 56, alignItems: "center", justifyContent: "center" },
   placeCopy: { flex: 1, minWidth: 0 },
-  placeCategory: {
-    flexDirection: "row",
-    gap: 6,
-    alignItems: "center",
-    marginBottom: 5,
-  },
   placeType: {
     fontFamily: fonts.sans,
     fontSize: 11,
@@ -1076,53 +908,9 @@ const s = StyleSheet.create({
     color: colors.mutedInk,
     marginTop: 6,
   },
-  status: {
-    fontFamily: fonts.sansSemi,
-    fontSize: 10,
-    color: colors.red,
-    marginTop: 6,
-  },
-  pinNote: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 9,
-    color: colors.mutedInk,
-    marginTop: 6,
-  },
-  placeBody: {
-    marginHorizontal: 12,
-    paddingHorizontal: 1,
-    paddingBottom: 13,
-    borderTopWidth: 1,
-    borderTopColor: "#d2d4c3",
-    borderStyle: "dashed",
-  },
-  expandedPhoto: { height: 176, marginTop: 17, marginBottom: 14 },
-  placeSummary: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 14,
-    lineHeight: 23,
-    color: colors.mutedInk,
-    marginVertical: 13,
-  },
-  addressLine: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "flex-start",
-    marginTop: 9,
-  },
-  addressText: {
-    flex: 1,
-    fontFamily: fonts.sansRegular,
-    fontSize: 13,
-    lineHeight: 21,
-    color: colors.mutedInk,
-  },
-  placeActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 13,
-    marginTop: 10,
-  },
+  status: { fontFamily: fonts.sansRegular, fontSize: 10, lineHeight: 15, color: colors.mutedInk, marginTop: 6 },
+  statusError: { color: colors.red },
+  placeActions: { flexDirection: "row", flexWrap: "wrap", gap: 13, marginTop: 10 },
   placeAction: { minHeight: 44, justifyContent: "center" },
   actionText: {
     fontFamily: fonts.sansRegular,

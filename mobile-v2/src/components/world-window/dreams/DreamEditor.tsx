@@ -14,14 +14,15 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { DreamItem, DreamItemCategory } from "../../../services/dreams";
 import { colors, fonts } from "../../../theme/trotterTheme";
-import { WWButton, WWHeader, WWIcon } from "../WorldWindowUI";
+import { WWButton, WWIcon } from "../WorldWindowUI";
 import { fitDisplayFont } from "../displayTextFit";
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 import { DreamPlacesMap } from "./DreamPlacesMap";
 import type { MapPoint } from "../trips/tripPresentation";
-import { categoryLabel, dreamLocationType, dreamPlaceLabel, exactMapPoint, safeWebUrl } from "./dreamPresentation";
+import { categoryLabel, dreamLocationType, exactMapPoint, safeWebUrl } from "./dreamPresentation";
+import { dreamCardTitle } from "./dreamCardPresentation";
 import { DreamPhoto } from "./DreamPhoto";
-import { canFindLocation, isFindingLocation, locationExplanation } from "./locationPresentation";
+import { canFindLocation, locationExplanation } from "./locationPresentation";
 import { dreamProcessingState } from "./dreamProcessing";
 import { useLiveDreamLocation } from "./useLiveDreamLocation";
 import { countryRegion } from "./countryRegion";
@@ -51,6 +52,8 @@ export function DreamEditor({
   onDelete,
   onRetry,
   onLocate,
+  sourceCount = 1,
+  onShowSource,
   initialMode = "view",
   visible = true,
   onCloseRequestChange,
@@ -62,14 +65,17 @@ export function DreamEditor({
   onDelete: (id: string) => Promise<void>;
   onRetry: () => void;
   onLocate?: (id: string) => Promise<void>;
+  sourceCount?: number;
+  onShowSource?: () => void;
   initialMode?: "view" | "edit";
   visible?: boolean;
   onCloseRequestChange?: (handler: (() => void) | null) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const { width, fontScale } = useWindowDimensions();
-  const displayName = item.coordinatePrecision === "area" ? dreamPlaceLabel(item) : item.placeName || item.city || "Saved inspiration";
-  const titleSize = fitDisplayFont(displayName, 34, getMobileVisualWidth(width) - 48, fontScale);
+  const { width, height = 800, fontScale } = useWindowDimensions();
+  const displayName = dreamCardTitle(item);
+  const sourceTitle = !item.placeName?.trim() && item.coordinatePrecision !== "area";
+  const titleSize = fitDisplayFont(displayName, sourceTitle ? 28 : 34, Math.min(getMobileVisualWidth(width) - 64, 512), fontScale);
   const mounted = React.useRef(true), closed = React.useRef(false), running = React.useRef(false);
   React.useEffect(() => {
     mounted.current = true;
@@ -87,7 +93,9 @@ export function DreamEditor({
     [confirmDelete, setConfirmDelete] = React.useState(false),
     [busy, setBusy] = React.useState(false),
     [error, setError] = React.useState<string>(),
-    [placing, setPlacing] = React.useState(false);
+    [placing, setPlacing] = React.useState(false),
+    [menuOpen, setMenuOpen] = React.useState(false),
+    [expandedSummary, setExpandedSummary] = React.useState(false);
   const [name, setName] = React.useState(item.placeName || ""),
     [city, setCity] = React.useState(item.city || ""),
     [country, setCountry] = React.useState(item.country || ""),
@@ -100,6 +108,9 @@ export function DreamEditor({
   const draftBaseline = React.useRef(draftFingerprint(draftFromItem(item)));
   const currentDraft = draftFingerprint({ name, city, country, region, summary, tags, maps, category });
   const requestClose = () => {
+    // The request is already submitted; closing cannot cancel or discard it.
+    if (running.current) { close(); return; }
+    if (menuOpen) { setMenuOpen(false); return; }
     if (discarding) { setDiscarding(false); return; }
     if (confirmDelete) { setConfirmDelete(false); return; }
     if (editing && currentDraft !== draftBaseline.current) { setDiscarding(true); return; }
@@ -173,7 +184,23 @@ export function DreamEditor({
   };
   const saved = /^\d+$/.test(item.id),
     processingState = dreamProcessingState(item),
-    processing = processingState?.kind === "sorting" || processingState?.kind === "upload";
+    processing = processingState?.kind === "sorting" || (processingState?.kind === "upload" && item.uploadStatus !== "failed");
+  const canRetry = !processing && (item.status === "failed" || item.needsReview || item.uploadStatus === "failed" || processingState?.kind === "unreadable" || processingState?.kind === "failed");
+  const locationLine = [...new Set([item.regionOrNeighborhood, item.city, item.country].filter(Boolean))].join(" · ");
+  const sourceDescription = item.summary.trim() || item.caption?.trim() || "";
+  const cleanedDescription = sourceDescription.replace(/https?:\/\/\S+/gi, "").replace(/(^|\s)#[\p{L}\p{N}_]+/gu, " ").replace(/\s+/g, " ").trim();
+  const description = sourceTitle && cleanedDescription === displayName ? "" : sourceDescription;
+  const beginEditing = () => {
+    setMenuOpen(false);
+    setName(item.placeName || ""); setCity(item.city || "");
+    setCountry(item.country || ""); setRegion(item.regionOrNeighborhood || "");
+    setSummary(item.summary); setTags(item.tags.join(", ")); setCategory(item.category);
+    mapsBaseline.current = item.googleMapsUrl || "";
+    draftBaseline.current = draftFingerprint(draftFromItem(item));
+    setMaps(mapsBaseline.current);
+    setSuccess(undefined);
+    setEditing(true);
+  };
   const savedFeedback = (message: string) => {
     setSuccess(message);
     void selectionHaptic("confirmation");
@@ -181,17 +208,26 @@ export function DreamEditor({
   return (
     <Modal
       visible={visible}
-      animationType={reducedMotion ? "none" : "slide"}
-      presentationStyle="pageSheet"
+      transparent
+      animationType={reducedMotion ? "none" : "fade"}
+      presentationStyle="overFullScreen"
       onRequestClose={requestClose}
     >
       <KeyboardAvoidingView
-        style={[s.screen, { paddingTop: insets.top }]}
+        style={[s.overlay, { paddingTop: Math.max(insets.top + 12, 24), paddingBottom: Math.max(insets.bottom, 12) }]}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <WWHeader
-          title={editing ? "Edit place" : "Saved place"}
-          action={
+        <Pressable accessibilityLabel="Dismiss place details" accessibilityRole="button" onPress={requestClose} style={s.backdrop} />
+        <View style={[s.screen, { maxHeight: height * .91 }]} accessibilityViewIsModal>
+          <View style={s.toolbar}>
+            <Text style={s.sheetLabel}>{editing ? "Edit place" : "Saved place"}</Text>
+            {!editing && !discarding && !confirmDelete && !processing && <Pressable
+              accessibilityLabel="More place options"
+              accessibilityRole="button"
+              accessibilityState={{ expanded: menuOpen }}
+              onPress={() => setMenuOpen(!menuOpen)}
+              style={s.icon}
+            ><Text style={s.moreIcon}>•••</Text></Pressable>}
             <Pressable
               accessibilityLabel="Close place"
               accessibilityRole="button"
@@ -200,8 +236,7 @@ export function DreamEditor({
             >
               <WWIcon name="close" />
             </Pressable>
-          }
-        />
+          </View>
         {discarding ? <View style={s.discardPanel}>
           <Text accessibilityRole="header" style={s.candidateName}>Discard changes?</Text>
           <Text style={s.locationHint}>Your saved place will stay as it was.</Text>
@@ -209,11 +244,20 @@ export function DreamEditor({
             <WWButton label="Keep editing" onPress={() => setDiscarding(false)} />
             <WWButton label="Discard changes" secondary onPress={close} />
           </View>
+        </View> : confirmDelete ? <View style={s.discardPanel}>
+          <Text accessibilityRole="header" style={s.candidateName}>Remove saved place?</Text>
+          <Text style={s.locationHint}>This removes the place from your collection. Other places from the reel will stay saved.</Text>
+          <View style={s.actions}>
+            <WWButton label="Keep place" secondary disabled={busy} onPress={() => setConfirmDelete(false)} />
+            <WWButton label={busy ? "Removing…" : "Remove"} disabled={busy} onPress={() => void run(() => onDelete(item.id))} />
+          </View>
+          {error && <Text accessibilityRole="alert" style={s.error}>{error}</Text>}
         </View> : <ScrollView
           keyboardShouldPersistTaps="handled"
+          importantForAccessibility={menuOpen ? "no-hide-descendants" : "auto"}
           contentContainerStyle={{
-            paddingHorizontal: 24,
-            paddingBottom: insets.bottom + 32,
+            paddingHorizontal: 20,
+            paddingBottom: 24,
           }}
         >
           {busy ? <Text accessibilityLiveRegion="polite" style={s.review}>This request can finish after you close this view.</Text> : null}
@@ -223,19 +267,23 @@ export function DreamEditor({
               <View style={s.photo}>
                 <DreamPhoto item={item} />
               </View>
-              <Text style={s.category}>{dreamLocationType(locationItem)}</Text>
-              <Text style={[s.title, { fontSize: titleSize, lineHeight: titleSize * 39 / 34 }]}>
+              <Text accessibilityRole="header" numberOfLines={sourceTitle ? 3 : undefined} style={[s.title, { fontSize: titleSize, lineHeight: titleSize * 39 / 34 }]}>
                 {displayName}
               </Text>
-              <Text style={s.location}>
-                {[item.regionOrNeighborhood, item.city, item.country]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </Text>
-              <Text style={s.summary}>{item.summary}</Text>
-              {item.tags.length > 0 && (
-                <Text style={s.tags}>{item.tags.join(" · ")}</Text>
-              )}
+              <Text style={s.location}>{dreamLocationType(locationItem)}{locationLine ? ` · ${locationLine}` : ""}</Text>
+              {description ? <>
+                <Text style={s.summary}>{!expandedSummary && description.length > 220 ? `${description.slice(0, 220).replace(/\s+\S*$/, "")}…` : description}</Text>
+                {description.length > 220 && <Pressable
+                  accessibilityRole="button" accessibilityState={{ expanded: expandedSummary }}
+                  onPress={() => setExpandedSummary(!expandedSummary)} style={s.readMore}
+                ><Text style={s.sourceText}>{expandedSummary ? "Read less" : "Read more"}</Text></Pressable>}
+              </> : null}
+              {sourceCount > 1 && onShowSource && <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`View ${sourceCount} places from this reel`}
+                onPress={() => { if (closed.current) return; close(); onShowSource(); }}
+                style={s.sourceLink}
+              ><Text style={s.sourceText}>{sourceCount} places from this reel</Text><WWIcon name="chevron" size={14} color={colors.blue} /></Pressable>}
               {processingState && !processing && (
                 <Text style={s.review}>
                   {processingState.detail}
@@ -243,8 +291,8 @@ export function DreamEditor({
               )}
               {processing && (
                 <Text style={s.review}>
-                  {item.uploadStatus
-                    ? 'Kept on this device. Waiting to send to Trotter.'
+                    {item.uploadStatus
+                    ? 'Reel saved on this device.'
                     : processingState?.detail}
                 </Text>
               )}
@@ -257,17 +305,12 @@ export function DreamEditor({
                   {liveLocation.loading && <Text accessibilityLiveRegion="polite" style={s.locationHint}>{shownPoint && locationItem.coordinatePrecision !== "area" ? "Loading address…" : "Loading location details…"}</Text>}
                   {liveLocation.error && <View>
                     <Text accessibilityRole="alert" style={s.locationHint}>{liveLocation.error}</Text>
-                    <View style={s.actions}><WWButton label="Retry details" secondary onPress={liveLocation.retry} /></View>
                   </View>}
                   {locationItem.coordinatePrecision === "area" && shownPoint && <Text style={s.locationHint}>The marker shows the general area.</Text>}
                   {locationItem.coordinatePrecision !== "area" && locationItem.locationAddress && <Text selectable style={s.locationAddress}>{locationItem.locationAddress}</Text>}
                   {shownPoint ? <DreamPlacesMap points={[shownPoint]} fitKey={`location-${item.id}`} height={248} /> : !liveLocation.loading && !liveLocation.error ? (
                     <>
                       <Text accessibilityLiveRegion="polite" style={s.locationHint}>{locationExplanation(locationItem)}</Text>
-                      {onLocate && canFindLocation(locationItem) &&
-                        <View style={s.actions}><WWButton
-                          label="Retry location"
-                          secondary disabled={busy} onPress={() => void run(() => onLocate(item.id), false)} /></View>}
                     </>
                   ) : null}
                   {locationItem.locationProvider === "google_places" && Boolean(locationItem.locationAddress || liveLocation.details?.locationAttributions.length) &&
@@ -283,59 +326,23 @@ export function DreamEditor({
                     </View>}
                 </View>
               )}
-              <View style={s.actions}>
+              <View style={[s.primaryActions, fontScale > 1.3 && s.actionsStack]}>
+                <View style={s.primaryAction}>
                 <WWButton
-                  label="Original post"
+                  label="View reel"
                   secondary
                   onPress={() => void open(item.sourceUrl)}
                 />
+                </View>
                 {safeWebUrl(mapsUrl) && (
+                  <View style={s.primaryAction}>
                   <WWButton
-                    label="Maps"
-                    secondary
+                    label="Open in Maps"
                     onPress={() => void open(mapsUrl)}
                   />
+                  </View>
                 )}
               </View>
-              {!processing && (
-                <View style={s.actions}>
-                  {saved && (
-                    <WWButton
-                      label="Edit details"
-                      secondary
-                      disabled={busy}
-                      onPress={() => {
-                        setName(item.placeName || ""); setCity(item.city || "");
-                        setCountry(item.country || ""); setRegion(item.regionOrNeighborhood || "");
-                        setSummary(item.summary); setTags(item.tags.join(", ")); setCategory(item.category);
-                        mapsBaseline.current = item.googleMapsUrl || "";
-                        draftBaseline.current = draftFingerprint(draftFromItem(item));
-                        setMaps(mapsBaseline.current);
-                        setSuccess(undefined);
-                        setEditing(true);
-                      }}
-                    />
-                  )}
-                  {item.needsReview && saved && (
-                    <WWButton
-                      label={busy ? "Saving…" : "Save place details"}
-                      disabled={busy}
-                      onPress={() =>
-                        void run(() => onSave(item.id, { needsReview: false }), false, () => savedFeedback("Place details saved."))
-                      }
-                    />
-                  )}
-                  {(item.status === "failed" || item.needsReview || processingState?.kind === "unreadable" || processingState?.kind === "failed") && (
-                    <WWButton
-                      label={saved ? "Retry reading post" : "Retry save"}
-                      onPress={() => {
-                        onRetry();
-                        close();
-                      }}
-                    />
-                  )}
-                </View>
-              )}
             </>
           ) : (
             <>
@@ -472,38 +479,36 @@ export function DreamEditor({
               {error}
             </Text>
           )}
-          {!processing && !confirmDelete ? (
-            <Pressable
-              disabled={busy}
-              onPress={() => setConfirmDelete(true)}
-              style={s.delete}
-            >
-              <Text style={s.deleteText}>Remove saved place</Text>
-            </Pressable>
-          ) : confirmDelete ? (
-            <View style={s.deleteConfirm}>
-              <Text style={s.review}>
-                Remove this place from your saved collection?
-              </Text>
-              <View style={s.actions}>
-                <WWButton
-                  label="Keep place"
-                  secondary
-                  disabled={busy}
-                  onPress={() => setConfirmDelete(false)}
-                />
-                <WWButton
-                  label={busy ? "Removing…" : "Remove"}
-                  disabled={busy}
-                  onPress={() => void run(() => onDelete(item.id))}
-                />
-              </View>
-            </View>
-          ) : null}
         </ScrollView>}
+        {menuOpen && !editing && <View style={s.menuLayer} accessibilityViewIsModal>
+          <Pressable accessibilityLabel="Dismiss place options" accessibilityRole="button" onPress={() => setMenuOpen(false)} style={StyleSheet.absoluteFill} />
+          <View style={s.menu}>
+            {saved && <MenuAction label="Edit details" disabled={busy} onPress={beginEditing} />}
+            {liveLocation.error && <MenuAction label="Retry details" disabled={busy} onPress={() => { setMenuOpen(false); liveLocation.retry(); }} />}
+            {onLocate && canFindLocation(locationItem) && <MenuAction label="Retry location" disabled={busy} onPress={() => {
+              setMenuOpen(false); void run(() => onLocate(item.id), false);
+            }} />}
+            {canRetry && <MenuAction label={saved ? "Retry reading post" : "Retry save"} disabled={busy} onPress={() => {
+              setMenuOpen(false); onRetry(); close();
+            }} />}
+            {!processing && <MenuAction label="Remove saved place" destructive disabled={busy} onPress={() => {
+              setMenuOpen(false); setConfirmDelete(true);
+            }} />}
+          </View>
+        </View>}
+        </View>
       </KeyboardAvoidingView>
     </Modal>
   );
+}
+
+function MenuAction({ label, onPress, disabled, destructive = false }: {
+  label: string; onPress: () => void; disabled?: boolean; destructive?: boolean;
+}) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: Boolean(disabled) }}
+    disabled={disabled} onPress={onPress} style={s.menuAction}>
+    <Text style={[s.menuText, destructive && s.menuDestructive, disabled && s.menuDisabled]}>{label}</Text>
+  </Pressable>;
 }
 
 function GoogleAttribution({ values, onOpen }: { values: { displayName: string; uri?: string }[]; onOpen: (url?: string) => Promise<void> }) {
@@ -560,7 +565,24 @@ const s = StyleSheet.create({
   attribution: { minHeight: 44, justifyContent: "center" },
   attributionLinks: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
   attributionText: { fontFamily: fonts.sansRegular, fontSize: 11, color: colors.mutedInk },
-  screen: { flex: 1, backgroundColor: colors.paperSoft },
+  overlay: { flex: 1, justifyContent: "flex-end", alignItems: "center", paddingHorizontal: 12 },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(20, 39, 45, .38)" },
+  screen: {
+    flex: 1, width: "100%", maxWidth: 560, backgroundColor: colors.paperSoft,
+    borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: colors.paperBorder,
+  },
+  toolbar: { flexDirection: "row", alignItems: "center", paddingLeft: 20, paddingRight: 8, minHeight: 60 },
+  sheetLabel: { flex: 1, fontFamily: fonts.sansSemi, color: colors.mutedInk, fontSize: 12 },
+  moreIcon: { color: colors.ink, fontSize: 16, letterSpacing: 2, lineHeight: 24 },
+  menuLayer: { ...StyleSheet.absoluteFillObject, zIndex: 20 },
+  menu: { position: "absolute", top: 54, right: 12, width: "82%", maxWidth: 265,
+    backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.paperBorder,
+    borderRadius: 8, paddingVertical: 5, elevation: 6,
+    shadowColor: colors.ink, shadowOpacity: .12, shadowOffset: { width: 0, height: 4 }, shadowRadius: 12 },
+  menuAction: { minHeight: 48, paddingHorizontal: 17, paddingVertical: 13, justifyContent: "center" },
+  menuText: { fontFamily: fonts.sansRegular, fontSize: 14, lineHeight: 20, color: colors.ink },
+  menuDestructive: { color: colors.red },
+  menuDisabled: { opacity: .45 },
   icon: {
     width: 44,
     height: 44,
@@ -568,25 +590,18 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   photo: {
-    height: 225,
-    padding: 6,
+    aspectRatio: 1.55,
+    padding: 5,
     backgroundColor: colors.paper,
     borderWidth: 1,
     borderColor: colors.paperBorder,
-  },
-  category: {
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    letterSpacing: 1,
-    color: colors.red,
-    marginTop: 22,
   },
   title: {
     fontFamily: fonts.display,
     fontSize: 34,
     lineHeight: 39,
     color: colors.blue,
-    marginTop: 8,
+    marginTop: 19,
   },
   location: {
     fontFamily: fonts.sansRegular,
@@ -600,15 +615,11 @@ const s = StyleSheet.create({
     fontSize: 15,
     lineHeight: 23,
     color: colors.ink,
-    marginTop: 19,
+    marginTop: 16,
   },
-  tags: {
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    lineHeight: 17,
-    color: colors.mutedInk,
-    marginTop: 15,
-  },
+  sourceLink: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44, paddingVertical: 8, marginTop: 4 },
+  readMore: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center" },
+  sourceText: { fontFamily: fonts.sansSemi, fontSize: 12, lineHeight: 19, color: colors.blue },
   review: {
     fontFamily: fonts.sansRegular,
     fontSize: 13,
@@ -617,6 +628,8 @@ const s = StyleSheet.create({
     marginTop: 16,
   },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 17 },
+  primaryActions: { flexDirection: "row", gap: 10, marginTop: 22, alignItems: "stretch" },
+  primaryAction: { flex: 1 },
   actionsStack: { flexDirection: "column", alignItems: "stretch" },
   fields: { flexDirection: "row", gap: 12 },
   fieldColumn: { flex: 1 },
@@ -680,17 +693,5 @@ const s = StyleSheet.create({
     lineHeight: 20,
     color: colors.red,
     marginTop: 16,
-  },
-  delete: { minHeight: 48, justifyContent: "center", marginTop: 20 },
-  deleteText: {
-    fontFamily: fonts.sansRegular,
-    fontSize: 12,
-    color: colors.red,
-  },
-  deleteConfirm: {
-    marginTop: 18,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: colors.paperBorder,
   },
 });

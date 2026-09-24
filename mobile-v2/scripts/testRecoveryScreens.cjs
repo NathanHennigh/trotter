@@ -23,7 +23,7 @@ function screen(file, exportName, overrides = {}) {
     useEffect(fn, deps) { const i = cursor++; if (!slots[i] || !same(slots[i].deps, deps)) { slots[i]?.cleanup?.(); slots[i] = { deps }; effects.push(() => { slots[i].cleanup = fn(); }); } },
   };
   const tags = 'ActivityIndicator Pressable ScrollView Text View KeyboardAvoidingView Modal TextInput'.split(' ');
-  const native = { ...Object.fromEntries(tags.map(tag => [tag, tag])), StyleSheet: { create: x => x }, Platform: { OS: 'android' }, useWindowDimensions: () => ({ width: 390, height: 840 }), Linking: { openURL: async () => {} } };
+  const native = { ...Object.fromEntries(tags.map(tag => [tag, tag])), StyleSheet: { create: x => x, absoluteFill: {}, absoluteFillObject: {} }, Platform: { OS: 'android' }, useWindowDimensions: () => ({ width: 390, height: 840, fontScale: 1 }), Linking: { openURL: async () => {} } };
   const mocks = {
     react, './dreamDraft': draftModule.exports, '../motion': { PressFeedback: 'Pressable', useReducedMotion: () => true }, '../components/world-window/motion': { PressFeedback: 'Pressable' }, '../../../utils/experiencePreferences': { selectionHaptic: noop }, 'react-native': native, 'react-native-svg': { default: 'Svg', Path: 'Path' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) },
@@ -34,9 +34,10 @@ function screen(file, exportName, overrides = {}) {
     '../WorldWindowUI': { WWButton: 'WWButton', WWHeader: 'WWHeader', WWIcon: 'WWIcon' },
     './DreamPlacesMap': { DreamPlacesMap: 'DreamPlacesMap' }, './DreamPhoto': { DreamPhoto: 'DreamPhoto' },
     './dreamProcessing': processingModule.exports,
+    './dreamCardPresentation': { dreamCardTitle: item => item.placeName || item.caption || item.summary || item.city || 'Saved reel' },
     './useLiveDreamLocation': { useLiveDreamLocation: () => ({}) },
     './countryRegion': { countryRegion: () => undefined },
-    './dreamPresentation': { categoryLabel: x => x, dreamLocationType: item => item.coordinatePrecision === 'area' ? 'Area' : item.category, exactMapPoint: () => undefined, safeWebUrl: x => x },
+    './dreamPresentation': { categoryLabel: x => x, dreamPlaceLabel: item => item.placeName || item.city || item.regionOrNeighborhood || item.country || 'Saved place', dreamLocationType: item => item.coordinatePrecision === 'area' ? 'Area' : item.category, exactMapPoint: () => undefined, safeWebUrl: x => x },
     './locationPresentation': { canFindLocation: item => Boolean(item.placeName || item.city || item.regionOrNeighborhood) && !['queued','running'].includes(item.locationStatus), isFindingLocation: item => ['queued','running'].includes(item.locationStatus), locationExplanation: item => item.locationStatus === 'needs_review' ? 'Which location is the one you saved?' : 'Looking for the address.' },
     '../displayTextFit': { fitDisplayFont: (_text, size) => size },
     '../../../utils/mobileLayout': { getMobileVisualWidth: width => width },
@@ -85,15 +86,18 @@ test('failed logout offers cleanup retry and never a Google sign-in or archive r
   wait.resolve(); await flush(); assert.equal(retries, 1); host.dispose();
 });
 
-for (const closeVia of ['hardware', 'button']) test(`Dream editor ${closeVia} Close works during save and late success cannot close the next screen`, async () => {
-  const wait = deferred(); let closes = 0, saves = 0;
+for (const closeVia of ['hardware', 'button']) test(`Dream editor ${closeVia} Close allows an in-flight save to finish and late success cannot close the next screen`, async () => {
+  const wait = deferred(); let closes = 0, saves = 0, savedPatch;
   const host = screen('components/world-window/dreams/DreamEditor.tsx', 'DreamEditor');
-  let tree = host.render({ item, points: [], onClose: () => closes++, onSave: () => { saves++; return wait.promise; }, onDelete: noop, onRetry: noop });
-  const confirm = button(tree, 'Save place details'); confirm.props.onPress(); confirm.props.onPress();
+  let tree = host.render({ item, initialMode: 'edit', points: [], onClose: () => closes++, onSave: (_id, patch) => { saves++; savedPatch = patch; return wait.promise; }, onDelete: noop, onRetry: noop });
+  button(tree, 'Notes').props.onChange('Notes being saved'); tree = host.render();
+  const save = button(tree, 'Save changes'); save.props.onPress(); save.props.onPress();
   assert.equal(saves, 1, 'Double press cannot launch two mutations before React rerenders');
+  assert.equal(savedPatch.summary, 'Notes being saved');
   tree = host.render();
   const close = button(tree, 'Close place'); assert.notEqual(close.props.disabled, true);
   if (closeVia === 'hardware') find(tree, 'Modal').props.onRequestClose(); else close.props.onPress();
+  tree = host.render(); assert(!button(tree, 'Discard changes'));
   assert.equal(closes, 1); host.dispose();
   wait.resolve(); await flush(); assert.equal(closes, 1);
 });
@@ -101,13 +105,11 @@ for (const closeVia of ['hardware', 'button']) test(`Dream editor ${closeVia} Cl
 test('failed Dreams save keeps the editor and its draft, then allows a deliberate retry', async () => {
   let calls = 0, closes = 0;
   const host = screen('components/world-window/dreams/DreamEditor.tsx', 'DreamEditor');
-  let tree = host.render({ item, points: [], onClose: () => closes++, onSave: async () => { if (++calls === 1) throw new Error('The request timed out. Refresh before retrying.'); }, onDelete: noop, onRetry: noop });
-  button(tree, 'Edit details').props.onPress(); tree = host.render();
-  const nameField = nodes(tree).find(node => typeof node.type === 'function' && node.props?.label === 'Place name');
-  nameField.props.onChange('My retained draft'); tree = host.render();
+  let tree = host.render({ item, initialMode: 'edit', points: [], onClose: () => closes++, onSave: async () => { if (++calls === 1) throw new Error('The request timed out. Refresh before retrying.'); }, onDelete: noop, onRetry: noop });
+  button(tree, 'Notes').props.onChange('My retained draft'); tree = host.render();
   button(tree, 'Save changes').props.onPress(); await flush(); tree = host.render();
   assert.equal(closes, 0); assert(text(tree).some(value => value.includes('request timed out')));
-  assert.equal(nodes(tree).find(node => node.props?.label === 'Place name').props.value, 'My retained draft');
+  assert.equal(button(tree, 'Notes').props.value, 'My retained draft');
   assert.equal(button(tree, 'Save changes').props.disabled, false);
   button(tree, 'Save changes').props.onPress(); await flush(); tree = host.render(); assert.equal(closes, 0); assert.equal(button(tree, 'Save changes'), undefined); assert(text(tree).includes('Changes saved.')); host.dispose();
 });
@@ -115,17 +117,19 @@ test('failed Dreams save keeps the editor and its draft, then allows a deliberat
 test('editing notes does not silently turn an automatically found location into a manual pin', async () => {
   let patch;
   const host=screen('components/world-window/dreams/DreamEditor.tsx','DreamEditor');
-  let tree=host.render({item:{...item,needsReview:false,locationStatus:'resolved',googleMapsUrl:'https://www.google.com/maps/search/?api=1&query=38.7,-9.1'},points:[],onClose:noop,onSave:async(id,value)=>{patch=value;},onDelete:noop,onRetry:noop});
-  button(tree,'Edit details').props.onPress(); tree=host.render();
+  let tree=host.render({item:{...item,needsReview:false,locationStatus:'resolved',googleMapsUrl:'https://www.google.com/maps/search/?api=1&query=38.7,-9.1'},initialMode:'edit',points:[],onClose:noop,onSave:async(id,value)=>{patch=value;},onDelete:noop,onRetry:noop});
+  button(tree,'Notes').props.onChange('My own notes, same mapped place'); tree=host.render();
   button(tree,'Save changes').props.onPress(); await flush();
-  assert(patch); assert(!Object.hasOwn(patch,'googleMapsUrl'),'An unchanged provider-derived Maps URL stays provider-derived'); host.dispose();
+  assert.equal(patch.summary, 'My own notes, same mapped place'); assert(!Object.hasOwn(patch,'googleMapsUrl'),'An unchanged provider-derived Maps URL stays provider-derived'); host.dispose();
 });
 
 test('retrying location remains open, then a resolved result displays without confirmation',async()=>{
   let closes=0,lookups=0;
   const host=screen('components/world-window/dreams/DreamEditor.tsx','DreamEditor');
   const props={item:{...item,needsReview:false},points:[],onClose:()=>closes++,onSave:noop,onDelete:noop,onRetry:noop,onLocate:async()=>lookups++};
-  let tree=host.render(props); button(tree,'Retry location').props.onPress(); await flush(); assert.equal(lookups,1); assert.equal(closes,0);
+  let tree=host.render(props); assert(!button(tree,'Retry location'));
+  button(tree,'More place options').props.onPress(); tree=host.render();
+  button(tree,'Retry location').props.onPress(); await flush(); assert.equal(lookups,1); assert.equal(closes,0);
   tree=host.render({...props,item:{...props.item,locationStatus:'resolved',latitude:38.7,longitude:-9.1,locationAddress:'1 Synthetic Road'}});
   assert.equal(button(tree,'Confirm pin'),undefined); assert.equal(closes,0); assert(text(tree).includes('1 Synthetic Road')); host.dispose();
 });
@@ -135,7 +139,8 @@ test('entering Edit uses the latest parsed place, then polling preserves an acti
   const props={item:{...item,status:'processing',placeName:undefined,city:undefined},points:[],onClose:noop,onSave:noop,onDelete:noop,onRetry:noop};
   host.render(props);
   const ready={...props,item:{...item,placeName:'Completed Cafe',city:'Lisbon',summary:'Parsed notes'}};
-  let tree=host.render(ready); button(tree,'Edit details').props.onPress(); tree=host.render();
+  let tree=host.render(ready); button(tree,'More place options').props.onPress(); tree=host.render();
+  button(tree,'Edit details').props.onPress(); tree=host.render();
   const field=(tree,label)=>nodes(tree).find(node=>node.props?.label===label);
   assert.equal(field(tree,'Place name').props.value,'Completed Cafe');
   field(tree,'Place name').props.onChange('My corrected name');

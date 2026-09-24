@@ -27,7 +27,7 @@ function host(file, exportName, options = {}) {
   const tags = 'View Text Pressable Modal TextInput ScrollView FlatList RefreshControl KeyboardAvoidingView'.split(' ');
   const native = { ...Object.fromEntries(tags.map(t => [t, t])), Platform: { OS: 'android' }, Keyboard: keyboard,
     BackHandler: { addEventListener: () => ({ remove: noop }) }, StyleSheet: { create: x => x, absoluteFill: {} },
-    Linking: { openURL: async () => {} }, useWindowDimensions: () => ({ width: 320, fontScale: 2 }),
+    Linking: { openURL: async () => {} }, useWindowDimensions: () => ({ width: 320, height: 850, fontScale: 2 }),
     Animated: { Value, View: 'AnimatedView', timing(value, config) { const a = { value, config }; animations.push(a); return { start(callback) { a.callback = callback; if (!config.duration) { value.value = config.toValue; callback?.({ finished: true }); a.callback = undefined; } } }; } },
   };
   const allMocks = {
@@ -96,9 +96,10 @@ test('opening Unsorted with a batch of processing, failed and unsent Instagram s
     uploadStatus: index < 3 ? 'queued' : undefined, needsReview: index % 3 === 2 }));
   const home = host(screen, 'DreamsScreen', { items: saves });
   let tree = home.render({ active: 'dreams', onChange: noop });
-  const boards = byType(tree, 'FlatList'); assert.equal(boards.props.data.length, 1);
-  const board = boards.props.data[0]; assert.equal(board.title, 'Unsorted');
-  const card = boards.props.renderItem({ item: board }); card.props.onPress(); tree = home.render();
+  const boards = byType(tree, 'FlatList'); assert.equal(boards.props.data.length, 0);
+  const inbox = nodes(tree).find(node => node.props?.accessibilityLabel?.startsWith('Unsorted, 28 saves.'));
+  assert(inbox, 'Unsorted remains reachable as an inbox above the country postcards');
+  inbox.props.onPress(); tree = home.render();
   const collection = nodes(tree).find(node => typeof node.type === 'function' && node.type.name === 'CountryPlaces');
   assert(collection); const country = host(screen, 'CountryPlaces'); const opened = country.render(collection.props);
   assert(!byType(opened, 'DreamPlacesMap'), 'A collection without country or pins must not mount an irrelevant native world map');
@@ -106,10 +107,11 @@ test('opening Unsorted with a batch of processing, failed and unsent Instagram s
   for (let index = 0; index < saves.length; index++) {
     const row = list.props.renderItem({ item: list.props.data[index], index });
     const content = nodes(row).find(node => typeof node.type === 'function' && node.type.name === 'PlaceRow');
-    const rowHost = host(screen, 'PlaceRow'); assert(text(rowHost.render(content.props)).includes('Saved inspiration')); rowHost.dispose();
+    const rowHost = host(screen, 'PlaceRow'); assert(text(rowHost.render(content.props)).includes('Saved reel')); rowHost.dispose();
   }
   action(opened, 'Back to Dreams').props.onPress(); tree = home.render();
-  assert.equal(byType(tree, 'FlatList').props.data[0].title, 'Unsorted');
+  assert.equal(byType(tree, 'FlatList').props.data.length, 0);
+  assert(nodes(tree).some(node => node.props?.accessibilityLabel?.startsWith('Unsorted, 28 saves.')));
   country.dispose(); home.dispose();
 });
 
@@ -128,10 +130,10 @@ test('Unsorted distinguishes live sorting, missing details and unreadable reels 
   assert(!byType(tree, 'DreamPlacesMap'));
   const expected = ['Sorting reel…', 'Sorting reel…', 'Needs details', 'Needs details', 'Location missing', 'Couldn’t read reel'];
   cases.forEach((saved, index) => {
-    const h = host(screen, 'PlaceRow'); const row = h.render({ item: saved, expanded: true, onPress: noop, onEdit: noop, onShowMap: noop, sourceCount: 1 });
+    const h = host(screen, 'PlaceRow'); const row = h.render({ item: saved, onPress: noop, onShowMap: noop });
     assert(text(row).includes(expected[index]));
     if (index >= 2) assert(!text(row).some(value => /Sorting|Reading post|Finding.*background/.test(value)));
-    if (saved.sortingState === 'unavailable') assert(text(row).includes(saved.processingMessage));
+    if (saved.sortingState === 'unavailable') assert(nodes(row).some(node => node.props?.accessibilityHint === saved.processingMessage));
     h.dispose();
   });
   const located = { ...cases[4], latitude: 40, longitude: 25, status: 'parsed', needsReview: false };
@@ -146,7 +148,8 @@ test('completed and failed server job status overrides a stale processing item i
   assert(text(tree).includes('Your reel is saved. Its caption didn’t identify a place.'));
   assert(!text(tree).some(value => value.includes('Sorting this post')));
   tree = h.render(editorProps({ item: { ...item, status: 'needs_review', needsReview: true, sortingState: 'unavailable', processingMessage: 'Instagram could not provide a readable caption.' } }));
-  assert(text(tree).includes('Instagram could not provide a readable caption.')); assert(action(tree, 'Retry reading post'));
+  assert(text(tree).includes('Instagram could not provide a readable caption.'));
+  action(tree, 'More place options').props.onPress(); tree = h.render(); assert(action(tree, 'Retry reading post'));
   h.dispose();
 });
 
@@ -197,7 +200,8 @@ test('saving details keeps the place open with explicit success, without changin
     onClose: () => closes++, onSave: async (_id, patch) => saved = patch }));
   action(tree, 'Notes').props.onChange('Better notes'); tree = h.render(); action(tree, 'Save changes').props.onPress(); await flush(); tree = h.render();
   assert.equal(saved.summary, 'Better notes'); assert(!Object.hasOwn(saved, 'googleMapsUrl'));
-  assert.equal(closes, 0); assert(text(tree).includes('Changes saved.')); assert(action(tree, 'Edit details')); h.dispose();
+  assert.equal(closes, 0); assert(text(tree).includes('Changes saved.'));
+  action(tree, 'More place options').props.onPress(); tree = h.render(); assert(action(tree, 'Edit details')); h.dispose();
 });
 
 test('a resolved Google result populates the map and address without a location approval action', () => {
@@ -212,7 +216,8 @@ test('a resolved Google result populates the map and address without a location 
   tree = h.render(); assert(!action(tree, 'Confirm pin')); assert(!action(tree, 'Save place details'));
   const point = byType(tree, 'DreamPlacesMap').props.points[0];
   assert.equal(point.id, item.id); assert.equal(point.lat, 38.71); assert.equal(point.lon, -9.14);
-  assert(text(tree).includes('Lisbon, Portugal')); assert(action(tree, 'Maps')); assert(action(tree, 'Edit details')); h.dispose();
+  assert(text(tree).includes('Lisbon, Portugal')); assert(action(tree, 'Open in Maps'));
+  action(tree, 'More place options').props.onPress(); tree = h.render(); assert(action(tree, 'Edit details')); h.dispose();
 });
 
 test('unresolved or mismatched Google candidates are not plotted or presented as an approval queue', () => {
@@ -249,7 +254,7 @@ test('area detail keeps the broad marker, labels its precision and does not disp
   const tree = h.render(editorProps({ item: { ...item, placeName: 'Lake Atitlán', category: 'unknown',
     locationProvider: 'google_places', coordinatePrecision: 'area', locationPlaceId: 'area-id', locationExpiresAt: '2099-01-01' } }));
   assert.equal(byType(tree, 'DreamPlacesMap').props.points[0].area, true);
-  assert(text(tree).includes('Area')); assert(text(tree).includes('Area on map'));
+  assert(text(tree).includes('Area · Lisbon · Portugal')); assert(text(tree).includes('Area on map'));
   assert(text(tree).includes('The marker shows the general area.'));
   assert(!text(tree).includes('Representative map centre'));
   h.dispose();
@@ -265,7 +270,8 @@ test('country Search focuses above the map; first resolution keeps map height an
   tree = h.render({ ...props, items: [located] }); const map = byType(tree, 'DreamPlacesMap'); assert.equal(map.props.height, 248);
   map.props.onSelect('1'); tree = h.render(); action(tree, 'Details for Saved café').props.onPress(); assert.deepEqual(selected, ['1','view']);
   const row = byType(tree, 'FlatList').props.renderItem({ item: located, index: 0 });
-  const place = nodes(row).find(node => typeof node.type === 'function' && node.props?.onEdit); place.props.onEdit(); assert.deepEqual(selected, ['1','edit']); h.dispose();
+  const place = nodes(row).find(node => typeof node.type === 'function' && node.type.name === 'PlaceRow');
+  place.props.onPress(); assert.deepEqual(selected, ['1','view']); h.dispose();
 });
 
 test('city/category filters preserve every matching save, expose selection, and clear a hidden pin preview', () => {
@@ -320,10 +326,11 @@ test('capture waits for durable receipt, prevents duplicate taps, and preserves 
 test('processing copy distinguishes an unsent local post from a save being sorted on the server', () => {
   const h=host(editor,'DreamEditor');
   let tree=h.render(editorProps({item:{...item,id:'dream-item-local',status:'created',uploadStatus:'queued',needsReview:false}}));
-  assert(text(tree).some(value=>value.includes('Waiting to send to Trotter')));
+  assert(text(tree).some(value=>value.includes('Reel saved on this device.')));
   tree=h.render(editorProps({item:{...item,status:'processing',needsReview:false}}));
   assert(text(tree).some(value=>value.includes('Sorting this post in the background')));
   tree=h.render(editorProps({item:{...item,status:'needs_review',needsReview:true,placeName:undefined}}));
+  action(tree,'More place options').props.onPress(); tree=h.render();
   assert(action(tree,'Retry reading post')); assert(!text(tree).some(value=>value.includes('Reading this post')));
   h.dispose();
 });
