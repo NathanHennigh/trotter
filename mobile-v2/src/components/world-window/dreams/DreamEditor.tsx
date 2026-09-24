@@ -22,6 +22,7 @@ import type { MapPoint } from "../trips/tripPresentation";
 import { categoryLabel, dreamLocationType, dreamPlaceLabel, exactMapPoint, safeWebUrl } from "./dreamPresentation";
 import { DreamPhoto } from "./DreamPhoto";
 import { canFindLocation, isFindingLocation, locationExplanation } from "./locationPresentation";
+import { dreamProcessingState } from "./dreamProcessing";
 import { useLiveDreamLocation } from "./useLiveDreamLocation";
 import { countryRegion } from "./countryRegion";
 import { draftFingerprint, draftFromItem } from "./dreamDraft";
@@ -171,7 +172,8 @@ export function DreamEditor({
     }
   };
   const saved = /^\d+$/.test(item.id),
-    processing = item.status === "processing" || item.status === "created";
+    processingState = dreamProcessingState(item),
+    processing = processingState?.kind === "sorting" || processingState?.kind === "upload";
   const savedFeedback = (message: string) => {
     setSuccess(message);
     void selectionHaptic("confirmation");
@@ -234,16 +236,16 @@ export function DreamEditor({
               {item.tags.length > 0 && (
                 <Text style={s.tags}>{item.tags.join(" · ")}</Text>
               )}
-              {item.needsReview && !processing && (
+              {processingState && !processing && (
                 <Text style={s.review}>
-                  {item.placeName ? 'Some details could not be verified. Your post is saved.' : 'This post is saved, but its caption did not identify an exact place.'}
+                  {processingState.detail}
                 </Text>
               )}
               {processing && (
                 <Text style={s.review}>
                   {item.uploadStatus
                     ? 'Kept on this device. Waiting to send to Trotter.'
-                    : item.processingMessage || 'Saved. Sorting this post in the background—you can leave this screen.'}
+                    : processingState?.detail}
                 </Text>
               )}
               {saved && !processing && (
@@ -323,7 +325,7 @@ export function DreamEditor({
                       }
                     />
                   )}
-                  {(item.status === "failed" || item.needsReview) && (
+                  {(item.status === "failed" || item.needsReview || processingState?.kind === "unreadable" || processingState?.kind === "failed") && (
                     <WWButton
                       label={saved ? "Retry reading post" : "Retry save"}
                       onPress={() => {

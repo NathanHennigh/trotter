@@ -94,6 +94,25 @@ function serviceEnvironment(options = {}) {
 }
 const apiItem=(id,changes={})=>({id,dream_id:1,source_platform:'instagram',source_url:`https://www.instagram.com/reel/${id}`,category:'cafe',place_name:'Cafe One',city:'Lisbon',country:'Portugal',summary:'Notes',tags_json:[],needs_review:true,status:'needs_review',created_at:'2026-01-01',...changes});
 
+test('authoritative sorting outcomes retain every save and poll only jobs still running', async () => {
+  const env = serviceEnvironment();
+  const outcomes = ['queued', 'running', 'sorted', 'needs_details', 'unavailable', 'failed'];
+  let rows = outcomes.map((sorting_state, index) => apiItem(index + 1, { sorting_state, status: 'processing', country: null, city: null }));
+  env.fetcher(async url => response(200, url.endsWith('/dream-items') ? rows : []));
+  env.render(); await flush(); let state = env.render();
+  assert.deepEqual(state.items.map(item => item.sortingState), outcomes);
+  assert.deepEqual(state.processingItems.map(item => item.id), ['1', '2']);
+  assert.equal(state.dreams.reduce((count, dream) => count + dream.processingCount, 0), 2);
+  rows = rows.map(item => ({ ...item, sorting_state: item.id < 3 ? 'needs_details' : item.sorting_state }));
+  await env.clock.advance(5000); state = env.render();
+  assert.equal(state.items.length, 6, 'Terminal outcomes never discard saved reels');
+  assert.equal(state.processingItems.length, 0);
+  assert.equal(state.dreams.reduce((count, dream) => count + dream.processingCount, 0), 0);
+  const calls = env.calls.length; await env.clock.advance(15000); env.render();
+  assert.equal(env.calls.length, calls, 'Completed or unsuccessful sorting does not poll forever');
+  env.dispose();
+});
+
 test('Dreams fetches all user items, including unassigned/review saves',async()=>{const env=serviceEnvironment();env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1),apiItem(2,{dream_id:999,country:null})]:[]));env.render();await flush();const state=env.render();assert.equal(state.items.length,2);assert.equal(state.needsReviewItems.length,2);assert.equal(env.calls.length,2);env.dispose();});
 test('Dreams 401 clears auth and never obtains a developer account or retries',async()=>{const env=serviceEnvironment();env.fetcher(async()=>response(401,{detail:'Expired'}));await assert.rejects(env.module.testFetch('/dream-items'),/expired/);assert.equal(env.calls.length,1);assert(!env.calls.some(call=>call.url.includes('dev-token')));await assert.rejects(env.module.testFetch('/dream-items'),/Sign in/);assert.equal(env.calls.length,1);});
 test('old-account responses cannot populate Dreams after sign out',async()=>{const env=serviceEnvironment();let resolve;const pending=new Promise(done=>resolve=done);env.fetcher(async()=>pending);env.render();env.changeToken(undefined);resolve(response(200,[apiItem(1)]));await flush();assert.deepEqual(env.render().items,[]);env.dispose();});

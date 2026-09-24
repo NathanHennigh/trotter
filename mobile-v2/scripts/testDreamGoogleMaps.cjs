@@ -34,8 +34,8 @@ function hooks() {
 function nodes(value, seen = new Set()) { if (!value || typeof value !== 'object' || seen.has(value)) return []; seen.add(value); return [value, ...Object.values(value).flatMap(child => nodes(child, seen))]; }
 const find = (tree, type) => nodes(tree).find(node => node.type === type);
 const findLabel = (tree, text) => nodes(tree).find(node => node.props?.accessibilityLabel === text);
-function nativeMap(configured = true) {
-  const h = hooks(), moves = [], selects = [], placements = [], timers = new Map(); let timerId = 0, props = { points: [p('a', 38.72, -9.14)], fitKey: 'Portugal', onSelect: id => selects.push(id), onPlace: (...point) => placements.push(point) };
+function nativeMap(configured = true, requireNativeLayout = false) {
+  const h = hooks(), moves = [], selects = [], placements = [], timers = new Map(); let hasNativeSize = false, timerId = 0, props = { points: [p('a', 38.72, -9.14)], fitKey: 'Portugal', onSelect: id => selects.push(id), onPlace: (...point) => placements.push(point) };
   const jsx = (type, props, key) => ({ type, props, key });
   const loaded = load('components/world-window/dreams/DreamPlacesMap.native.tsx', {
     react: h.react, 'react/jsx-runtime': { jsx, jsxs: jsx },
@@ -45,8 +45,9 @@ function nativeMap(configured = true) {
     '../../../theme/trotterTheme': { colors: {}, fonts: {} }, '../WorldWindowUI': { WWIcon: 'Icon' }, './DreamPhoto': { PlaceSymbol: 'PlaceSymbol' }, './dreamMapModel': model,
   }, '', { setTimeout: (fn, ms) => { const id = ++timerId; timers.set(id, { fn, ms }); return id; }, clearTimeout: id => timers.delete(id) });
   return { moves, selects, placements, timers, ...h,
-    render(next = {}) { props = { ...props, ...next }; const tree = h.render(() => loaded.DreamPlacesMap(props)); const map = find(tree, 'MapView'); if (map) map.props.ref.current = { animateToRegion: (...args) => moves.push(args) }; return tree; },
-    ready() { let tree = this.render(); find(tree, 'MapView').props.onMapReady(); tree = this.render(); return tree; },
+    render(next = {}) { props = { ...props, ...next }; const tree = h.render(() => loaded.DreamPlacesMap(props)); const map = find(tree, 'MapView'); if (map) map.props.ref.current = { animateToRegion: (...args) => { if (requireNativeLayout && !hasNativeSize) throw new Error('IllegalStateException: Map size cannot be 0. Most likely, layout has not yet occurred'); moves.push(args); } }; return tree; },
+    layout(width = 320, height = 240) { const tree = this.render(); hasNativeSize = width > 0 && height > 0; find(tree, 'MapView').props.onLayout?.({ nativeEvent: { layout: { width, height } } }); return this.render(); },
+    ready() { this.layout(); let tree = this.render(); find(tree, 'MapView').props.onMapReady(); tree = this.render(); return tree; },
   };
 }
 
@@ -108,6 +109,16 @@ test('country map uses Google and waits for readiness before framing; selection 
   h.render({ points: [p('a', 38.72, -9.14)] }); assert.equal(h.moves.length, 2);
   find(tree, 'MapView').props.onPress({ nativeEvent: { coordinate: { latitude: 1, longitude: 2 } } }); assert.deepEqual(h.selects, [undefined]);
   h.dispose(); assert.equal(h.timers.size, 0);
+});
+
+test('Unsorted map readiness before native layout cannot issue the crashing Android bounds command', () => {
+  const h = nativeMap(true, true); let tree = h.render({ points: [], overview: undefined, fitKey: 'Unsorted' });
+  find(tree, 'MapView').props.onMapReady();
+  assert.doesNotThrow(() => { tree = h.render(); });
+  assert.equal(h.moves.length, 0); assert.equal(findLabel(tree, 'Show country on map').props.disabled, true);
+  h.layout(320, 0); assert.equal(h.moves.length, 0, 'A zero-height view is not laid out for a bounds camera');
+  h.layout(320, 248); assert.equal(h.moves.length, 1);
+  assert(Object.values(h.moves[0][0]).every(Number.isFinite)); h.dispose();
 });
 test('manual placement accepts exact valid taps without refitting after every pin move', () => {
   const h = nativeMap(); let tree = h.ready(); tree = h.render({ placing: true });

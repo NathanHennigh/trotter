@@ -11,7 +11,8 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
   const configured = Constants.expoConfig?.extra?.[Platform.OS === "ios" ? "googleMapsIosConfigured" : "googleMapsAndroidConfigured"] === true;
   const clean = React.useMemo(() => cleanMapPoints(points), [points]);
   const ref = React.useRef<MapView>(null), mounted = React.useRef(true), reduceMotion = React.useRef(true);
-  const [width, setWidth] = React.useState(320), [ready, setReady] = React.useState(false), [loaded, setLoaded] = React.useState(false);
+  const [width, setWidth] = React.useState(320), [laidOut, setLaidOut] = React.useState(false), [ready, setReady] = React.useState(false), [loaded, setLoaded] = React.useState(false);
+  const cameraReady = ready && laidOut;
   const [slow, setSlow] = React.useState(false), [attempt, setAttempt] = React.useState(0), [linkError, setLinkError] = React.useState(false);
   const [region, setRegion] = React.useState(() => placesRegion(clean, overview, width, height));
   const currentRegion = React.useRef(region), fittedKey = React.useRef<string | undefined>(undefined), selectedFromMap = React.useRef<string | undefined>(undefined), focusedPoint = React.useRef<string | undefined>(undefined);
@@ -30,14 +31,14 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
   }, [configured, loaded, attempt]);
   const move = React.useCallback((next: PlacesRegion, animated: boolean) => {
     currentRegion.current = next; setRegion(next);
-    if (ready) ref.current?.animateToRegion(next, animated && !reduceMotion.current ? 240 : 0);
-  }, [ready]);
+    if (cameraReady) ref.current?.animateToRegion(next, animated && !reduceMotion.current ? 240 : 0);
+  }, [cameraReady]);
   // Workers resolve places independently. Keep newly arriving pins in view until
   // the user takes control; a one-time first-pin fit hid later places offscreen.
   // Coordinate refreshes never reset a camera, even when no gesture occurred.
   React.useEffect(() => {
     const key = `${fitKey}:${attempt}:${width}:${height}`;
-    if (!ready || width <= 0) return;
+    if (!cameraReady || width <= 0) return;
     const newView = fittedKey.current !== key;
     if (newView) { fittedPointIds.current = new Set(); userFramed.current = false; }
     const newPin = clean.some(point => !fittedPointIds.current.has(point.id));
@@ -45,10 +46,10 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     if (!newView && (placing || userFramed.current || !newPin)) return;
     fittedKey.current = key; setChoices([]);
     move(placesRegion(clean, overview, width, height), false);
-  }, [ready, fitKey, attempt, width, height, clean, overview, placing, move]);
+  }, [cameraReady, fitKey, attempt, width, height, clean, overview, placing, move]);
   React.useEffect(() => {
     if (!selectedId) { focusedPoint.current = undefined; selectedFromMap.current = undefined; return; }
-    if (!ready || placing) return;
+    if (!cameraReady || placing) return;
     const point = clean.find(p => p.id === selectedId);
     if (!point) return;
     const key = `${point.id}:${point.lat}:${point.lon}:${Boolean(point.area)}`;
@@ -57,7 +58,7 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     userFramed.current = true;
     if (selectedFromMap.current === selectedId) { selectedFromMap.current = undefined; return; }
     move(focusPlaceRegion(point, currentRegion.current, width, height), true);
-  }, [selectedId, ready, placing, clean, move, width, height]);
+  }, [selectedId, cameraReady, placing, clean, move, width, height]);
   const clusters = React.useMemo(() => placing ? clean.map(point => ({ id: point.id, points: [point], latitude: point.lat, longitude: point.lon })) : clusterPlaces(clean, region, width, height, selectedId), [clean, region, width, height, selectedId, placing]);
   const open = async () => {
     const url = googleMapUrl(clean.filter(p => !selectedId || p.id === selectedId), overview);
@@ -86,14 +87,21 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
   };
   return <View style={s.frame}>
     <View style={s.toolbar}>
-      <Pressable accessibilityRole="button" accessibilityLabel={clean.length ? "Fit saved places on map" : "Show country on map"} disabled={!configured || !ready} style={s.action}
+      <Pressable accessibilityRole="button" accessibilityLabel={clean.length ? "Fit saved places on map" : "Show country on map"} disabled={!configured || !cameraReady} style={s.action}
         onPress={() => { userFramed.current = false; setChoices([]); move(placesRegion(clean, overview, width, height), true); }}>
         <WWIcon name="globe" size={15} /><Text style={s.actionText}>{clean.length ? "Fit places" : "Country view"}</Text>
       </Pressable>
       {googleMapUrl(clean, overview) && <Pressable accessibilityRole="link" accessibilityLabel="Open in Google Maps" style={s.action} onPress={() => void open()}><WWIcon name="arrow" size={17} /></Pressable>}
     </View>
-    {configured ? <View style={{ height }} onLayout={event => setWidth(event.nativeEvent.layout.width)}>
+    {configured ? <View style={{ height }}>
       <MapView key={attempt} ref={ref} provider={PROVIDER_GOOGLE} style={StyleSheet.absoluteFill}
+        onLayout={event => {
+          const size = event.nativeEvent.layout;
+          // Google onMapReady may precede layout. Bounds updates throw on Android
+          // until this actual native MapView has positive width and height.
+          const valid = Number.isFinite(size.width) && Number.isFinite(size.height) && size.width > 0 && size.height > 0;
+          setLaidOut(valid); if (valid) setWidth(size.width);
+        }}
         initialRegion={placesRegion(clean, overview, width, height)} customMapStyle={placesMapStyle}
         showsUserLocation={false} showsMyLocationButton={false} showsCompass={false} showsBuildings={false}
         pitchEnabled={false} rotateEnabled={false} zoomControlEnabled={false} toolbarEnabled={false}
@@ -108,7 +116,7 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
       <WWIcon name="pin" size={24} /><Text style={s.note}>Maps aren’t available in this build. Your saved places are still here.</Text>
       {placing && <Text style={s.note}>You can paste a Google Maps link in Edit details.</Text>}
     </View>}
-    {slow && <View style={s.status}><Text style={s.note}>Map detail is taking longer to load. Check your connection or try again.</Text><Pressable accessibilityRole="button" onPress={() => { setReady(false); setLoaded(false); setSlow(false); fittedKey.current = undefined; setAttempt(value => value + 1); }} style={s.action}><Text style={s.actionText}>Reload map</Text></Pressable></View>}
+    {slow && <View style={s.status}><Text style={s.note}>Map detail is taking longer to load. Check your connection or try again.</Text><Pressable accessibilityRole="button" onPress={() => { setReady(false); setLaidOut(false); setLoaded(false); setSlow(false); fittedKey.current = undefined; setAttempt(value => value + 1); }} style={s.action}><Text style={s.actionText}>Reload map</Text></Pressable></View>}
     {!clean.length && <Text style={s.empty}>{placing ? "Tap the exact location to place your pin." : "Saved places will appear here when their locations are ready."}</Text>}
     {!placing && clean.some(point => point.area) && <Text style={s.empty}>Area markers show a general location.</Text>}
     {choices.length > 0 && <ScrollView style={s.choices} nestedScrollEnabled>

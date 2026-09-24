@@ -49,6 +49,7 @@ import {
 } from "../components/world-window/dreams/dreamPresentation";
 import { countryRegion } from "../components/world-window/dreams/countryRegion";
 import { dreamCopy } from "../components/world-window/dreams/dreamCopy";
+import { dreamProcessingState, dreamProcessingSummary } from "../components/world-window/dreams/dreamProcessing";
 import { canFindLocation, isFindingLocation, locationNote } from "../components/world-window/dreams/locationPresentation";
 import { DreamPlacesMap } from "../components/world-window/dreams/DreamPlacesMap";
 import type { MapPoint } from "../components/world-window/trips/tripPresentation";
@@ -397,6 +398,7 @@ function CountryPlaces({
       : (a.city || "").localeCompare(b.city || "") || (a.placeName || "").localeCompare(b.placeName || "")),
     [items, query, city, category, sourceUrl]);
   const points = React.useMemo(() => visible.map(exactMapPoint).filter((point): point is MapPoint => Boolean(point)), [visible]);
+  const unsorted = !sourceUrl && !review && countryKey(title) === "unsorted";
   const selectedPlace = visible.find(item => item.id === selected);
   const previewSize = fitDisplayFont(selectedPlace?.placeName || "Saved place", 21, getMobileVisualWidth(width) - 136, fontScale);
   const cityCounts = React.useMemo(() => {
@@ -471,6 +473,10 @@ function CountryPlaces({
           initialNumToRender={8} windowSize={7}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={colors.blue} />}
           ListHeaderComponent={<>
+            {unsorted && <View style={s.notice}>
+              <Text style={s.noticeText}>Your reels are saved here until a place can be identified.</Text>
+              <Text accessibilityLiveRegion="polite" style={s.unsortedStatus}>{dreamProcessingSummary(items)}</Text>
+            </View>}
             {sourceReceipt && sourceReceipt.status !== "saved" && <View style={s.notice}>
               <Text accessibilityLiveRegion="polite" style={s.noticeText}>
                 {sourceReceipt.status === "uploading" ? "Sending your reel… You can leave this screen."
@@ -486,7 +492,7 @@ function CountryPlaces({
               onPress={() => void Linking.openURL(safeWebUrl(sourceUrl)!).catch(() => {})}>
               <Text style={s.actionText}>Original reel ↗</Text>
             </Pressable>}
-            {!review && (!sourceReceipt || items.length > 0 || sourceReceipt.status === "saved") && <View style={s.mapPaper}>
+            {!review && (region || points.length > 0) && (!sourceReceipt || items.length > 0 || sourceReceipt.status === "saved") && <View style={s.mapPaper}>
               <DreamPlacesMap overview={region} points={points} fitKey={`${title}-${city}-${category}-${query}`}
                 height={248} selectedId={selected} onSelect={setSelected} />
               <View style={s.mapFoot}>
@@ -555,7 +561,8 @@ function CountryPlaces({
   sourceCount: number;
   onShowSource?: () => void;
 }) {
-  const processing = item.status === "processing" || item.status === "created";
+  const state = dreamProcessingState(item);
+  const processing = state?.kind === "sorting" || state?.kind === "upload";
   const copy = React.useMemo(() => dreamCopy(item), [item]);
   const [showOriginal, setShowOriginal] = React.useState(false);
   return (
@@ -586,13 +593,9 @@ function CountryPlaces({
               item.country ||
               "Location to review"}
           </Text>
-          {item.status === "failed" || item.needsReview || processing ? (
+          {state ? (
             <Text style={s.status}>
-              {processing
-                ? "Reading post…"
-                : item.status === "failed"
-                  ? "Save needs attention"
-                  : "Review place"}
+              {state.label}
             </Text>
           ) : (
             locationNote(item) && <Text style={s.pinNote}>{locationNote(item)}</Text>
@@ -606,6 +609,7 @@ function CountryPlaces({
       </Pressable>
       {expanded && (
         <View style={s.placeBody}>
+          {state && <Text accessibilityLiveRegion="polite" style={s.placeSummary}>{state.detail}</Text>}
           {item.thumbnailUrl && (
             <View style={s.expandedPhoto}>
               <DreamPhoto item={item} />
@@ -919,6 +923,7 @@ const s = StyleSheet.create({
     color: colors.mutedInk,
     flexShrink: 1,
   },
+  unsortedStatus: { fontFamily: fonts.sansSemi, fontSize: 12, lineHeight: 18, color: colors.ink, marginTop: 7 },
   findingNote: { paddingHorizontal: 12, paddingBottom: 12, fontFamily: fonts.sansRegular, fontSize: 12, lineHeight: 18, color: colors.mutedInk },
   search: {
     marginHorizontal: 24,

@@ -373,3 +373,88 @@ def test_only_unambiguous_explicit_country_fills_missing_model_field(sessions, c
         assert item.raw_metadata_json["parser_raw"]["items"][0]["country"] == expected
         if expected:
             assert item.dream.title == expected
+
+
+@pytest.mark.parametrize("caption,name,city,country,job_state,item_state,expected", [
+    ("🏜️", None, None, None, "completed", "needs_review", "needs_details"),
+    ("Deluxe room with view #fyp", None, None, None, "completed", "needs_review", "needs_details"),
+    ("Seaweed studio on airbnb🤍", "Seaweed studio", None, None, "completed", "parsed", "needs_details"),
+    (None, None, None, None, "failed", "needs_review", "unavailable"),
+    ("A cafe in Spain", None, None, None, "failed", "needs_review", "failed"),
+    ("The dream stay in Santorini", "Echoes", "Santorini", "Greece", "completed", "needs_review", "sorted"),
+    ("Sorting", None, None, None, "queued", "processing", "queued"),
+    ("Sorting", None, None, None, "running", "processing", "running"),
+])
+def test_api_explains_legacy_sort_outcome_without_rewriting_jobs(client, test_db, test_user,
+                                                              caption, name, city, country, job_state, item_state, expected):
+    item_id = client.post('/dreams/share', json={'source_url': 'https://instagram.com/reel/sort-outcome'}).json()['dream_item_id']
+    item = test_db.get(DreamItem, item_id)
+    item.caption, item.place_name, item.city, item.country = caption, name, city, country
+    item.status = item_state
+    item.enrichment.status = job_state
+    item.enrichment.message = 'Saved to Dreams.'
+    test_db.commit()
+    output = next(row for row in client.get('/dream-items').json() if row['id'] == item_id)
+    assert output['sorting_state'] == expected
+    assert output['status'] == item_state
+    if expected in {'needs_details', 'unavailable', 'failed'}:
+        assert output['processing_message'] != 'Saved to Dreams.'
+    test_db.expire_all()
+    assert test_db.get(DreamItem, item_id).enrichment.message == 'Saved to Dreams.'
+
+
+def test_sparse_caption_completes_once_with_honest_message_and_does_not_retry_forever(sessions):
+    add_item(sessions, place_name=None, city=None, country=None, caption='🏜️', raw_metadata_json={'shared_text': '🏜️'})
+    job_id, _ = enqueue(sessions)
+    def sparse(_):
+        return {'caption': '🏜️', 'metadata': {}, 'parsed': DreamParseResponse(
+            items=[DreamParseItem(summary='Saved post', needs_review=True, confidence=0)], model='synthetic')}
+    assert run(sessions, job_id, sparse) == 'completed'
+    assert run(sessions, job_id, sparse, NOW + timedelta(minutes=16)) == 'skipped'
+    with sessions() as db:
+        job = db.get(DreamEnrichmentJob, job_id)
+        assert job.attempts == 1 and job.next_attempt_at is None
+        assert 'does not include a place' in job.message
+        assert db.get(DreamItem, 1).caption == '🏜️'
+        assert db.get(DreamItem, 1).country is None
+        assert discover_enrichment(db, now=NOW + timedelta(minutes=16)) == 0
+
+
+def test_ai_retry_keeps_fetched_caption_without_refetching_instagram(sessions):
+    from app.services.dream_enrichment import EnrichmentUnavailable
+    add_item(sessions, place_name=None, city=None, country=None, caption=None, raw_metadata_json={'shared_text': None})
+    job_id, _ = enqueue(sessions)
+    caption = 'Garden Cafe in Madrid, Spain'
+    def temporarily_unavailable(claim):
+        assert claim['caption'] is None
+        raise EnrichmentUnavailable(caption, {'caption': caption, 'thumbnail_url': 'https://cdn.example.invalid/public.jpg',
+                                              'error': 'must-not-persist-secret'})
+    assert run(sessions, job_id, temporarily_unavailable) == 'queued'
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        assert item.caption == item.source_post.caption == caption
+        assert 'error' not in item.raw_metadata_json['instagram_metadata']
+    def succeeds(claim):
+        assert claim['caption'] == caption
+        return result()
+    assert run(sessions, job_id, succeeds, NOW + timedelta(seconds=31)) == 'completed'
+    with sessions() as db:
+        assert db.get(DreamItem, 1).country == 'Spain'
+        assert db.get(DreamEnrichmentJob, job_id).attempts == 2
+
+
+def test_failed_fetch_remains_bounded_and_can_be_retried_explicitly(sessions, monkeypatch):
+    from app.services.dream_enrichment import EnrichmentUnavailable, public_sorting_state
+    monkeypatch.setenv('DREAM_ENRICHMENT_MAX_ATTEMPTS', '2')
+    add_item(sessions, place_name=None, city=None, country=None, caption=None)
+    job_id, _ = enqueue(sessions)
+    def unavailable(_):
+        raise EnrichmentUnavailable()
+    assert run(sessions, job_id, unavailable) == 'queued'
+    assert run(sessions, job_id, unavailable, NOW + timedelta(seconds=31)) == 'failed'
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        assert public_sorting_state(item)['sorting_state'] == 'unavailable'
+        assert 'Instagram did not provide' in item.enrichment.message
+        assert item.enrichment.next_attempt_at is None
+    assert enqueue(sessions, force=True) == (job_id, True)

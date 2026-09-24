@@ -28,6 +28,26 @@ def parsed_place(**overrides):
     return item
 
 
+@pytest.mark.parametrize('caption,expected', [
+    ('Seaweed studio on airbnb🤍', 'hotel'),
+    ('Seaweed Studio is listed on Airbnb.', 'hotel'),
+    ('Seaweed Studio available through Airbnb.', 'hotel'),
+    ('Seaweed Studio on Airbnb Experiences.', 'activity'),
+    ('Visit Seaweed Studio. Our apartment is on Airbnb.', 'activity'),
+    ('Seaweed Studio is a workshop near our Airbnb.', 'activity'),
+])
+def test_named_airbnb_stay_has_lodging_category_without_guessing_geography(caption, expected):
+    item = dream_parser._normalize_item(parsed_place(place_name='Seaweed Studio', category='activity',
+                                                    city=None, country=None, google_maps_search_query=None), caption)
+    assert item.category == expected
+    assert item.city is None and item.country is None
+
+
+def test_other_venue_type_is_not_reclassified_by_an_airbnb_mention():
+    item = dream_parser._normalize_item(parsed_place(place_name='Garden Cafe', category='cafe'), 'Garden Cafe on Airbnb.')
+    assert item.category == 'cafe'
+
+
 def venice_response(url: str, *, item=None, status_code: int = 200, headers=None):
     body = {
         "id": "chatcmpl-test",

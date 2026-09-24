@@ -16,6 +16,7 @@ import { WWIcon } from "../WorldWindowUI";
 import { CountryBoard } from "./dreamPresentation";
 import { DreamPhoto } from "./DreamPhoto";
 import { postcardReelCover } from "./dreamImageSource";
+import { dreamProcessingSummary } from "./dreamProcessing";
 import { getApiBaseUrl } from "../../../services/travelTrips";
 
 export function CountryPostcard({
@@ -160,11 +161,11 @@ export function CountryPostcard({
         </View>
         <View style={s.caption}>
           <Text style={s.cities}>
-            {board.items.length} saved{" "}
+            {board.key === "unsorted" ? dreamProcessingSummary(board.items) || `${board.items.length} saved reels` : <>{board.items.length} saved{" "}
             {board.items.length === 1 ? "place" : "places"}
             {board.cities.length
               ? ` ·\u00a0${board.cities.length}\u00a0${board.cities.length === 1 ? "city" : "cities"}`
-              : ""}
+              : ""}</>}
           </Text>
           <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
             <WWIcon name="arrow" size={16} color={colors.ink} />

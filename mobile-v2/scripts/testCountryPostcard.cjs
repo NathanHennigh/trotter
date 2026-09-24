@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), ts = require('typescript');
 const { test } = require('node:test');
 const file = path.join(__dirname, '../src/components/world-window/dreams/CountryPostcard.tsx');
+const processing = { exports: {} };
+new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(path.dirname(file), 'dreamProcessing.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(processing, processing.exports);
 const board = { key: 'thailand', title: 'Thailand', cities: ['Bangkok', 'Krabi'], items: Array.from({ length: 28 }, (_, i) => ({ id: String(i) })) };
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 function harness() {
@@ -39,6 +41,7 @@ function harness() {
     '../../../theme/trotterTheme': { colors: {}, fonts: {} },
     '../WorldWindowUI': { WWIcon: 'Icon' }, './DreamPhoto': { DreamPhoto: 'DreamPhoto' },
     './dreamImageSource': { postcardReelCover: items => items[0] }, '../../../services/travelTrips': { getApiBaseUrl: () => '' },
+    './dreamProcessing': processing.exports,
   };
   const module = { exports: {} };
   const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), { fileName: file, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;

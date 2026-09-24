@@ -18,6 +18,7 @@ export type DreamItemCategory =
   | 'unknown';
 
 export type DreamItemStatus = 'created' | 'processing' | 'parsed' | 'needs_review' | 'confirmed' | 'failed';
+export type DreamSortingState = 'queued' | 'running' | 'sorted' | 'needs_details' | 'unavailable' | 'failed';
 export type DreamLocationStatus = 'queued' | 'running' | 'resolved' | 'needs_review' | 'not_found' | 'failed' | 'blocked' | 'manual';
 export type DreamLocationAttribution = { displayName: string; uri?: string };
 export type DreamLocationCandidate = {
@@ -101,6 +102,7 @@ type ApiDreamItem = {
   location_message?: string | null;
   location_checked_at?: string | null;
   processing_message?: string | null;
+  sorting_state?: DreamSortingState | null;
   status: DreamItemStatus;
   created_at: string;
   updated_at?: string | null;
@@ -143,6 +145,7 @@ export type DreamItem = {
   /** Present only while the device still has an upload receipt. */
   uploadStatus?: 'queued' | 'sending' | 'failed';
   processingMessage?: string;
+  sortingState?: DreamSortingState;
   createdAt: string;
   updatedAt: string;
 };
@@ -259,7 +262,7 @@ function useDreamsState() {
   const dreams = React.useMemo(() => mergeDreams(liveDreams, itemDreams), [liveDreams, itemDreams]);
   const needsReviewItems = React.useMemo(() => items.filter((item) => item.needsReview), [items]);
   const pendingUploadItems = React.useMemo(() => items.filter(item => item.uploadStatus), [items]);
-  const processingItems = React.useMemo(() => items.filter((item) => !item.uploadStatus && (item.status === 'processing' || item.status === 'created')), [items]);
+  const processingItems = React.useMemo(() => items.filter(isSortingDreamItem), [items]);
   const locatingItems = React.useMemo(() => items.filter((item) => item.locationStatus === 'queued' || item.locationStatus === 'running'), [items]);
   const awaitingReceiptDetails = recentlyAccepted.current.size;
 
@@ -810,6 +813,7 @@ function mapApiDreamItem(item: ApiDreamItem): DreamItem {
     locationCheckedAt: item.location_checked_at ?? undefined,
     status: item.status,
     processingMessage: item.processing_message ?? undefined,
+    sortingState: item.sorting_state ?? undefined,
     createdAt: item.created_at,
     updatedAt: item.updated_at ?? item.created_at,
   };
@@ -851,6 +855,12 @@ function mergeDreams(apiDreams: Dream[] | undefined, itemDreams: Dream[]) {
   });
 }
 
+function isSortingDreamItem(item: DreamItem): boolean {
+  return !item.uploadStatus && (item.sortingState
+    ? item.sortingState === 'queued' || item.sortingState === 'running'
+    : item.status === 'processing' || item.status === 'created');
+}
+
 function buildDreams(items: DreamItem[]): Dream[] {
   const groups = new Map<string, DreamItem[]>();
   for (const item of items) {
@@ -861,7 +871,7 @@ function buildDreams(items: DreamItem[]): Dream[] {
   return Array.from(groups.entries())
     .map(([id, groupItems]) => {
       const first = groupItems[0];
-      const isProcessing = groupItems.some((item) => item.status === 'processing' || item.status === 'created');
+      const isProcessing = groupItems.some(isSortingDreamItem);
       return {
         id,
         title: isProcessing && id === 'dream-processing' ? 'Processing' : dreamTitleFor(first.country, first.city),
@@ -869,7 +879,7 @@ function buildDreams(items: DreamItem[]): Dream[] {
         city: first.city,
         itemCount: groupItems.length,
         needsReviewCount: groupItems.filter((item) => item.needsReview).length,
-        processingCount: groupItems.filter((item) => item.status === 'processing').length,
+        processingCount: groupItems.filter(isSortingDreamItem).length,
         updatedAt: groupItems.map((item) => item.updatedAt).sort().reverse()[0],
       };
     })

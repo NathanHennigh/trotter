@@ -56,7 +56,7 @@ function host(file, exportName, options = {}) {
   const cache = {};
   function load(filename) {
     if (cache[filename]) return cache[filename];
-    const code = fs.readFileSync(filename, 'utf8') + (filename.endsWith('DreamsScreen.tsx') ? '\nexport { CountryPlaces, CapturePlace };' : '');
+    const code = fs.readFileSync(filename, 'utf8') + (filename.endsWith('DreamsScreen.tsx') ? '\nexport { CountryPlaces, CapturePlace, PlaceRow };' : '');
     const compiled = ts.transpileModule(code, { compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
     const mod = { exports: {} };
     new Function('module','exports','require', compiled)(mod, mod.exports, request => {
@@ -88,6 +88,77 @@ const editorProps = overrides => ({ item, points: [], onSave: async () => {}, on
 const countryProps = overrides => ({ title: 'Portugal', items: [item], review: false, topInset: 0, bottomInset: 20,
   loading: false, onBack: noop, onRefresh: noop, onSelect: noop, onLocateMissing: async () => {}, motion: false,
   sourceCounts: new Map(), onShowSource: noop, ...overrides });
+
+test('opening Unsorted with a batch of processing, failed and unsent Instagram saves renders every row and can return', () => {
+  const saves = Array.from({ length: 28 }, (_, index) => ({ ...item, id: index < 3 ? `pending-${index}` : String(index + 1),
+    country: undefined, city: undefined, placeName: undefined, category: 'unknown', tags: [], summary: '',
+    sourceUrl: `https://www.instagram.com/reel/pending-${index}`, status: ['created', 'processing', 'failed'][index % 3],
+    uploadStatus: index < 3 ? 'queued' : undefined, needsReview: index % 3 === 2 }));
+  const home = host(screen, 'DreamsScreen', { items: saves });
+  let tree = home.render({ active: 'dreams', onChange: noop });
+  const boards = byType(tree, 'FlatList'); assert.equal(boards.props.data.length, 1);
+  const board = boards.props.data[0]; assert.equal(board.title, 'Unsorted');
+  const card = boards.props.renderItem({ item: board }); card.props.onPress(); tree = home.render();
+  const collection = nodes(tree).find(node => typeof node.type === 'function' && node.type.name === 'CountryPlaces');
+  assert(collection); const country = host(screen, 'CountryPlaces'); const opened = country.render(collection.props);
+  assert(!byType(opened, 'DreamPlacesMap'), 'A collection without country or pins must not mount an irrelevant native world map');
+  const list = byType(opened, 'FlatList'); assert.equal(list.props.data.length, saves.length);
+  for (let index = 0; index < saves.length; index++) {
+    const row = list.props.renderItem({ item: list.props.data[index], index });
+    const content = nodes(row).find(node => typeof node.type === 'function' && node.type.name === 'PlaceRow');
+    const rowHost = host(screen, 'PlaceRow'); assert(text(rowHost.render(content.props)).includes('Saved inspiration')); rowHost.dispose();
+  }
+  action(opened, 'Back to Dreams').props.onPress(); tree = home.render();
+  assert.equal(byType(tree, 'FlatList').props.data[0].title, 'Unsorted');
+  country.dispose(); home.dispose();
+});
+
+test('Unsorted distinguishes live sorting, missing details and unreadable reels without an endless progress claim', () => {
+  const base = { ...item, country: undefined, city: undefined, placeName: undefined, category: 'unknown', status: 'needs_review', needsReview: true };
+  const cases = [
+    { ...base, id: 'queued', sortingState: 'queued', status: 'processing' },
+    { ...base, id: 'running', sortingState: 'running', status: 'processing' },
+    { ...base, id: 'emoji', sortingState: 'needs_details', caption: '🏜️' },
+    { ...base, id: 'room', sortingState: 'needs_details', caption: 'Deluxe room with view #fyp' },
+    { ...base, id: 'named', sortingState: 'needs_details', placeName: 'Seaweed Studio' },
+    { ...base, id: 'failed', sortingState: 'unavailable', processingMessage: 'Instagram could not provide a readable caption.' },
+  ];
+  const collection = host(screen, 'CountryPlaces'); let tree = collection.render(countryProps({ title: 'Unsorted', items: cases }));
+  assert(text(tree).includes('2 sorting · 3 need details · 1 couldn’t be read'));
+  assert(!byType(tree, 'DreamPlacesMap'));
+  const expected = ['Sorting reel…', 'Sorting reel…', 'Needs details', 'Needs details', 'Location missing', 'Couldn’t read reel'];
+  cases.forEach((saved, index) => {
+    const h = host(screen, 'PlaceRow'); const row = h.render({ item: saved, expanded: true, onPress: noop, onEdit: noop, onShowMap: noop, sourceCount: 1 });
+    assert(text(row).includes(expected[index]));
+    if (index >= 2) assert(!text(row).some(value => /Sorting|Reading post|Finding.*background/.test(value)));
+    if (saved.sortingState === 'unavailable') assert(text(row).includes(saved.processingMessage));
+    h.dispose();
+  });
+  const located = { ...cases[4], latitude: 40, longitude: 25, status: 'parsed', needsReview: false };
+  tree = collection.render(countryProps({ title: 'Unsorted', items: [located] }));
+  assert.equal(byType(tree, 'DreamPlacesMap').props.points[0].id, 'named', 'A genuine pin adds the map without inventing a country');
+  collection.dispose();
+});
+
+test('completed and failed server job status overrides a stale processing item in place details', () => {
+  const h = host(editor, 'DreamEditor');
+  let tree = h.render(editorProps({ item: { ...item, status: 'processing', sortingState: 'needs_details', needsReview: true, placeName: undefined, country: undefined } }));
+  assert(text(tree).includes('Your reel is saved. Its caption didn’t identify a place.'));
+  assert(!text(tree).some(value => value.includes('Sorting this post')));
+  tree = h.render(editorProps({ item: { ...item, status: 'needs_review', needsReview: true, sortingState: 'unavailable', processingMessage: 'Instagram could not provide a readable caption.' } }));
+  assert(text(tree).includes('Instagram could not provide a readable caption.')); assert(action(tree, 'Retry reading post'));
+  h.dispose();
+});
+
+test('sorted destination suppresses obsolete review warnings while a failed parse remains retryable', () => {
+  const h = host(screen, 'PlaceRow');
+  let tree = h.render({ item: { ...item, placeName: 'Echoes Luxury Suites', country: 'Greece', city: 'Santorini', needsReview: true, sortingState: 'sorted' }, expanded: true, onPress: noop, onEdit: noop, onShowMap: noop, sourceCount: 1 });
+  assert(!text(tree).some(value => /Location missing|Needs details|Sorting reel/.test(value)));
+  tree = h.render({ item: { ...item, country: undefined, sortingState: 'failed', processingMessage: 'Saved. We could not finish sorting this post. Try again.' }, expanded: true, onPress: noop, onEdit: noop, onShowMap: noop, sourceCount: 1 });
+  assert(text(tree).includes('Couldn’t sort reel'));
+  assert(!text(tree).includes('Couldn’t read reel'));
+  h.dispose();
+});
 
 test('direct Edit starts in the form; Close guards changed fields, Keep editing retains them, Discard alone closes', () => {
   let closes = 0;

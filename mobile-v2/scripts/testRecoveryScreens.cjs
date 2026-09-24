@@ -8,6 +8,8 @@ const root = path.join(__dirname, '../src');
 const noop = () => {};
 const draftModule = { exports: {} };
 new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(root, 'components/world-window/dreams/dreamDraft.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(draftModule, draftModule.exports);
+const processingModule = { exports: {} };
+new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(root, 'components/world-window/dreams/dreamProcessing.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(processingModule, processingModule.exports);
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const flush = async () => { for (let n = 0; n < 30; n++) await Promise.resolve(); };
 function screen(file, exportName, overrides = {}) {
@@ -31,6 +33,7 @@ function screen(file, exportName, overrides = {}) {
     '../../../theme/trotterTheme': { colors: {}, fonts: {} },
     '../WorldWindowUI': { WWButton: 'WWButton', WWHeader: 'WWHeader', WWIcon: 'WWIcon' },
     './DreamPlacesMap': { DreamPlacesMap: 'DreamPlacesMap' }, './DreamPhoto': { DreamPhoto: 'DreamPhoto' },
+    './dreamProcessing': processingModule.exports,
     './useLiveDreamLocation': { useLiveDreamLocation: () => ({}) },
     './countryRegion': { countryRegion: () => undefined },
     './dreamPresentation': { categoryLabel: x => x, dreamLocationType: item => item.coordinatePrecision === 'area' ? 'Area' : item.category, exactMapPoint: () => undefined, safeWebUrl: x => x },

@@ -23,6 +23,29 @@ PROTECTED_FIELDS = (
 )
 
 
+def public_sorting_state(item: DreamItem):
+    """Current per-card outcome, including legacy jobs, without a DB write.
+
+    A completed provider job is not proof that a destination was found. Keep
+    the existing item status contract and expose this separate UI distinction.
+    """
+    row = item.enrichment
+    if item.status == "processing" and (row is None or row.status in ACTIVE):
+        state = row.status if row else "queued"
+        return {"sorting_state": state, "processing_message": row.message if row and row.message else "Sorting this save in the background."}
+    if (item.country or "").strip():
+        return {"sorting_state": "sorted", "processing_message": "Saved to Dreams."}
+    if row and row.status == "failed":
+        from ..routers.dreams import usable_caption_text
+        if not usable_caption_text(item.caption, item.source_url):
+            return {"sorting_state": "unavailable", "processing_message": "Saved. Instagram did not provide this reel's caption. Try again later or add its details."}
+        return {"sorting_state": "failed", "processing_message": "Saved. We could not finish sorting this post. Try again."}
+    message = ("Saved. The caption does not say where this place is." if item.place_name
+               else "Saved. We could not identify a country from this caption." if item.city or item.region_or_neighborhood
+               else "Saved. The caption does not include a place or destination.")
+    return {"sorting_state": "needs_details", "processing_message": message}
+
+
 def fingerprint(item):
     values = {name: getattr(item, name) for name in PROTECTED_FIELDS}
     values["shared_text"] = (item.raw_metadata_json or {}).get("shared_text")
@@ -131,6 +154,7 @@ def _finish_failed(item, row, now):
     row.next_attempt_at = row.lease_token = row.lease_expires_at = None
     row.updated_at = now
     item.status, item.needs_review, item.updated_at = "needs_review", True, now
+    row.message = public_sorting_state(item)["processing_message"]
 
 
 def claim_enrichment(db: Session, job_id: int, *, now=None):
@@ -273,6 +297,19 @@ def resolve_enrichment_job(job_id, *, session_factory=None, reader=None, now=Non
         row.next_attempt_at = None
         if failure:
             if row.attempts < setting("DREAM_ENRICHMENT_MAX_ATTEMPTS", 3, 5):
+                # A later AI retry must not depend on fetching an already-read
+                # Instagram caption again: that endpoint can become unavailable
+                # between attempts. The source/lease checks above protect edits.
+                if failure.caption:
+                    from ..routers.dreams import usable_caption_text
+                    if not usable_caption_text(item.caption, item.source_url):
+                        item.caption = failure.caption
+                        if item.source_post:
+                            item.source_post.caption = failure.caption
+                    metadata = {key: value for key, value in failure.metadata.items() if key != "error"}
+                    if metadata:
+                        item.raw_metadata_json = {**(item.raw_metadata_json or {}), "instagram_metadata": metadata}
+                    row.fingerprint = fingerprint(item)
                 row.status = "queued"
                 row.next_attempt_at = finished + timedelta(seconds=30 * 2 ** (row.attempts - 1))
                 row.message = "This save is taking longer to read. We will retry automatically."
@@ -285,6 +322,7 @@ def resolve_enrichment_job(job_id, *, session_factory=None, reader=None, now=Non
                 _finish_failed(item, row, finished)
         else:
             _apply_result(db, item, result)
-            row.status, row.message = "completed", "Saved to Dreams."
+            row.status = "completed"
+            row.message = public_sorting_state(item)["processing_message"]
         db.commit()
         return row.status

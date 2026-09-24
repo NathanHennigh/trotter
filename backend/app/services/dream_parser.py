@@ -56,6 +56,7 @@ Extraction rules:
 - A comparison destination is not itself a place to save unless the caption also explicitly recommends visiting a named place there.
 - Never invent an exact place name or infer one from a general travel theme.
 - Preserve proper names as written, apart from obvious whitespace cleanup.
+- A named stay listed on Airbnb is category hotel, not activity. Airbnb Experiences are activities. Generic descriptions such as "deluxe room with view" do not establish a property name or destination.
 - A city, country, region, neighborhood, or broad destination is not a place_name.
 - If the source contains only a broad destination, return one unknown item with place_name null.
 - If no exact place can be supported, set needs_review true and confidence to 0.65 or lower.
@@ -196,6 +197,17 @@ def _normalize_item(raw_item: dict[str, Any], caption: str) -> DreamParseItem:
     tags = [str(tag).strip().lower() for tag in tags if str(tag).strip()][:12]
     confidence = _clamp_confidence(raw_item.get("confidence"))
     needs_review = bool(raw_item.get("needs_review", True))
+
+    # Narrow correction for an explicit source label, without inferring any
+    # location or turning an Airbnb experience into accommodation.
+    if place_name and category in {"activity", "unknown"}:
+        name = re.escape(re.sub(r"\s+", " ", place_name).strip())
+        for clause in re.split(r"[.!?;\n]", caption):
+            if re.search(r"\bairbnb\s+experiences?\b", clause, re.IGNORECASE):
+                continue
+            if re.search(r"(?<!\w)" + name + r"\s+(?:(?:is\s+)?(?:listed|available|booked|found)\s+)?(?:on|through|via)\s+airbnb\b", clause, re.IGNORECASE):
+                category = "hotel"
+                break
 
     if place_name and city and place_name.strip().lower() == city.strip().lower():
         place_name = None

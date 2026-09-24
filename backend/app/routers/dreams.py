@@ -195,6 +195,7 @@ class DreamItemOut(BaseModel):
     location_expires_at: Optional[datetime] = None
     location_user_confirmed: bool = False
     status: str
+    sorting_state: Literal["queued", "running", "sorted", "needs_details", "unavailable", "failed"] = "needs_details"
     processing_message: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -583,6 +584,7 @@ def dream_item_coordinates(item: DreamItem) -> tuple[Optional[float], Optional[f
 
 def dream_item_out(item: DreamItem) -> DreamItemOut:
     from ..services.dream_source_places import source_fields
+    from ..services.dream_enrichment import public_sorting_state
     raw = item.raw_metadata_json or {}
     metadata = raw.get("instagram_metadata") if isinstance(raw, dict) else None
     thumbnail_url = f"/dream-items/{item.id}/thumbnail" if isinstance(metadata, dict) and metadata.get("thumbnail_url") else None
@@ -616,7 +618,7 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         longitude=longitude,
         coordinate_precision=coordinate_precision,
         status=item.status,
-        processing_message=item.enrichment.message if item.enrichment else None,
+        **public_sorting_state(item),
         created_at=item.created_at,
         updated_at=item.updated_at,
     )
