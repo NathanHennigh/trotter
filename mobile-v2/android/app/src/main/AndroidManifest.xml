@@ -29,9 +29,10 @@
         <data android:scheme="exp+trotter-v2"/>
       </intent-filter>
     </activity>
+    <activity android:name=".DreamShareActivity" android:theme="@style/Theme.Trotter.ShareReceipt" android:exported="false" android:excludeFromRecents="true" android:taskAffinity=""/>
     <activity-alias
       android:name=".ShareToDreams"
-      android:targetActivity=".MainActivity"
+      android:targetActivity=".DreamShareActivity"
       android:enabled="true"
       android:exported="true"
       android:icon="@mipmap/ic_launcher"

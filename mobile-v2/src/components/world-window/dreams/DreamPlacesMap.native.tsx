@@ -15,7 +15,7 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
   const [slow, setSlow] = React.useState(false), [attempt, setAttempt] = React.useState(0), [linkError, setLinkError] = React.useState(false);
   const [region, setRegion] = React.useState(() => placesRegion(clean, overview, width, height));
   const currentRegion = React.useRef(region), fittedKey = React.useRef<string | undefined>(undefined), selectedFromMap = React.useRef<string | undefined>(undefined), focusedPoint = React.useRef<string | undefined>(undefined);
-  const fittedWithPoints = React.useRef(false);
+  const fittedPointIds = React.useRef(new Set<string>()), userFramed = React.useRef(false);
   const [choices, setChoices] = React.useState<string[]>([]);
   React.useEffect(() => {
     mounted.current = true;
@@ -32,15 +32,17 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     currentRegion.current = next; setRegion(next);
     if (ready) ref.current?.animateToRegion(next, animated && !reduceMotion.current ? 240 : 0);
   }, [ready]);
-  // Fit a country/filter once, then fit its first resolved pin once. Subsequent
-  // geometry updates and manual placement preserve the user's camera.
+  // Workers resolve places independently. Keep newly arriving pins in view until
+  // the user takes control; a one-time first-pin fit hid later places offscreen.
+  // Coordinate refreshes never reset a camera, even when no gesture occurred.
   React.useEffect(() => {
     const key = `${fitKey}:${attempt}:${width}:${height}`;
     if (!ready || width <= 0) return;
     const newView = fittedKey.current !== key;
-    const firstResolvedPoint = !placing && !fittedWithPoints.current && clean.length > 0;
-    if (!newView && !firstResolvedPoint) return;
-    fittedWithPoints.current = clean.length > 0;
+    if (newView) { fittedPointIds.current = new Set(); userFramed.current = false; }
+    const newPin = clean.some(point => !fittedPointIds.current.has(point.id));
+    for (const point of clean) fittedPointIds.current.add(point.id);
+    if (!newView && (placing || userFramed.current || !newPin)) return;
     fittedKey.current = key; setChoices([]);
     move(placesRegion(clean, overview, width, height), false);
   }, [ready, fitKey, attempt, width, height, clean, overview, placing, move]);
@@ -52,6 +54,7 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     const key = `${point.id}:${point.lat}:${point.lon}`;
     if (focusedPoint.current === key) return;
     focusedPoint.current = key;
+    userFramed.current = true;
     if (selectedFromMap.current === selectedId) { selectedFromMap.current = undefined; return; }
     move({ ...currentRegion.current, latitude: point.lat, longitude: point.lon }, true);
   }, [selectedId, ready, placing, clean, move]);
@@ -63,6 +66,7 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     try { await Linking.openURL(url); } catch { if (mounted.current) setLinkError(true); }
   };
   const select = (cluster: PlaceCluster) => {
+    userFramed.current = true;
     if (cluster.points.length === 1) {
       const point = cluster.points[0]; selectedFromMap.current = point.id; setChoices([]);
       if (placing) onPlace?.(point.lat, point.lon); else onSelect?.(point.id);
@@ -83,7 +87,7 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
   return <View style={s.frame}>
     <View style={s.toolbar}>
       <Pressable accessibilityRole="button" accessibilityLabel={clean.length ? "Fit saved places on map" : "Show country on map"} disabled={!configured || !ready} style={s.action}
-        onPress={() => { setChoices([]); move(placesRegion(clean, overview, width, height), true); }}>
+        onPress={() => { userFramed.current = false; setChoices([]); move(placesRegion(clean, overview, width, height), true); }}>
         <WWIcon name="globe" size={15} /><Text style={s.actionText}>{clean.length ? "Fit places" : "Country view"}</Text>
       </Pressable>
       {googleMapUrl(clean, overview) && <Pressable accessibilityRole="link" accessibilityLabel="Open in Google Maps" style={s.action} onPress={() => void open()}><WWIcon name="arrow" size={17} /></Pressable>}
@@ -95,9 +99,10 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
         pitchEnabled={false} rotateEnabled={false} zoomControlEnabled={false} toolbarEnabled={false}
         minZoomLevel={2} maxZoomLevel={20} loadingEnabled loadingBackgroundColor={colors.paperDeep} loadingIndicatorColor={colors.ink}
         onMapReady={() => setReady(true)} onMapLoaded={() => { setLoaded(true); setSlow(false); }}
-        onRegionChangeComplete={next => { currentRegion.current = next; setRegion(next); }}
+        onPanDrag={() => { userFramed.current = true; }}
+        onRegionChangeComplete={(next, details) => { if (details?.isGesture) userFramed.current = true; currentRegion.current = next; setRegion(next); }}
         onPress={blankPress} onPoiClick={event => { if (placing && validMapCoordinate(event.nativeEvent.coordinate.latitude, event.nativeEvent.coordinate.longitude)) onPlace?.(event.nativeEvent.coordinate.latitude, event.nativeEvent.coordinate.longitude); else if (!placing) onSelect?.(undefined); }}>
-        {clusters.map(cluster => <PlaceMarker key={JSON.stringify([cluster.id, cluster.points.some(p => p.id === selectedId), cluster.points.length === 1 ? cluster.points[0].category : undefined, cluster.points.length === 1 && Boolean(cluster.points[0].area)])} cluster={cluster} selected={cluster.points.some(p => p.id === selectedId)} onPress={() => select(cluster)} />)}
+        {clusters.map(cluster => <PlaceMarker key={JSON.stringify([cluster.id, cluster.points.some(p => p.id === selectedId), cluster.points.length === 1 ? cluster.points[0].category : undefined, cluster.points.length === 1 && Boolean(cluster.points[0].area)])} cluster={cluster} mapReady={ready} mapLoaded={loaded} selected={cluster.points.some(p => p.id === selectedId)} onPress={() => select(cluster)} />)}
       </MapView>
     </View> : <View style={[s.unavailable, { minHeight: Math.min(height, 160) }]}>
       <WWIcon name="pin" size={24} /><Text style={s.note}>Maps aren’t available in this build. Your saved places are still here.</Text>
@@ -118,15 +123,24 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     </View>}
   </View>;
 }
-function PlaceMarker({ cluster, selected, onPress }: { cluster: PlaceCluster; selected: boolean; onPress: () => void }) {
+function PlaceMarker({ cluster, selected, mapReady, mapLoaded, onPress }: { cluster: PlaceCluster; selected: boolean; mapReady: boolean; mapLoaded: boolean; onPress: () => void }) {
+  const marker = React.useRef<React.ElementRef<typeof Marker>>(null);
+  const [laidOut, setLaidOut] = React.useState(false);
   const [tracking, setTracking] = React.useState(true);
-  React.useEffect(() => { const timer = setTimeout(() => setTracking(false), 500); return () => clearTimeout(timer); }, []);
+  React.useEffect(() => {
+    if (!mapReady || !laidOut) return;
+    // The Android marker is a native bitmap, not a live React view. Starting the
+    // old timer at mount could freeze that bitmap before layout / map readiness.
+    marker.current?.redraw();
+    const timer = setTimeout(() => { marker.current?.redraw(); setTracking(false); }, 500);
+    return () => clearTimeout(timer);
+  }, [mapReady, laidOut, mapLoaded]);
   const point = cluster.points[0], count = cluster.points.length;
-  return <Marker coordinate={{ latitude: cluster.latitude, longitude: cluster.longitude }} identifier={cluster.id}
+  return <Marker ref={marker} coordinate={{ latitude: cluster.latitude, longitude: cluster.longitude }} identifier={cluster.id}
     anchor={{ x: .5, y: .5 }} stopPropagation tracksViewChanges={tracking} zIndex={selected ? 3 : count > 1 ? 2 : 1}
     accessibilityLabel={count > 1 ? `${count} saved places, zoom or choose a place` : `${point.label}${point.area ? ", approximate area" : ""}`}
     accessibilityRole="button" onPress={event => { event.stopPropagation(); onPress(); }}>
-    <View collapsable={false} style={[s.marker, selected && s.selectedMarker, point.area && count === 1 && s.areaMarker]}>
+    <View collapsable={false} onLayout={() => setLaidOut(true)} style={[s.marker, selected && s.selectedMarker, point.area && count === 1 && s.areaMarker]}>
       {count > 1 ? <Text allowFontScaling={false} style={s.count}>{count}</Text> : <PlaceSymbol category={point.category ?? "unknown"} size={20} color={colors.paper} />}
     </View>
   </Marker>;

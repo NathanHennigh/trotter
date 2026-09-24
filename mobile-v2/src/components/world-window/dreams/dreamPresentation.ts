@@ -18,6 +18,26 @@ const aliases: Record<string, string> = {
 export const countryKey = (value?: string) =>
   (aliases[normalizeName(value ?? "")] ?? normalizeName(value ?? "")) ||
   "unsorted";
+export function dreamSourceKey(value: string): string {
+  try {
+    const url = new URL(value);
+    if (/(^|\.)instagram\.com$/i.test(url.hostname))
+      return `instagram.com${url.pathname.replace(/\/+$/, "")}`;
+  } catch { /* A local unsent receipt may not have a canonical URL yet. */ }
+  return value;
+}
+export function placesFromSource(items: DreamItem[], sourceUrl: string): DreamItem[] {
+  const key = dreamSourceKey(sourceUrl);
+  return items.filter(item => dreamSourceKey(item.sourceUrl) === key);
+}
+export function sourcePlaceCounts(items: DreamItem[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const key = dreamSourceKey(item.sourceUrl);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
 export type CountryBoard = {
   key: string;
   title: string;

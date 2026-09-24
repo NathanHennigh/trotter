@@ -471,3 +471,51 @@ test('terminal ACK preserves known details that arrived from a list while the sh
   assert.equal(env.render().items[0].summary, 'Known cafe notes'); assert.equal(env.render().items[0].placeName, 'Already sorted cafe');
   assert.equal(env.render().processingItems.length, 0); env.dispose();
 });
+
+test('a multi-place reel ACK preserves every venue and uses the acknowledged venue details', async () => {
+  const env = serviceEnvironment(); env.render(); await flush(); const network = deferred(); let listAvailable = true;
+  const source = 'https://instagram.com/reel/severalPlaces';
+  const first = apiItem(501, { source_url: source, status: 'parsed', needs_review: false, place_name: 'First cafe', summary: 'First notes' });
+  const second = apiItem(502, { source_url: source, status: 'confirmed', needs_review: false, place_name: 'Second hotel', summary: 'My hotel notes',
+    category: 'hotel', latitude: 31.6, longitude: -7.9, location_status: 'manual' });
+  env.fetcher(async (url, init) => init?.method === 'POST' ? network.promise
+    : listAvailable ? response(200, url.endsWith('/dream-items') ? [second, first] : []) : response(503, {}));
+  await env.render().shareInstagramLinkDurable(source); await flush();
+  await env.render().refresh('quiet'); listAvailable = false;
+  network.resolve(shareAck(501, 'parsed')); await flush();
+  const items = env.render().items;
+  assert.deepEqual(items.map(item => item.id).sort(), ['501', '502']);
+  assert.equal(items.find(item => item.id === '501').placeName, 'First cafe');
+  assert.equal(items.find(item => item.id === '502').summary, 'My hotel notes');
+  assert.equal(items.find(item => item.id === '502').latitude, 31.6);
+  assert.equal(env.render().pendingUploadItems.length, 0); env.dispose();
+});
+
+test('deleting one venue from a reel keeps its other venues and map coordinates', async () => {
+  const env = serviceEnvironment(); const source = 'https://instagram.com/reel/twoPlaces';
+  env.fetcher(async url => response(200, url.endsWith('/dream-items') ? [
+    apiItem(511, { source_url: source }), apiItem(512, { source_url: source, latitude: 38.7, longitude: -9.1, location_status: 'manual' }),
+  ] : []));
+  env.render(); await flush(); env.fetcher(async () => response(204, {}));
+  await env.render().deleteItem('511');
+  assert.deepEqual(env.render().items.map(item => item.id), ['512']);
+  assert.equal(dreams.exactMapPoint(env.render().items[0]).lat, 38.7); env.dispose();
+});
+
+test('a reel can span countries and categories while retaining one source collection', () => {
+  const items = [place(601, { sourceUrl: 'https://www.instagram.com/reel/AcrossBorders/?igsh=tracking', country: 'Portugal', category: 'cafe' }),
+    place(602, { sourceUrl: 'https://instagram.com/reel/AcrossBorders', country: 'Spain', category: 'hotel' }), place(603)];
+  assert.deepEqual(dreams.placesFromSource(items, 'https://instagram.com/reel/AcrossBorders/').map(item => item.id), ['601', '602']);
+  assert.equal(dreams.sourcePlaceCounts(items).get('instagram.com/reel/AcrossBorders'), 2);
+  assert.equal(dreams.countryBoards(items).length, 2);
+  assert.deepEqual(dreams.filterDreams(items, '', '', 'Hotels').map(item => item.id), ['602']);
+});
+
+test('View in Dreams opens a native receipt without requesting a second capture', () => {
+  const env = serviceEnvironment();
+  const destination = env.module.parseIncomingDreamShare('trotterv2://dreams?source_url=https%3A%2F%2Finstagram.com%2Freel%2Fmany&receipt_id=native-1');
+  assert.equal(destination.viewOnly, true); assert.equal(destination.receiptId, 'native-1');
+  assert.equal(destination.sourceUrl, 'https://instagram.com/reel/many');
+  assert.equal(env.module.parseIncomingDreamShare('trotterv2://dreams?source_url=https%3A%2F%2Fevil.invalid'), undefined);
+  assert.equal(env.module.parseIncomingDreamShare('trotterv2://share?url=https%3A%2F%2Finstagram.com%2Freel%2Fold').viewOnly, undefined);
+});

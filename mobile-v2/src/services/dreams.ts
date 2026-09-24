@@ -71,6 +71,9 @@ type ApiDreamItem = {
   dream_id: number;
   source_platform: 'instagram';
   source_url: string;
+  source_post_id?: number | null;
+  source_place_count?: number;
+  source_place_index?: number;
   caption?: string | null;
   category: DreamItemCategory;
   place_name?: string | null;
@@ -107,6 +110,9 @@ export type DreamItem = {
   dreamId: string;
   sourcePlatform: 'instagram';
   sourceUrl: string;
+  sourcePostId?: string;
+  sourcePlaceCount?: number;
+  sourcePlaceIndex?: number;
   caption?: string;
   category: DreamItemCategory;
   placeName?: string;
@@ -143,6 +149,9 @@ export type DreamItem = {
 export type IncomingDreamShare = {
   sourceUrl: string;
   sharedText?: string;
+  /** Native receipt already owns upload; this link only opens its saved places. */
+  viewOnly?: boolean;
+  receiptId?: string;
 };
 
 const emptyItems: DreamItem[] = [];
@@ -161,14 +170,17 @@ export function DreamsProvider({ children }: { children: React.ReactNode }) {
 export function parseIncomingDreamShare(url: string): IncomingDreamShare | undefined {
   try {
     const parsed = new URL(url);
+    const isDreamDestination = parsed.protocol === 'trotterv2:' && parsed.hostname === 'dreams';
     const isDreamShare = parsed.protocol === 'trotterv2:' && (parsed.hostname === 'share' || parsed.pathname.includes('share'));
-    if (!isDreamShare) return undefined;
+    if (!isDreamShare && !isDreamDestination) return undefined;
     const sourceUrl = parsed.searchParams.get('url') || parsed.searchParams.get('source_url');
     const sharedText = parsed.searchParams.get('text') || parsed.searchParams.get('shared_text') || undefined;
     if (!sourceUrl && !sharedText) return undefined;
+    if (isDreamDestination && !canonicalDreamShareUrl(sourceUrl ?? '')) return undefined;
     return {
       sourceUrl: sourceUrl || extractInstagramUrl(sharedText) || 'https://www.instagram.com/',
       sharedText,
+      ...(isDreamDestination ? { viewOnly: true, receiptId: parsed.searchParams.get('receipt_id') || undefined } : {}),
     };
   } catch {
     return undefined;
@@ -336,12 +348,16 @@ function useDreamsState() {
             attempt = await dreamShareOutbox.beginAttempt(owner, entry);
             if (!attempt || !currentOwner()) continue;
             showPending(entries.map(value => value.id === attempt!.id ? attempt! : value));
-            const saved = await sendPendingDreamShare(attempt, () => itemsRef.current.find(item => normalizeSourceUrl(item.sourceUrl) === attempt!.sourceUrl));
+            const saved = await sendPendingDreamShare(attempt, id => itemsRef.current.find(item =>
+              id ? item.id === id : normalizeSourceUrl(item.sourceUrl) === attempt!.sourceUrl));
             if (!currentOwner()) return;
             // Capture success directly becomes a server item, even when list GETs fail.
             refreshSequence.current += 1;
             recentlyAccepted.current.set(saved.id, saved);
-            updateItems(current => [saved, ...current.filter(item => item.id !== saved.id && normalizeSourceUrl(item.sourceUrl) !== attempt!.sourceUrl)]);
+            // A reel may own several venue rows. Replace its acknowledged row
+            // and local upload placeholder, never its already-saved siblings.
+            updateItems(current => [saved, ...current.filter(item => item.id !== saved.id
+              && (/^\d+$/.test(item.id) || normalizeSourceUrl(item.sourceUrl) !== attempt!.sourceUrl))]);
             setSource('api'); setStatus('idle'); setError(undefined);
             await dreamShareOutbox.acknowledge(owner, attempt);
             if (!currentOwner()) return;
@@ -617,7 +633,7 @@ function pendingDreamItem(entry: PendingDreamShare, sending = false): DreamItem 
 
 type DreamShareAcknowledgement = { dream_item_id: number; dream_id: number; status: DreamItemStatus; processing_message?: string };
 
-async function sendPendingDreamShare(entry: PendingDreamShare, getExisting: () => DreamItem | undefined): Promise<DreamItem> {
+async function sendPendingDreamShare(entry: PendingDreamShare, getExisting: (id?: string) => DreamItem | undefined): Promise<DreamItem> {
   if (entry.retryItemId) {
     const response = await dreamsAuthenticatedFetch(`/dream-items/${entry.retryItemId}/parse`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ caption: entry.sharedText }),
@@ -632,7 +648,7 @@ async function sendPendingDreamShare(entry: PendingDreamShare, getExisting: () =
   }
   const acknowledged = await shareInstagramLinkRemote(entry.sourceUrl, entry.sharedText);
   // The list may have exposed full details while this capture request was pending.
-  const existing = getExisting();
+  const existing = getExisting(String(acknowledged.dream_item_id));
   const needsReview = acknowledged.status === 'needs_review' || acknowledged.status === 'failed';
   const sorting = acknowledged.status === 'created' || acknowledged.status === 'processing';
   const knownSummary = existing && /^\d+$/.test(existing.id) && !['created', 'processing'].includes(existing.status) ? existing.summary.trim() : undefined;
@@ -761,6 +777,9 @@ function mapApiDreamItem(item: ApiDreamItem): DreamItem {
     dreamId: String(item.dream_id),
     sourcePlatform: item.source_platform,
     sourceUrl: item.source_url,
+    sourcePostId: item.source_post_id == null ? undefined : String(item.source_post_id),
+    sourcePlaceCount: item.source_place_count,
+    sourcePlaceIndex: item.source_place_index,
     caption: item.caption ?? undefined,
     category: item.category,
     placeName: item.place_name ?? undefined,

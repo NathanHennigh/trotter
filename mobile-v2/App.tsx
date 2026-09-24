@@ -139,6 +139,8 @@ export function reduceIncomingShareQueue(
   const key = JSON.stringify([
     action.share.sourceUrl.trim(),
     action.share.sharedText ?? "",
+    action.share.viewOnly ?? false,
+    action.share.receiptId ?? "",
   ]);
   const recent = next.recent.filter(
     (receipt) => action.now - receipt.at < 2000,
@@ -183,6 +185,8 @@ function AccountGate() {
       const key = JSON.stringify([
         incoming.sourceUrl.trim(),
         incoming.sharedText ?? "",
+        incoming.viewOnly ?? false,
+        incoming.receiptId ?? "",
       ]);
       if (initial && delivered.current.has(key)) return;
       delivered.current.add(key);
@@ -274,12 +278,13 @@ function AppShell({
     handlers.current.globe = handler;
   }, []);
   const { trips } = useTravelTrips();
-  const { shareInstagramLinkDurable } = useDreams();
+  const { shareInstagramLinkDurable, refresh: refreshDreams } = useDreams();
   const insets = useSafeAreaInsets();
   const handledShare = React.useRef<{ queueId: number; status: "capturing" | "failed" | "retained" } | undefined>(undefined);
   const shareHostMounted = React.useRef(true);
   const [shareCaptureAttempt, setShareCaptureAttempt] = React.useState(0);
   const [shareCaptureError, setShareCaptureError] = React.useState<{ queueId: number; message: string }>();
+  const [dreamSource, setDreamSource] = React.useState<{ url: string; requestId: number; receiptId?: string }>();
   const selectedTrip = trips.find((trip) => trip.id === selectedTripId);
   const visit = (tab: BottomNavTab) => {
     setVisitedTabs((visited) => visited.includes(tab) ? visited : [...visited, tab]);
@@ -360,6 +365,13 @@ function AppShell({
     handledShare.current = { queueId, status: "capturing" };
     setShareCaptureError(undefined);
     changeTab("dreams");
+    setDreamSource({ url: sourceUrl, requestId: queueId, receiptId: incomingShare.receiptId });
+    if (incomingShare.viewOnly) {
+      void refreshDreams("quiet");
+      handledShare.current = { queueId, status: "retained" };
+      consumeShare(queueId);
+      return;
+    }
     void (async () => {
       try {
         // This confirms local retention only. Dreams owns upload progress and
@@ -374,7 +386,7 @@ function AppShell({
         setShareCaptureError({ queueId, message: caught instanceof Error ? caught.message : "Your link is still here. Keep Trotter open and try again." });
       }
     })();
-  }, [incomingShare, consumeShare, shareInstagramLinkDurable, shareCaptureAttempt]);
+  }, [incomingShare, consumeShare, shareInstagramLinkDurable, refreshDreams, shareCaptureAttempt]);
   const retryIncomingShare = () => {
     if (!incomingShare || handledShare.current?.queueId !== incomingShare.queueId || handledShare.current.status !== "failed") return;
     handledShare.current = undefined;
@@ -452,6 +464,7 @@ function AppShell({
           onBack={closeCountries} onOpenTrip={openTrip} />)}
       {visitedTabs.includes("dreams") && layer("dreams", baseTab === "dreams",
         <DreamsScreen active={activeTab} onChange={changeTab}
+          openSource={dreamSource}
           visible={mainVisible && activeTab === "dreams"} onBackHandlerChange={registerDreamsBack} />)}
       {visitedTabs.includes("profile") && layer("profile", baseTab === "profile",
         <ProfileScreen active={activeTab} onChange={changeTab} onOpenStamps={() => openCountries()}

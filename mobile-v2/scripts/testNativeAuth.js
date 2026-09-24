@@ -67,6 +67,10 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
       if (request === '@react-native-async-storage/async-storage') return { getItem: async key => plain.get(key) ?? null, setItem: async (key, value) => { plain.set(key, value); }, removeItem: async key => { plain.delete(key); } };
       if (request === './googleAuth') return load('googleAuth');
       if (request === './gmailRecovery') return load('gmailRecovery');
+      if (request === './nativeDreamShare') return {
+        invalidateNativeDreamShareSession: async revision => { calls.push({ kind: 'native-share-clear', revision }); },
+        syncNativeDreamShareSession: async (session, revision) => { calls.push({ kind: 'native-share-session', ownerId: session.ownerId, token: session.token, revision }); },
+      };
       if (request.includes('stampIdentity')) return { stampIdentity: () => ({ shape: 'circle', color: '#111' }) };
       if (request.includes('passport-arrivals')) return { buildPassportArrivals: () => [] };
       if (request.includes('countryArrivals')) return { firstCountryEntry: () => undefined, buildCountryArrivals: () => [] };
@@ -507,4 +511,30 @@ test('account revision changes only after identity verification, including same-
   await renewed.signOut(); await flush();
   assert.equal(env.render().accountRevision, undefined);
   env.dispose();
+});
+
+test('native share credentials are mirrored only after verification and cleared on sign-out', async () => {
+  const identity = deferred();
+  const env = environment({ stored: JSON.stringify({ token: 'saved', apiBaseUrl: 'https://api.example.invalid' }), fetcher: async url =>
+    url.endsWith('/auth/me') ? identity.promise : response(200, []) });
+  env.render(); await flush();
+  assert.equal(env.calls.filter(call => call.kind === 'native-share-session').length, 0);
+  identity.resolve(response(200, { user_id: 7, email: 'verified@example.invalid' })); await flush();
+  const sessions = env.calls.filter(call => call.kind === 'native-share-session');
+  assert.equal(sessions.length, 1); assert.equal(sessions[0].ownerId, 7); assert.equal(sessions[0].token, 'saved');
+  assert(env.calls.findIndex(call => call.kind === 'native-share-clear') < env.calls.findIndex(call => call.kind === 'native-share-session'));
+  await env.render().signOut(); await flush();
+  const clears = env.calls.filter(call => call.kind === 'native-share-clear');
+  assert(clears.at(-1).revision > sessions[0].revision);
+  assert.equal(env.calls.filter(call => call.kind === 'native-share-session').length, 1); env.dispose();
+});
+
+test('an identity response arriving after sign-out cannot restore native background sharing', async () => {
+  const identity = deferred();
+  const env = environment({ stored: JSON.stringify({ token: 'saved', apiBaseUrl: 'https://api.example.invalid' }), fetcher: async url =>
+    url.endsWith('/auth/me') ? identity.promise : response(200, []) });
+  env.render(); await flush(); await env.travel.clearAuthToken();
+  identity.resolve(response(200, { user_id: 7, email: 'old@example.invalid' })); await flush();
+  assert.equal(env.calls.filter(call => call.kind === 'native-share-session').length, 0);
+  assert.equal(env.travel.getStoredToken(), undefined); env.dispose();
 });

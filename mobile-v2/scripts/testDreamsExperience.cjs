@@ -86,7 +86,8 @@ const text = tree => nodes(tree).filter(node => node.type === 'Text').map(node =
 const editor = 'components/world-window/dreams/DreamEditor.tsx', screen = 'screens/DreamsScreen.tsx';
 const editorProps = overrides => ({ item, points: [], onSave: async () => {}, onDelete: async () => {}, onClose: noop, onRetry: noop, ...overrides });
 const countryProps = overrides => ({ title: 'Portugal', items: [item], review: false, topInset: 0, bottomInset: 20,
-  loading: false, onBack: noop, onRefresh: noop, onSelect: noop, onLocateMissing: async () => {}, motion: false, ...overrides });
+  loading: false, onBack: noop, onRefresh: noop, onSelect: noop, onLocateMissing: async () => {}, motion: false,
+  sourceCounts: new Map(), onShowSource: noop, ...overrides });
 
 test('direct Edit starts in the form; Close guards changed fields, Keep editing retains them, Discard alone closes', () => {
   let closes = 0;

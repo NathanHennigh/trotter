@@ -84,19 +84,48 @@ test('manual placement accepts exact valid taps without refitting after every pi
   assert.deepEqual(h.placements, [[38.713, -9.142]]);
   const count = h.moves.length; h.render({ points: [p('a', 38.713, -9.142)] }); assert.equal(h.moves.length, count); h.dispose();
 });
-test('an empty country fits its first resolved pin once, then leaves ordinary point updates and user pans alone', () => {
+test('an empty country fits newly resolved pins, then leaves coordinate updates and user pans alone', () => {
   const h = nativeMap(); h.render({ points: [], overview: { label: 'Portugal', bounds: [[36.9, -9.5], [42.2, -6.1]] } });
   let tree = h.ready(); assert.equal(h.moves.length, 1);
   const pan = { latitude: 40, longitude: -7, latitudeDelta: .2, longitudeDelta: .2 };
   find(tree, 'MapView').props.onRegionChangeComplete(pan);
   tree = h.render({ points: [p('first', 38.72, -9.14)] });
   assert.equal(h.moves.length, 2); assert(Math.abs(h.moves[1][0].latitude - 38.72) < 1e-10); assert(Math.abs(h.moves[1][0].longitude + 9.14) < 1e-10);
-  find(tree, 'MapView').props.onRegionChangeComplete(pan);
+  find(tree, 'MapView').props.onRegionChangeComplete(pan, { isGesture: true });
   h.render({ points: [p('first', 38.721, -9.14), p('second', 41, -8)] });
   h.render({ points: [] }); h.render({ points: [p('first', 38.72, -9.14)] });
   assert.equal(h.moves.length, 2, 'Later changes, including temporary removal, must not repeatedly refit');
   h.render({ fitKey: 'France', points: [], overview: { label: 'France', bounds: [[42, -5], [51, 8]] } });
   h.render({ points: [p('paris', 48.8, 2.3)] }); assert.equal(h.moves.length, 4, 'A new country gets its own first-pin fit'); h.dispose();
+});
+
+test('separately resolved places stay visible until a user pans or selects a place', () => {
+  const h = nativeMap(); h.render({ points: [] }); h.ready();
+  h.render({ points: [p('marrakech', 31.63, -7.99)] });
+  assert.equal(h.moves.length, 2);
+  h.render({ points: [p('marrakech', 31.63, -7.99), p('agafay', 31.42, -8.27)] });
+  assert.equal(h.moves.length, 3, 'A later worker result must not remain outside the first-pin camera');
+  assert(h.moves.at(-1)[0].latitudeDelta > .21);
+  let tree = h.render({ points: [p('marrakech', 31.631, -7.99), p('agafay', 31.42, -8.27)] });
+  assert.equal(h.moves.length, 3, 'Refreshed coordinates do not move the camera');
+  find(tree, 'MapView').props.onPanDrag();
+  h.render({ points: [p('marrakech', 31.631, -7.99), p('agafay', 31.42, -8.27), p('fes', 34.03, -5)] });
+  assert.equal(h.moves.length, 3, 'An intentional user camera is preserved');
+  tree = h.render(); findLabel(tree, 'Fit saved places on map').props.onPress();
+  assert.equal(h.moves.length, 4, 'The fit button includes every newly arrived pin');
+  h.render({ points: [p('marrakech', 31.631, -7.99), p('agafay', 31.42, -8.27), p('fes', 34.03, -5), p('rabat', 34.02, -6.84)] });
+  assert.equal(h.moves.length, 5, 'Explicitly fitting restores follow-new-places behavior'); h.dispose();
+});
+
+test('a pinch gesture and selected pin preserve the map camera as more places resolve', () => {
+  const h = nativeMap(); let tree = h.ready();
+  find(tree, 'MapView').props.onRegionChangeComplete({ latitude: 38.72, longitude: -9.14, latitudeDelta: .1, longitudeDelta: .1 }, { isGesture: true });
+  h.render({ points: [p('a', 38.72, -9.14), p('b', 40, -8)] });
+  assert.equal(h.moves.length, 1);
+  h.render({ fitKey: 'new', selectedId: 'a' });
+  const count = h.moves.length;
+  h.render({ points: [p('a', 38.72, -9.14), p('b', 40, -8), p('c', 42, -7)] });
+  assert.equal(h.moves.length, count); h.dispose();
 });
 test('placing the first manual pin preserves the chosen street camera', () => {
   const h = nativeMap(); h.render({ points: [], placing: true }); const tree = h.ready();
@@ -113,6 +142,27 @@ test('category and area edits replace a native marker snapshot without refitting
   const areaKey = marker(tree).key;
   tree = h.render({ points: [p('a', 38.73, -9.15, { category: 'hotel', area: true })] }); assert.equal(marker(tree).key, areaKey, 'Position changes use the native coordinate update');
   assert.equal(h.moves.length, 1); h.dispose();
+});
+
+test('native marker snapshots wait for real layout and map readiness, then redraw after tiles load', () => {
+  const h = hooks(), timers = new Map(); let timerId = 0, redraws = 0;
+  const jsx = (type, props, key) => ({ type, props, key });
+  const loaded = load('components/world-window/dreams/DreamPlacesMap.native.tsx', {
+    react: h.react, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    'react-native': { View: 'View', Text: 'Text', StyleSheet: { create: value => value } },
+    'expo-constants': {}, 'react-native-maps': { Marker: 'Marker' },
+    '../../../theme/trotterTheme': { colors: {}, fonts: {} }, '../WorldWindowUI': {}, './DreamPhoto': { PlaceSymbol: 'PlaceSymbol' }, './dreamMapModel': model,
+  }, '\nmodule.exports.PlaceMarker = PlaceMarker;', {
+    setTimeout: (fn, ms) => { const id = ++timerId; timers.set(id, { fn, ms }); return id; }, clearTimeout: id => timers.delete(id),
+  });
+  let props = { cluster: { id: 'a', points: [p('a', 31, -7)], latitude: 31, longitude: -7 }, selected: false, mapReady: false, mapLoaded: false, onPress() {} };
+  const render = changes => { props = { ...props, ...changes }; const tree = h.render(() => loaded.PlaceMarker(props)); tree.props.ref.current = { redraw: () => redraws++ }; return tree; };
+  let tree = render(); assert.equal(timers.size, 0); assert.equal(tree.props.tracksViewChanges, true);
+  tree = render({ mapReady: true }); assert.equal(timers.size, 0, 'Ready before layout must not freeze a blank bitmap');
+  find(tree, 'View').props.onLayout(); tree = render(); assert.equal(timers.size, 1); assert.equal(redraws, 1);
+  const timer = [...timers.values()][0]; timer.fn(); tree = render(); assert.equal(redraws, 2); assert.equal(tree.props.tracksViewChanges, false);
+  tree = render({ mapLoaded: true }); assert.equal(redraws, 3, 'Map/tile readiness gives an existing native marker a fresh snapshot');
+  h.dispose(); assert.equal(timers.size, 0);
 });
 test('exact overlapping places can each be selected and marker taps cannot trigger blank-map deselection', () => {
   const h = nativeMap(); h.render({ points: [p('a', 0, 0), p('b', 0, 0), p('c', 0, 0)] }); let tree = h.ready();

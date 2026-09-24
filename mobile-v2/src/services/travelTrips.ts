@@ -1,6 +1,7 @@
 import React from 'react';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import { invalidateNativeDreamShareSession, syncNativeDreamShareSession } from './nativeDreamShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { readGmailRecovery, writeGmailRecovery, type GmailRecovery } from './gmailRecovery';
 import type { CountryIconKey } from '../components/trotter/stamps/PngStamp';
@@ -130,6 +131,7 @@ const AUTH_CLEAR_ERROR = 'Saved sign-in could not be cleared. Retry sign out to 
 let memoryAuthToken: string | undefined;
 let pendingAuthClear = false;
 let authRevision = 0;
+let nativeShareInvalidation: Promise<void> = Promise.resolve();
 let storageQueue: Promise<unknown> = Promise.resolve();
 const authListeners = new Set<() => void>();
 
@@ -266,6 +268,13 @@ function useTravelTripsState(): TravelTripsContextValue {
       setAccount(me);
       setAccountRevision(revision);
       setAuthStatus('signed-in');
+      // The compact native share sheet needs a verified account without
+      // booting React. Its credential copy is device-only and invalidated
+      // before every token transition, including sign-out.
+      void nativeShareInvalidation.then(async () => {
+        if (!relevant() || token !== getStoredToken()) return;
+        await syncNativeDreamShareSession({ apiBaseUrl: getApiBaseUrl(), ownerId: me.user_id, token }, revision);
+      }).catch(() => { /* The receipt remains durable and can request sign-in. */ });
       const tripsResult = await tripsRequest;
       if (!relevant()) return;
       if (!tripsResult.ok) throw tripsResult.error;
@@ -527,6 +536,10 @@ export function subscribeAuthToken(listener: () => void) {
 function changeMemoryToken(token?: string) {
   memoryAuthToken = token;
   authRevision += 1;
+  nativeShareInvalidation = invalidateNativeDreamShareSession(authRevision);
+  // Attach a rejection handler immediately; clearAuthToken still awaits the
+  // original promise so it cannot report sign-out with a live share credential.
+  void nativeShareInvalidation.catch(() => undefined);
   for (const listener of authListeners) listener();
 }
 function queueStorage(operation: () => Promise<void>) {
@@ -592,6 +605,7 @@ export function clearAuthToken() {
   return queueStorage(async () => {
     // Still try deleting the credential if the auxiliary marker cannot be saved.
     await writeClearPending(true).catch(() => undefined);
+    await nativeShareInvalidation;
     if (Platform.OS === 'web') {
       const storage = browserStorage('sessionStorage');
       if (!storage) throw new Error(AUTH_CLEAR_ERROR);

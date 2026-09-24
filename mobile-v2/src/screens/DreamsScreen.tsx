@@ -37,6 +37,9 @@ import {
   cityNames,
   countryBoards,
   countryKey,
+  dreamSourceKey,
+  placesFromSource,
+  sourcePlaceCounts,
   dreamCategories,
   DreamFilter,
   exactMapPoint,
@@ -50,6 +53,7 @@ import { DreamPlacesMap } from "../components/world-window/dreams/DreamPlacesMap
 import type { MapPoint } from "../components/world-window/trips/tripPresentation";
 import type { BottomNavTab } from "../data/trotterMock";
 import { DreamItem, useDreams } from "../services/dreams";
+import { acknowledgeNativeDreamShare, listNativeDreamShareReceipts, retryNativeDreamShare, type NativeDreamShareReceipt } from "../services/nativeDreamShare";
 import { colors, fonts, layout } from "../theme/trotterTheme";
 import { paperEase, PressFeedback as Pressable, useReducedMotion } from "../components/world-window/motion";
 
@@ -58,11 +62,13 @@ export function DreamsScreen({
   onChange,
   visible = true,
   onBackHandlerChange,
+  openSource,
 }: {
   active: BottomNavTab;
   onChange: (tab: BottomNavTab) => void;
   visible?: boolean;
   onBackHandlerChange?: (handler: (() => boolean) | null) => void;
+  openSource?: { url: string; requestId: number; receiptId?: string };
 }) {
   const insets = useSafeAreaInsets(),
     store = useDreams();
@@ -76,6 +82,13 @@ export function DreamsScreen({
     [selectedMode, setSelectedMode] = React.useState<"view" | "edit">("view"),
     [returningCountry, setReturningCountry] = React.useState<string>(),
     [selectedId, setSelectedId] = React.useState<string>();
+  const [sourceUrl, setSourceUrl] = React.useState<string>();
+  const [nativeReceipt, setNativeReceipt] = React.useState<NativeDreamShareReceipt>();
+  React.useEffect(() => {
+    if (!openSource) return;
+    setSourceUrl(openSource.url); setCountry(undefined); setReview(false);
+    setSelectedId(undefined); setCapture(false); setNativeReceipt(undefined);
+  }, [openSource?.requestId]);
   const editorBack = React.useRef<(() => void) | null>(null),
     captureBack = React.useRef<(() => void) | null>(null),
     countryBack = React.useRef<(() => void) | null>(null);
@@ -85,6 +98,32 @@ export function DreamsScreen({
   const homeOffset = React.useRef(0),
     selected = store.items.find((item) => item.id === selectedId);
   const boards = React.useMemo(() => countryBoards(store.items), [store.items]);
+  const sourceCounts = React.useMemo(() => sourcePlaceCounts(store.items), [store.items]);
+  const sourceItems = React.useMemo(() => sourceUrl ? placesFromSource(store.items, sourceUrl) : [], [store.items, sourceUrl]);
+  const sourceItemsRef = React.useRef(sourceItems); sourceItemsRef.current = sourceItems;
+  React.useEffect(() => {
+    if (!visible || !sourceUrl || !openSource?.receiptId || dreamSourceKey(sourceUrl) !== dreamSourceKey(openSource.url)) return;
+    let disposed = false, timer: ReturnType<typeof setTimeout>, lastStatus: string | undefined;
+    const poll = async () => {
+      try {
+        const receipts = await listNativeDreamShareReceipts();
+        if (disposed) return;
+        const receipt = receipts.find(value => value.id === openSource.receiptId);
+        setNativeReceipt(receipt);
+        if (receipt?.status === "saved" && lastStatus !== "saved") await store.refresh("quiet");
+        if (receipt?.status === "saved" && sourceItemsRef.current.some(item => item.id === String(receipt.itemId))) {
+          await acknowledgeNativeDreamShare(receipt.id);
+          if (!disposed) setNativeReceipt(undefined);
+          return;
+        }
+        if (!receipt) return;
+        lastStatus = receipt?.status;
+      } catch { /* The native receipt retains the link even if its bridge is briefly unavailable. */ }
+      if (!disposed) timer = setTimeout(() => void poll(), lastStatus === "saved" ? 5000 : 1500);
+    };
+    void poll();
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [visible, sourceUrl, openSource?.requestId, store.refresh]);
   const pointsByCountry = React.useMemo(() => {
     const grouped = new Map<string, MapPoint[]>();
     for (const item of store.items) {
@@ -110,6 +149,7 @@ export function DreamsScreen({
     [store.items],
   );
   const back = () => {
+    if (sourceUrl) { setSourceUrl(undefined); return; }
     setReturningCountry(country?.key);
     setCountry(undefined);
     setReview(false);
@@ -119,7 +159,7 @@ export function DreamsScreen({
       if (!visible) return false;
       if (capture && captureBack.current) { captureBack.current(); return true; }
       if (selected && editorBack.current) { editorBack.current(); return true; }
-      if (!country && !review) return false;
+      if (!country && !review && !sourceUrl) return false;
       if (countryBack.current) countryBack.current(); else back();
       return true;
     };
@@ -127,7 +167,7 @@ export function DreamsScreen({
     const handler = !onBackHandlerChange && visible
       ? BackHandler.addEventListener("hardwareBackPress", goBack) : undefined;
     return () => { handler?.remove(); onBackHandlerChange?.(null); };
-  }, [country, review, visible, selected, capture, onBackHandlerChange]);
+  }, [country, review, sourceUrl, visible, selected, capture, onBackHandlerChange]);
   const loading = store.status === "loading" || store.status === "refreshing";
   const actions = (
     <Pressable
@@ -141,12 +181,17 @@ export function DreamsScreen({
   );
   return (
     <View style={[s.screen, { paddingTop: insets.top }]}>
-      {country || review ? (
+      {country || review || sourceUrl ? (
         <CountryPlaces
-          key={country?.key || "review"}
-          title={review ? "To review" : country?.title || "Saved places"}
-          items={review ? reviews : countryItems}
-          review={review}
+          key={sourceUrl || country?.key || "review"}
+          title={sourceUrl ? "From this reel" : review ? "To review" : country?.title || "Saved places"}
+          items={sourceUrl ? sourceItems : review ? reviews : countryItems}
+          review={!sourceUrl && review}
+          sourceUrl={sourceUrl}
+          sourceCounts={sourceCounts}
+          onShowSource={setSourceUrl}
+          sourceReceipt={sourceUrl && nativeReceipt && dreamSourceKey(sourceUrl) === dreamSourceKey(nativeReceipt.sourceUrl) ? nativeReceipt : undefined}
+          onRetryShare={nativeReceipt ? () => void retryNativeDreamShare(nativeReceipt.id).catch(() => {}) : undefined}
           topInset={0}
           bottomInset={insets.bottom}
           loading={loading}
@@ -291,6 +336,8 @@ export function DreamsScreen({
 function CountryPlaces({
   title, items, review, topInset, bottomInset, loading, error, onBack, onRefresh,
   onSelect, onLocateMissing, motion, active = true, onBackRequestChange,
+  sourceUrl, sourceCounts, onShowSource,
+  sourceReceipt, onRetryShare,
 }: {
   title: string; items: DreamItem[]; review: boolean; topInset: number;
   bottomInset: number; loading: boolean; error?: string; onBack: () => void;
@@ -298,6 +345,11 @@ function CountryPlaces({
   onLocateMissing: (ids: string[]) => Promise<void>; motion: boolean;
   active?: boolean;
   onBackRequestChange?: (handler: (() => void) | null) => void;
+  sourceUrl?: string;
+  sourceCounts: Map<string, number>;
+  onShowSource: (sourceUrl: string) => void;
+  sourceReceipt?: NativeDreamShareReceipt;
+  onRetryShare?: () => void;
 }) {
   const { width, fontScale } = useWindowDimensions();
   const countrySize = fitDisplayFont(title, 35, getMobileVisualWidth(width) - 152, fontScale, "italic");
@@ -340,8 +392,9 @@ function CountryPlaces({
   const region = React.useMemo(() => countryRegion(title), [title]);
   const cities = React.useMemo(() => cityNames(items), [items]);
   const visible = React.useMemo(() => filterDreams(items, query, city, category).sort((a, b) =>
-    (a.city || "").localeCompare(b.city || "") || (a.placeName || "").localeCompare(b.placeName || "")),
-    [items, query, city, category]);
+    sourceUrl ? (a.sourcePlaceIndex ?? 0) - (b.sourcePlaceIndex ?? 0)
+      : (a.city || "").localeCompare(b.city || "") || (a.placeName || "").localeCompare(b.placeName || "")),
+    [items, query, city, category, sourceUrl]);
   const points = React.useMemo(() => visible.map(exactMapPoint).filter((point): point is MapPoint => Boolean(point)), [visible]);
   const selectedPlace = visible.find(item => item.id === selected);
   const previewSize = fitDisplayFont(selectedPlace?.placeName || "Saved place", 21, getMobileVisualWidth(width) - 136, fontScale);
@@ -417,7 +470,22 @@ function CountryPlaces({
           initialNumToRender={8} windowSize={7}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={colors.blue} />}
           ListHeaderComponent={<>
-            {!review && <View style={s.mapPaper}>
+            {sourceReceipt && sourceReceipt.status !== "saved" && <View style={s.notice}>
+              <Text accessibilityLiveRegion="polite" style={s.noticeText}>
+                {sourceReceipt.status === "uploading" ? "Sending your reel… You can leave this screen."
+                  : sourceReceipt.status === "failed" ? "Your reel is kept on this device. Try sending it again."
+                    : sourceReceipt.status === "sign_in" ? "Your reel is kept on this device. Sign in to send it to Dreams."
+                    : "Your reel is kept on this device and will send when connected."}
+              </Text>
+              {sourceReceipt.status === "failed" && onRetryShare && <Pressable onPress={onRetryShare} style={s.placeAction} accessibilityRole="button">
+                <Text style={s.actionText}>Retry upload</Text>
+              </Pressable>}
+            </View>}
+            {sourceUrl && safeWebUrl(sourceUrl) && <Pressable style={s.mapSelection} accessibilityRole="link"
+              onPress={() => void Linking.openURL(safeWebUrl(sourceUrl)!).catch(() => {})}>
+              <Text style={s.actionText}>Original reel ↗</Text>
+            </Pressable>}
+            {!review && (!sourceReceipt || items.length > 0 || sourceReceipt.status === "saved") && <View style={s.mapPaper}>
               <DreamPlacesMap overview={region} points={points} fitKey={`${title}-${city}-${category}-${query}`}
                 height={248} selectedId={selected} onSelect={setSelected} />
               <View style={s.mapFoot}>
@@ -454,6 +522,8 @@ function CountryPlaces({
               <Text style={s.cityCount}>{cityCounts.get(item.city) ?? 0}</Text>
             </View>}
             <PlaceRow item={item} expanded={opened === item.id}
+              sourceCount={sourceCounts.get(dreamSourceKey(item.sourceUrl)) ?? 1}
+              onShowSource={sourceUrl ? undefined : () => onShowSource(item.sourceUrl)}
               onPress={() => { setOpened(opened === item.id ? undefined : item.id); setSelected(opened !== item.id && exactMapPoint(item) ? item.id : undefined); }}
               onEdit={() => onSelect(item.id, "edit")}
               onShowMap={() => {
@@ -461,7 +531,7 @@ function CountryPlaces({
                 setSelected(item.id); list.current?.scrollToOffset({ offset: 0, animated: motion });
               }} />
           </View>}
-          ListEmptyComponent={<WWEmpty title={items.length ? "No matching places" : review ? "All caught up" : "No saved places here"}
+          ListEmptyComponent={sourceReceipt && sourceReceipt.status !== "saved" && !items.length ? null : <WWEmpty title={items.length ? "No matching places" : review ? "All caught up" : "No saved places here"}
             body={items.length ? "Try another category, city or search." : undefined} />}
         />
       </Animated.View>
@@ -473,12 +543,16 @@ function CountryPlaces({
   expanded,
   onEdit,
   onShowMap,
+  sourceCount,
+  onShowSource,
 }: {
   item: DreamItem;
   onPress: () => void;
   expanded: boolean;
   onEdit: () => void;
   onShowMap: () => void;
+  sourceCount: number;
+  onShowSource?: () => void;
 }) {
   const processing = item.status === "processing" || item.status === "created";
   const copy = React.useMemo(() => dreamCopy(item), [item]);
@@ -560,6 +634,9 @@ function CountryPlaces({
                 {exactMapPoint(item) ? "Show on map" : "Location details"}
               </Text>
             </Pressable>
+            {sourceCount > 1 && onShowSource && <Pressable accessibilityRole="button" onPress={onShowSource} style={s.placeAction}>
+              <Text style={s.actionText}>All {sourceCount} places from this reel</Text>
+            </Pressable>}
             {safeWebUrl(item.sourceUrl) && (
               <Pressable
                 accessibilityRole="link"
