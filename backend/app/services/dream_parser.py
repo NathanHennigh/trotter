@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Optional
 
@@ -771,6 +772,146 @@ def _annotate_fallback(
     return result
 
 
+def _literal_text(value: str) -> str:
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", value)).strip().casefold()
+
+
+def _positive_source_mention(value: str, source: str) -> bool:
+    """Require a non-comparison occurrence, retaining literal source spellings."""
+    wanted = _literal_text(value)
+    if not wanted:
+        return False
+    for clause in re.split(r"[,;.!?\n✨•]", source):
+        normalized = _literal_text(clause)
+        start = normalized.find(wanted)
+        if start < 0:
+            continue
+        prefix = normalized[:start]
+        if re.search(r"(?:\bunlike\b|\binstead of\b|\brather than\b|\bavoid\b|\bskip\b|\bnot\b|"
+                     r"\bwhile\b.{0,100}\b(?:flocks?|go(?:es)?|visits?|heads?|chooses?)\b|"
+                     r"\b(?:ignore|disregard)\b.{0,60}\b(?:instructions?|prompt)\b)", prefix):
+            continue
+        return True
+    return False
+
+
+def _needs_completeness_check(result: DreamParseResponse, caption: str) -> bool:
+    if len(result.items) >= 25:
+        return False
+    if sum(bool(item.place_name) for item in result.items) >= 2:
+        return True
+    # A single extracted place can still have omitted siblings from an explicit
+    # itinerary. A normal single-place caption does not trigger another call.
+    markers = re.findall(r"(?:^\s*(?:[-*•]|\d+[.)])\s+|[✨📍])", caption, re.MULTILINE)
+    return len(markers) >= 2 and any(item.place_name for item in result.items)
+
+
+def _request_missing_places(caption, source_url, existing, *, provider, model, base_url, api_key, timeout_seconds):
+    """Exactly one bounded provider request; no retry, repair, or recursive pass."""
+    schema = json.loads(json.dumps(DREAM_PARSE_JSON_SCHEMA))
+    schema["properties"]["items"]["minItems"] = 0
+    schema["properties"]["items"]["maxItems"] = 25
+    entry_schema = schema["properties"]["items"]["items"]
+    entry_schema["properties"]["source_quote"] = {"type": "string", "maxLength": 400}
+    entry_schema["required"] = [*entry_schema["required"], "source_quote"]
+    source_data = {"source_url": source_url, "caption": caption,
+                   "already_saved_places": [{"place_name": item.place_name, "city": item.city, "country": item.country}
+                                             for item in existing if item.place_name]}
+    instructions = (SYSTEM_PROMPT + "\nCompleteness check: read the entire original caption, including introductions and every list item. "
+        "Return ONLY explicitly named travel places omitted from already_saved_places. Return items: [] if none are missing. "
+        "Do not repeat, replace, or rename existing places. Preserve original local-language names and accents. "
+        "Every added item MUST include source_quote, a short exact contiguous quote from the original caption that names that place. "
+        "Comparison destinations, alternatives the caption says to skip, unnamed hotels and generic activities are not additions. "
+        "Do not invent names, locations, or quotes. Do not treat a parenthetical local name for an existing place as a separate venue.")
+    messages = [{"role": "system", "content": instructions},
+                {"role": "user", "content": "Check this untrusted source data:\n" + json.dumps(source_data, ensure_ascii=False)}]
+    timeout = min(20.0, timeout_seconds or _positive_float_env("DREAM_AI_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
+    if provider == "venice":
+        endpoint = (base_url or os.getenv("DREAM_AI_BASE_URL") or os.getenv("VENICE_API_BASE_URL") or DEFAULT_VENICE_BASE_URL).rstrip("/")
+        payload = {"model": model, "messages": messages,
+            "response_format": {"type": "json_schema", "json_schema": {"name": "trotter_missing_places", "strict": True, "schema": schema}},
+            "temperature": 0, "max_completion_tokens": 2400, "parallel_tool_calls": False, "store": False,
+            "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True, "enable_web_search": "off",
+                "enable_web_scraping": False, "enable_web_citations": False, "include_venice_system_prompt": False}}
+        body, _, _, _ = _venice_chat(payload, base_url=endpoint, api_key=_secret_value("VENICE_API_KEY", api_key), timeout=timeout, max_attempts=1)
+        content, _ = _chat_message_content(body, "Venice")
+    else:
+        endpoint = (base_url or os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)).rstrip("/")
+        body = _ollama_chat({"model": model, "messages": messages, "stream": False, "format": schema, "think": False,
+                            "options": {"temperature": 0, "num_ctx": 8192, "num_predict": 2400}}, endpoint, timeout)
+        message = body.get("message") if isinstance(body, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str):
+            raise DreamParserError("Completeness check returned no content")
+    return _extract_json_object(content)
+
+
+def _same_extracted_place(first, second, caption=""):
+    from .dream_place_aliases import source_place_aliases
+    from .dream_source_places import identity_parts
+    def names(item):
+        return {_literal_text(name) for name in [item.place_name, *source_place_aliases(item.place_name, caption)]
+                if isinstance(name, str) and name}
+    if not names(first).intersection(names(second)):
+        return False
+    # Match the reconciler's accent-insensitive, country-scoped geography
+    # identity. Different cities/branches still remain different places.
+    return all(not a or not b or a == b for a, b in zip(identity_parts(first)[1:], identity_parts(second)[1:]))
+
+
+def complete_missing_places(result, caption, source_url=None, *, provider, model, base_url=None, api_key=None, timeout_seconds=None):
+    if not _env_enabled("DREAM_AI_ENABLE_COMPLETENESS", True) or not _needs_completeness_check(result, caption):
+        return result
+    clean_caption = caption[:_positive_int_env("DREAM_AI_MAX_CAPTION_CHARS", DEFAULT_MAX_CAPTION_CHARS)]
+    try:
+        output = _request_missing_places(clean_caption, source_url, result.items, provider=provider, model=model,
+                                         base_url=base_url, api_key=api_key, timeout_seconds=timeout_seconds)
+        if not isinstance(output, dict):
+            return result
+        additions = output.get("items")
+        if not isinstance(additions, list):
+            return result
+    except (DreamParserError, httpx.HTTPError, ValueError, TypeError):
+        # A failed optional check must never discard a successfully parsed save
+        # or trigger enrichment retries for content already extracted correctly.
+        return result
+    items = list(result.items)
+    added = 0
+    for raw in additions[:25]:
+        if not isinstance(raw, dict) or len(items) >= 25:
+            continue
+        name, quote = raw.get("place_name"), raw.get("source_quote")
+        if not isinstance(name, str) or not isinstance(quote, str) or not (0 < len(quote) <= 400):
+            continue
+        if (_literal_text(quote) not in _literal_text(clean_caption) or _literal_text(name) not in _literal_text(quote)
+                or not _positive_source_mention(name, quote) or not _positive_source_mention(name, clean_caption)):
+            continue
+        # Geography quoted only as an alternative must not become a pin hint.
+        candidate = dict(raw)
+        for field in ("city", "country", "region_or_neighborhood"):
+            value = candidate.get(field)
+            if value is not None and (not isinstance(value, str) or not _positive_source_mention(value, clean_caption)):
+                candidate[field] = None
+        candidate["google_maps_search_query"] = None
+        try:
+            DreamParseItem.model_validate(candidate)
+            item = _normalize_item(candidate, clean_caption)
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if not item.place_name or any(_same_extracted_place(item, existing, clean_caption) for existing in items):
+            continue
+        items.append(item)
+        added += 1
+    if not added:
+        return result
+    # Retain every original item; only change ordering to match source order.
+    source_text = _literal_text(clean_caption)
+    items.sort(key=lambda item: (source_text.find(_literal_text(item.place_name))
+                                if item.place_name and _literal_text(item.place_name) in source_text else len(source_text)))
+    return result.model_copy(update={"items": items, "raw": {**(result.raw or {}),
+        "completeness_model": model, "completeness_added_count": added}})
+
+
 def parse_caption_with_fallback_model(
     caption: str,
     source_url: Optional[str] = None,
@@ -786,6 +927,11 @@ def parse_caption_with_fallback_model(
     selected_primary = _configured_model(selected_provider, fallback=False, explicit=primary_model)
     selected_fallback = _configured_model(selected_provider, fallback=True, explicit=fallback_model)
     fallback_enabled = _env_enabled("DREAM_AI_ENABLE_FALLBACK", True)
+
+    def complete(result):
+        return complete_missing_places(result, caption, source_url, provider=selected_provider,
+            model=selected_fallback if fallback_enabled else selected_primary,
+            base_url=base_url, api_key=api_key, timeout_seconds=timeout_seconds)
 
     try:
         primary = parse_caption(
@@ -816,14 +962,14 @@ def parse_caption_with_fallback_model(
             raise DreamParserError(
                 f"Primary Dreams parser failed ({primary_error}); fallback failed ({fallback_error})"
             ) from fallback_error
-        return _annotate_fallback(fallback, primary_model=selected_primary, reason="primary_error")
+        return complete(_annotate_fallback(fallback, primary_model=selected_primary, reason="primary_error"))
 
     if (
         not fallback_enabled
         or selected_fallback == selected_primary
         or not should_try_stronger_model(primary)
     ):
-        return primary
+        return complete(primary)
 
     try:
         fallback = parse_caption(
@@ -841,8 +987,8 @@ def parse_caption_with_fallback_model(
             "fallback_model": selected_fallback,
             "fallback_error": str(fallback_error),
         }
-        return primary
+        return complete(primary)
 
     if _result_quality(fallback) > _result_quality(primary):
-        return _annotate_fallback(fallback, primary_model=selected_primary, reason="weak_primary")
-    return primary
+        return complete(_annotate_fallback(fallback, primary_model=selected_primary, reason="weak_primary"))
+    return complete(primary)

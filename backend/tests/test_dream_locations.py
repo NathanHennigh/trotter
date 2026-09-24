@@ -183,6 +183,59 @@ def test_direct_input_edit_is_detected_before_claim_and_after_provider(sessions)
         assert db.get(DreamLocation, job_id).generation == 3
 
 
+def test_source_alias_changes_retry_unresolved_jobs_and_fence_old_provider_results(sessions):
+    add_item(sessions, caption="Garden Cafe (Café Jardín)")
+    job_id, _ = enqueue(sessions)
+    assert run_job(sessions, job_id, status="not_found", candidates=[]) == "not_found"
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        item.caption = "Garden Cafe (Café Nuevo)"
+        row, added = enqueue_location(db, item, now=NOW)
+        assert added and row.generation == 2
+        db.commit()
+    def alter_alias():
+        with sessions() as db:
+            db.get(DreamItem, 1).caption = "Garden Cafe (Café Tercero)"
+            db.commit()
+    assert run_job(sessions, job_id, callback=alter_alias) == "superseded"
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        assert item.location.status == "queued" and item.location.generation == 3
+        assert location_coordinates(item)[0] is None
+
+
+def test_source_alias_does_not_invalidate_a_resolved_or_manual_pin(sessions):
+    add_item(sessions)
+    job_id, _ = enqueue(sessions)
+    assert run_job(sessions, job_id) == "resolved"
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        item.caption = "Garden Cafe (Café Jardín)"
+        assert enqueue_location(db, item, now=NOW)[1] is False
+        db.commit()
+        assert location_coordinates(item) == (40.4, -3.7, "place")
+        item.google_maps_url = "https://maps.google.com/?q=20,30"
+        enqueue_location(db, item, now=NOW)
+        db.commit()
+        item.caption = "Garden Cafe (Café Nuevo)"
+        assert enqueue_location(db, item, now=NOW)[1] is False
+        db.commit()
+        assert location_coordinates(item) == (20.0, 30.0, "place")
+
+
+def test_google_worker_receives_only_retained_caption_alias_evidence(sessions, monkeypatch):
+    from app.services import google_dream_place_search
+    add_item(sessions, caption="Garden Cafe (Café Jardín)")
+    job_id, _ = enqueue(sessions)
+    calls = []
+    async def google(*inputs, source_caption=None):
+        calls.append((inputs, source_caption))
+        return {"status": "not_found", "provider": "google_places", "candidates": []}
+    monkeypatch.setattr(google_dream_place_search, "search_google_dream_place", google)
+    assert asyncio.run(resolve_location_job(job_id, session_factory=sessions, now=NOW)) == "not_found"
+    assert calls == [(("Garden Cafe", "Madrid", "Spain", None, "cafe"), "Garden Cafe (Café Jardín)")]
+
+
 def test_manual_candidate_survives_retry_notes_and_status_but_identity_invalidates(sessions):
     add_item(sessions)
     job_id, _ = enqueue(sessions)

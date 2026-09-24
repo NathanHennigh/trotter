@@ -21,6 +21,7 @@ from urllib.parse import quote, urlencode, urlparse
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
+from .dream_place_aliases import source_place_aliases
 
 from .dream_place_search import (
     RetryableDreamPlaceLookupError,
@@ -456,6 +457,52 @@ def _google_locality(value: str, country: str) -> str:
     return normalized
 
 
+def _described_single_brand(wanted: str, actual: str, city: str, country: str) -> bool:
+    """Recognize an exact brand decorated only with venue descriptors / its city.
+
+    Google often labels a saved six-letter brand as e.g. "Restaurant BRAND
+    Rooftop CITY". This is not fuzzy matching: short brands, extra branch names,
+    numbers and unrelated words are retained as differences. The caller still
+    requires compatible category and independently verified local geography.
+    """
+    brand = _normal(wanted)
+    descriptors = _VENUE_WORDS | {"rooftop", "terrace", "lounge", "food", "cocktails", "and"}
+    if (len(brand.split()) != 1 or len(brand) < 6 or not brand.isalpha() or brand in _GENERIC | descriptors
+            or _google_locality(brand, country) == _google_locality(city, country) or _country(brand) == _country(country)):
+        return False
+    words = _normal(actual).split()
+    # Only a trailing city label can be omitted, and only using the same scoped
+    # locality aliases as the provider's verified address components.
+    for length in range(min(5, len(words) - 1), 0, -1):
+        if _google_locality(" ".join(words[-length:]), country) == _google_locality(city, country):
+            words = words[:-length]
+            break
+    return words.count(brand) == 1 and all(word == brand or word in descriptors for word in words)
+
+
+def _described_source_alias(wanted: str, actual: str, city: str, country: str) -> bool:
+    """A source-stated local name can carry a city and venue labels in Google."""
+    name = _normal(wanted).split()
+    if len(name) < 2 or len("".join(name)) < 6:
+        return False
+    words = _normal(actual).split()
+    # Preserve the full alias contiguously; never use a partial/fuzzy translation.
+    found = [start for start in range(len(words) - len(name) + 1) if words[start:start + len(name)] == name]
+    if len(found) != 1:
+        return False
+    start = found[0]
+    remaining = words[:start] + words[start + len(name):]
+    for length in range(min(5, len(remaining)), 0, -1):
+        offsets = [index for index in range(len(remaining) - length + 1)
+                   if _google_locality(" ".join(remaining[index:index + length]), country) == _google_locality(city, country)]
+        if len(offsets) == 1:
+            offset = offsets[0]
+            remaining = remaining[:offset] + remaining[offset + length:]
+            break
+    descriptors = _VENUE_WORDS | {"rooftop", "terrace", "lounge", "homestay", "more", "and"}
+    return all(word in descriptors for word in remaining)
+
+
 def _same_transport_brand(wanted: str, actual: str, types: set[str]) -> bool:
     # A transport operator may append the literal service label "Train" to its
     # brand. Normalize that one label only for transport listings; arbitrary
@@ -471,7 +518,8 @@ def _same_transport_brand(wanted: str, actual: str, types: set[str]) -> bool:
 
 
 def _match(
-    candidate: GoogleCandidate, name: str, city: str, country: str, region: str, category: str
+    candidate: GoogleCandidate, name: str, city: str, country: str, region: str, category: str,
+    *, source_alias=False,
 ):
     components = candidate._components
     countries = {_country(value) for value in components.get("country", set())} - {""}
@@ -498,7 +546,9 @@ def _match(
     administrative = any(_same_admin(wanted_city, _google_locality(value, country)) for value in admin_values)
     allowed, category_exact = _category_match(category, candidate._types)
     geography_verified = city_exact or administrative
-    brand_score = _brand_similarity(name, candidate.name)
+    brand_score = max(_brand_similarity(name, candidate.name),
+                      1.0 if (_described_single_brand(name, candidate.name, city, country)
+                              or source_alias and _described_source_alias(name, candidate.name, city, country)) else 0.0)
     distinctive_exact = (
         _normal(name) == _normal(candidate.name)
         and len(_brand_words(name)) >= 2
@@ -567,13 +617,17 @@ async def search_google_dream_place(
     country: str | None,
     region: str | None = None,
     category: str | None = None,
+    *,
+    source_caption: str | None = None,
 ) -> GoogleSearchResult:
     """Use Google's first compatible result, without a user-approval step.
 
     Google ranks its text results for the complete name and location query. Keep
     that order after rejecting mismatched countries, cities, names and venue
     types; sorting opaque place IDs must never decide which branch is pinned.
-    At most two provider requests are made, including fresh details.
+    At most two ordinary provider requests are made, including fresh details.
+    If needed, up to two extra searches use local names explicitly attached to
+    this place in the original caption. All attempts share one timeout budget.
     """
     name, city, country, region, category = map(
         _text, (place_name, city, country, region, category)
@@ -616,15 +670,11 @@ async def search_google_dream_place(
                     client, "POST", _SEARCH_URL, key, "places.id,nextPageToken", body=query
                 )
                 ids = _places(initial)
-                if not ids:
-                    return GoogleSearchResult(
-                        status="not_found", message="No reliable Google place match was found."
-                    )
                 singleton = len(ids) == 1 and not initial.get("nextPageToken")
                 if singleton:
                     candidate = await _details(client, key, ids[0]["id"])
                     candidates = [candidate] if candidate else []
-                else:
+                elif ids:
                     full = await _request(
                         client, "POST", _SEARCH_URL, key, _SEARCH_FIELDS, body=query
                     )
@@ -633,10 +683,26 @@ async def search_google_dream_place(
                         for place in _places(full)[:5]
                         if (candidate := _candidate(place)) is not None
                     ]
+                else:
+                    candidates = []
                 for candidate in candidates:
                     match = _match(candidate, name, city, country, region, category)
                     if match:
                         matches.append(match)
+                if not matches:
+                    for alias in source_place_aliases(name, source_caption):
+                        if (_normal(alias) in _GENERIC or _google_locality(alias, country) == _google_locality(city, country)
+                                or _country(alias) == _country(country)):
+                            continue
+                        alias_query = {**query, "textQuery": ", ".join(value for value in (alias, region, city, country) if value)}
+                        page = await _request(client, "POST", _SEARCH_URL, key, _SEARCH_FIELDS, body=alias_query)
+                        for raw in _places(page)[:5]:
+                            candidate = _candidate(raw)
+                            match = candidate and _match(candidate, alias, city, country, region, category, source_alias=True)
+                            if match:
+                                matches.append(match)
+                        if matches:
+                            break
     except GooglePlacesBlockedError:
         return GoogleSearchResult(
             status="blocked",

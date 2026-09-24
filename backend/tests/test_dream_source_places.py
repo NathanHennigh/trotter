@@ -1,5 +1,6 @@
 """Multiple places from one retained source: recovery, ownership and edits."""
 from copy import deepcopy
+import pytest
 
 from sqlalchemy.orm import sessionmaker
 
@@ -195,6 +196,30 @@ def test_legacy_named_anchor_matches_identity_before_positional_expansion(client
     assert next(card for card in cards if card["id"] == saved["dream_item_id"])["place_name"] == "El Fenn"
 
 
+def test_full_worker_adds_first_named_venue_beside_legacy_broad_destination(client, test_db, test_user, monkeypatch):
+    saved, job_id, factory = capture(client, test_db, monkeypatch)
+    old = DreamParseItem(place_name="Ta Xua", city="Sa Pa", country="Vietnam", summary="Saved mountain destination")
+    with factory() as db:
+        item = db.get(DreamItem, saved["dream_item_id"])
+        item.place_name, item.city, item.country = old.place_name, old.city, old.country
+        item.status, item.needs_review = "parsed", False
+        item.raw_metadata_json = {"parser_raw": {"items": [old.model_dump()]}}
+        item.enrichment.status = "completed"
+        db.commit()
+    names = ("Hiên Coffee", "Dinosaur Spine ridge", "Dolphin Rock", "Windy Peak", "Lonely Tree")
+    value = output(names)
+    value["caption"] = "Ta Xua Vietnam: " + ", ".join(names)
+    value["parsed"].items = [item.model_copy(update={"city": "Ta Xua", "country": "Vietnam"}) for item in value["parsed"].items]
+    assert run(factory, retry(factory, saved["dream_item_id"]), value) == "completed"
+    cards = client.get("/dream-items").json()
+    assert len(cards) == 6
+    original = next(card for card in cards if card["id"] == saved["dream_item_id"])
+    assert original["place_name"] == "Ta Xua" and original["city"] == "Sa Pa"
+    assert {card["place_name"] for card in cards if card["id"] != original["id"]} == set(names)
+    hien = next(card for card in cards if card["place_name"] == "Hiên Coffee")
+    assert hien["city"] == "Ta Xua" and hien["id"] != original["id"]
+
+
 def test_known_geography_aliases_preserve_ids_and_removal_tombstones(client, test_db, test_user, monkeypatch):
     saved, job_id, factory = capture(client, test_db, monkeypatch)
     run(factory, job_id)
@@ -267,3 +292,80 @@ def test_sibling_review_during_provider_work_survives_and_lock_order_is_owner_fi
     current = next(card for card in client.get("/dream-items").json() if card["id"] == child["id"])
     assert current["place_name"] == "My chosen branch" and current["summary"] == "My protected note"
     assert current["latitude"] == 31.64 and current["location_status"] == "manual"
+
+
+def test_source_local_alias_reparse_preserves_english_cards_and_retries_missing_pins(client, test_db, test_user, monkeypatch):
+    saved, job_id, factory = capture(client, test_db, monkeypatch)
+    original = output(("Dolphin Rock", "Cloud Peak"))
+    run(factory, job_id, original)
+    before = {card["place_name"]: card["id"] for card in client.get("/dream-items").json()}
+    with factory() as db:
+        for row in db.query(DreamLocation).all():
+            row.status, row.next_attempt_at = "not_found", None
+        db.commit()
+    translated = output(("Mỏm Cá Heo", "Đỉnh Mây"))
+    translated["caption"] = "Dolphin Rock (Mỏm Cá Heo). Cloud Peak (Đỉnh Mây). Marrakech, Morocco."
+    assert run(factory, retry(factory, saved["dream_item_id"]), translated) == "completed"
+    cards = client.get("/dream-items").json()
+    assert {card["place_name"]: card["id"] for card in cards} == before
+    with factory() as db:
+        for row in db.query(DreamLocation).all():
+            assert row.status == "queued" and row.generation == 2
+            claim = __import__('app.services.dream_locations', fromlist=['claim_job']).claim_job(db, row.id)
+            assert "Mỏm Cá Heo" in claim["source_caption"] and "Đỉnh Mây" in claim["source_caption"]
+        db.rollback()
+    # Deleting one English card must also suppress its source-stated local alias.
+    assert client.delete(f'/dream-items/{before["Cloud Peak"]}').status_code == 204
+    assert run(factory, retry(factory, saved["dream_item_id"]), translated) == "completed"
+    assert [card["place_name"] for card in client.get("/dream-items").json()] == ["Dolphin Rock"]
+
+
+def test_source_alias_reparse_does_not_rename_reviewed_child_or_change_manual_pin(client, test_db, test_user, monkeypatch):
+    saved, job_id, factory = capture(client, test_db, monkeypatch)
+    run(factory, job_id, output(("Garden Cafe", "Dolphin Rock")))
+    child = next(card for card in client.get("/dream-items").json() if card["place_name"] == "Dolphin Rock")
+    assert client.post(f'/dream-items/{child["id"]}/review', json={"decision": "confirm", "edits": {
+        "google_maps_url": "https://maps.google.com/?q=20,30", "summary": "Keep my pin and note"}}).status_code == 200
+    translated = output(("Garden Cafe", "Mỏm Cá Heo"))
+    translated["caption"] = "Garden Cafe. Dolphin Rock (Mỏm Cá Heo). Marrakech, Morocco."
+    run(factory, retry(factory, saved["dream_item_id"]), translated)
+    cards = client.get("/dream-items").json()
+    assert len(cards) == 2
+    kept = next(card for card in cards if card["id"] == child["id"])
+    assert kept["place_name"] == "Dolphin Rock" and kept["summary"] == "Keep my pin and note"
+    assert kept["latitude"] == 20 and kept["longitude"] == 30
+
+
+def test_deleted_english_card_cannot_return_under_source_local_alias(client, test_db, test_user, monkeypatch):
+    saved, job_id, factory = capture(client, test_db, monkeypatch)
+    original = output(("Garden Cafe", "Dolphin Rock"))
+    original["caption"] = "Garden Cafe. Dolphin Rock (Mỏm Cá Heo). Marrakech, Morocco."
+    run(factory, job_id, original)
+    child = next(card for card in client.get("/dream-items").json() if card["place_name"] == "Dolphin Rock")
+    assert client.delete(f'/dream-items/{child["id"]}').status_code == 204
+    translated = deepcopy(original)
+    translated["parsed"].items[1] = translated["parsed"].items[1].model_copy(update={"place_name": "Mỏm Cá Heo"})
+    assert run(factory, retry(factory, saved["dream_item_id"]), translated) == "completed"
+    assert [card["place_name"] for card in client.get("/dream-items").json()] == ["Garden Cafe"]
+
+
+@pytest.mark.parametrize("names", [("Dolphin Rock", "Mỏm Cá Heo"), ("Mỏm Cá Heo", "Dolphin Rock")])
+def test_primary_and_local_alias_in_one_parse_make_one_card(client, test_db, test_user, monkeypatch, names):
+    saved, job_id, factory = capture(client, test_db, monkeypatch)
+    value = output(names)
+    value["caption"] = "Dolphin Rock (Mỏm Cá Heo). Marrakech, Morocco."
+    assert run(factory, job_id, value) == "completed"
+    cards = client.get("/dream-items").json()
+    assert [(card["id"], card["place_name"]) for card in cards] == [(saved["dream_item_id"], "Dolphin Rock")]
+    assert test_db.query(DreamLocation).count() == 1
+    assert run(factory, retry(factory, saved["dream_item_id"]), value) == "completed"
+    assert len(client.get("/dream-items").json()) == 1
+
+
+def test_source_alias_dedup_does_not_merge_distinct_branches(client, test_db, test_user, monkeypatch):
+    saved, job_id, factory = capture(client, test_db, monkeypatch)
+    value = output(("Dolphin Rock", "Mỏm Cá Heo"))
+    value["caption"] = "Dolphin Rock (Mỏm Cá Heo). Marrakech, Morocco."
+    value["parsed"].items[1] = value["parsed"].items[1].model_copy(update={"city": "Casablanca"})
+    assert run(factory, job_id, value) == "completed"
+    assert len(client.get("/dream-items").json()) == 2

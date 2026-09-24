@@ -18,6 +18,20 @@ All validated model items are retained under `raw_metadata_json.parser_raw.items
 
 Reconciliation reuses existing IDs regardless of parser ordering, collapses repeated extracted identities, preserves user edits and manual/confirmed pins, and never deletes a previously saved place just because a later model result omits it. Deleting a place records its extracted identity on the source, preventing later parsing from resurrecting it. Removing one place does not remove siblings; sharing again while siblings exist remains a duplicate. After all places have been explicitly removed, an explicit new share starts a fresh save. Source generations reject results from an older job on a sibling. Sort submits only one job per source.
 
+Multi-place extraction includes one bounded completeness check for named stops
+missed in an introduction or list. Additions require an exact supporting quote
+from the retained caption; comparison destinations and unsupported additions are
+rejected. The optional check does not discard successful extraction if its
+provider fails. Ordinary single-place captions do not require that extra call.
+
+Google lookup can use up to two local-name aliases explicitly paired with the
+saved place in its caption, such as `Dolphin Rock (Mỏm Cá Heo)`. Aliases help search
+and candidate matching; they do not replace the saved title or create translated
+copies. Each candidate still needs verified geography and a compatible category.
+Adding source aliases retries unresolved location jobs without invalidating
+existing resolved/manual pins. Source evidence is rechecked before applying a
+lookup result, so a caption change during network work supersedes it.
+
 Existing multi-place parses can be expanded explicitly without any provider calls using `expand_saved_sources(db, user_id=..., item_ids=[...])` in `app.services.dream_source_places`, followed by a commit. This is idempotent and additive: it preserves existing place content and only adds missing named entries from validated saved `parser_raw.items`. For older sources whose cached parser output itself omitted venues, enqueue a deliberate reparse using the existing API/worker. Nothing in the migration automatically reparses personal data or calls paid providers.
 
 If a model omits the country, one explicit country from the deterministic parser's known-country list can fill it. Multi-country captions, directly negated country mentions, and known city/country conflicts are left alone. This never invents a city or replaces a model-provided country.

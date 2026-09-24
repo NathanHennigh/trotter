@@ -47,6 +47,14 @@ def place_key(place):
     return hashlib.sha256(json.dumps(parts, ensure_ascii=False).encode()).hexdigest()
 
 
+def source_alias_keys(place, caption):
+    """Alternative names retain this exact place's geography and branch."""
+    from .dream_place_aliases import source_place_aliases
+    parts = identity_parts(place)
+    return {hashlib.sha256(json.dumps([normalized(alias), *parts[1:]], ensure_ascii=False).encode()).hexdigest()
+            for alias in source_place_aliases(place.place_name, caption)}
+
+
 def provisional_draft(item):
     raw = item.raw_metadata_json or {}
     return bool("shared_text" in raw
@@ -96,11 +104,13 @@ def source_fields(item):
 
 
 def remember_removed_place(db, item):
+    from .dream_place_aliases import caption_for_place
     source = ensure_source(db, item)
     raw = item.raw_metadata_json or {}
     removed = set(source.removed_place_keys or [])
     removed.add(place_key(item))
     removed.add(raw.get("source_extracted_key") or place_key(item))
+    removed.update(source_alias_keys(item, caption_for_place(item)))
     if item.source_place_key != "primary":
         removed.add(item.source_place_key)
     source.removed_place_keys = sorted(removed)
@@ -114,6 +124,7 @@ def reconcile_places(db: Session, anchor: DreamItem, parsed, *, preserve_anchor=
     """
     from ..routers import dreams
     from .dream_enrichment import enrichment_is_protected
+    from .dream_place_aliases import caption_for_place, source_place_aliases
 
     # All public mutations and the worker use owner -> items -> job/location.
     # Lock every sibling before inspecting edit/pin protection. Refresh existing
@@ -139,9 +150,25 @@ def reconcile_places(db: Session, anchor: DreamItem, parsed, *, preserve_anchor=
     seen = set()
     named = [entry for entry in parsed.items if (entry.place_name or "").strip()]
     candidates = named or (parsed.items[:1] if not any(item.place_name for item in existing) else [])
+    # A model may return both names in `English name (local name)`. Prefer the
+    # primary source name when the pair names the same exact branch. Ambiguous
+    # shared aliases and different geography cannot collapse distinct venues.
+    alias_owners = {}
+    for entry in candidates:
+        for alias_key in source_alias_keys(entry, source.caption):
+            alias_owners.setdefault(alias_key, set()).add(place_key(entry))
+    duplicate_aliases = set()
     for entry in candidates:
         key = place_key(entry)
-        if key in seen or key in removed:
+        owners = alias_owners.get(key, set())
+        if len(owners) == 1 and key not in owners and not owners & duplicate_aliases:
+            duplicate_aliases.add(key)
+    for entry in candidates:
+        key = place_key(entry)
+        aliases = source_alias_keys(entry, source.caption)
+        if key in seen or key in removed or aliases & removed:
+            continue
+        if key in duplicate_aliases:
             continue
         seen.add(key)
         entries.append((key, entry))
@@ -156,7 +183,8 @@ def reconcile_places(db: Session, anchor: DreamItem, parsed, *, preserve_anchor=
         possible = []
         for item in existing:
             actual = identity_parts(item)
-            if actual[0] and actual[0] == wanted[0] and all(not a or not b or a == b for a, b in zip(actual[1:], wanted[1:])):
+            names = {actual[0], *(normalized(alias) for alias in source_place_aliases(item.place_name, caption_for_place(item)))}
+            if actual[0] and wanted[0] in names and all(not a or not b or a == b for a, b in zip(actual[1:], wanted[1:])):
                 possible.append(item)
         if len(possible) == 1:
             compatible[key] = possible[0]
@@ -199,6 +227,11 @@ def reconcile_places(db: Session, anchor: DreamItem, parsed, *, preserve_anchor=
             old_caption = item.caption
             old_auto_summary = (item.raw_metadata_json or {}).get("source_generated_summary")
             old_identity = place_key(item)
+            aliases = {normalized(alias) for alias in source_place_aliases(item.place_name, caption_for_place(item))}
+            if normalized(entry.place_name) in aliases:
+                # Local aliases aid lookup; reparsing must not rename an
+                # existing English card or split it into translated duplicates.
+                entry = entry.model_copy(update={"place_name": item.place_name})
             if normalized(item.place_name) == normalized(entry.place_name):
                 # Equivalent spelling should not move an existing card from
                 # its country board or invalidate an already accurate pin.
@@ -213,7 +246,7 @@ def reconcile_places(db: Session, anchor: DreamItem, parsed, *, preserve_anchor=
                 item.summary = old_summary
             item.tags_json = list(dict.fromkeys([*old_tags, *(item.tags_json or [])]))
             item.raw_metadata_json = {**(item.raw_metadata_json or {}), "source_generated_summary": entry.summary}
-            if old_identity != key:
+            if old_identity != place_key(entry):
                 item.google_place_id = None
                 item.google_maps_url = None
             if item.place_name and not item.google_maps_url:

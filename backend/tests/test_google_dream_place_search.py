@@ -376,6 +376,102 @@ def test_variant_brand_cannot_hide_a_conflicting_branch_number(monkeypatch):
     assert lookup(place_name="Harbor Green 2 Cafe").status == "not_found"
 
 
+@pytest.mark.parametrize("actual", [
+    "Restaurant CALDERO Rooftop Oaxaca", "CALDERO ROOFTOP FOOD & COCKTAILS",
+    "CALDERO Terrace Restaurant",
+])
+def test_exact_single_brand_with_only_venue_descriptors_and_verified_city(monkeypatch, actual):
+    calls, _ = singleton(monkeypatch, place(displayName={"text": actual}, types=["restaurant", "food", "establishment"]))
+    assert lookup(place_name="Caldero", category="restaurant").status == "resolved"
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("wanted,actual,city,category", [
+    ("Caldero", "Caldero Rooftop North", "Oaxaca", "restaurant"),
+    ("Caldero", "Caldero Rooftop AnotherCity", "Oaxaca", "restaurant"),
+    ("Caldero", "Caldero 2 Rooftop", "Oaxaca", "restaurant"),
+    ("Caldero", "Caldoro Rooftop Food & Cocktails", "Oaxaca", "restaurant"),
+    ("Caldero", "Restaurant Caldero Rooftop Oaxaca", "AnotherCity", "restaurant"),
+    ("Caldero", "Restaurant Caldero Rooftop Oaxaca", "Oaxaca", "hotel"),
+    ("Caldero", "Restaurant Caldero Rooftop Oaxaca", "Oaxaca", "unknown"),
+    ("Momo", "Momo Rooftop Food & Cocktails", "Oaxaca", "restaurant"),
+])
+def test_decorated_single_brand_still_rejects_weak_identity_or_geography(monkeypatch, wanted, actual, city, category):
+    singleton(monkeypatch, place(displayName={"text": actual}, types=["restaurant", "food", "establishment"]))
+    assert lookup(place_name=wanted, city=city, category=category).status == "not_found"
+
+
+def test_decorated_single_brand_city_suffix_uses_only_verified_country_aliases(monkeypatch):
+    singleton(monkeypatch, place(displayName={"text": "Restaurant Caldero Rooftop Marrakech"},
+        types=["restaurant", "food", "establishment"],
+        addressComponents=[component("locality", "Marrakesh"), component("country", "Morocco", "MA")]))
+    assert lookup(place_name="Caldero", city="Marrakech", country="Morocco", category="restaurant").status == "resolved"
+
+
+@pytest.mark.parametrize("wanted,actual", [
+    ("Rooftop", "Rooftop Food and Cocktails Oaxaca"),
+    ("Terrace", "Restaurant Terrace Rooftop Oaxaca"),
+    ("Lounge", "Restaurant Lounge Terrace Oaxaca"),
+    ("Resort", "Restaurant Resort Rooftop Oaxaca"),
+])
+def test_venue_descriptor_cannot_become_a_distinctive_single_word_brand(monkeypatch, wanted, actual):
+    singleton(monkeypatch, place(displayName={"text": actual}, types=["restaurant", "food", "establishment"]))
+    assert lookup(place_name=wanted, category="restaurant").status == "not_found"
+
+
+def test_city_alias_cannot_become_a_distinctive_brand(monkeypatch):
+    singleton(monkeypatch, place(displayName={"text": "Restaurant Marrakech Rooftop Marrakesh"},
+        types=["restaurant", "food", "establishment"],
+        addressComponents=[component("locality", "Marrakesh"), component("country", "Morocco", "MA")]))
+    assert lookup(place_name="Marrakech", city="Marrakesh", country="Morocco", category="restaurant").status == "not_found"
+
+
+def test_source_stated_local_alias_finds_exact_venue_without_guessing_a_translation(monkeypatch):
+    calls, _ = responses(monkeypatch, [{"places": []}, {"places": [place(
+        displayName={"text": "Đỉnh Mây Oaxaca Homestay Cafe & More"}, types=["tourist_attraction", "hotel", "lodging", "establishment"],
+    )]}])
+    result = lookup(place_name="Cloud Peak", category="attraction", source_caption="Sunrise at Cloud Peak (Đỉnh Mây).")
+    assert result.status == "resolved" and len(calls) == 2
+    assert calls[1]["json"]["textQuery"] == "Đỉnh Mây, Oaxaca, Mexico"
+    assert "displayName" in calls[1]["headers"]["X-Goog-FieldMask"]
+
+
+@pytest.mark.parametrize("updates", [
+    {"addressComponents": [component("locality", "Elsewhere"), component("country", "Mexico", "MX")]},
+    {"addressComponents": [component("locality", "Oaxaca"), component("country", "Spain", "ES")]},
+    {"displayName": {"text": "Đỉnh Mây Another Branch"}},
+    {"displayName": {"text": "Đỉnh Mây 2"}},
+    {"displayName": {"text": "Đỉnh Khác"}},
+    {"types": ["locality", "political"]},
+])
+def test_source_alias_never_relaxes_geography_branch_or_place_checks(monkeypatch, updates):
+    raw = place(displayName={"text": "Đỉnh Mây Oaxaca Homestay Cafe & More"}, types=["tourist_attraction", "establishment"])
+    raw.update(updates)
+    responses(monkeypatch, [{"places": []}, {"places": [raw]}])
+    assert lookup(place_name="Cloud Peak", category="attraction", source_caption="Cloud Peak (Đỉnh Mây)").status == "not_found"
+
+
+def test_only_the_current_places_aliases_are_used_and_lookup_budget_is_bounded(monkeypatch):
+    calls, _ = responses(monkeypatch, [{"places": []}, {"places": []}, {"places": []}])
+    result = lookup(place_name="Cloud Peak", category="attraction", source_caption=
+        "Another Place (Different Venue). Cloud Peak (Đỉnh Mây). Cloud Peak (Cerro Azul). Cloud Peak (Monte Verde).")
+    assert result.status == "not_found"
+    assert len(calls) == 3
+    assert [call["json"]["textQuery"] for call in calls[1:]] == ["Đỉnh Mây, Oaxaca, Mexico", "Cerro Azul, Oaxaca, Mexico"]
+
+
+def test_an_original_match_does_not_start_extra_alias_requests(monkeypatch):
+    calls, _ = singleton(monkeypatch)
+    assert lookup(source_caption="Casa Toro (Casa Azul)").status == "resolved"
+    assert len(calls) == 2
+
+
+def test_unrelated_caption_cannot_supply_an_alias_to_a_different_saved_place(monkeypatch):
+    calls, _ = responses(monkeypatch, [{"places": []}])
+    assert lookup(place_name="Cloud Peak", source_caption="Dolphin Rock (Mỏm Cá Heo)").status == "not_found"
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("provider_name", ["Harbor Green 3 Cafe", "Harbor Green Cafe", "Harbor Green 12 Cafe"])
 def test_whole_name_similarity_never_overrides_conflicting_branch_numbers(monkeypatch, provider_name):
     assert search._name_score("Harbor Green 2 Cafe", provider_name) >= 0.70

@@ -30,6 +30,27 @@ Local iPhone builds require macOS and Xcode. From Windows, use an EAS iOS develo
 
 ## Build Android Artifacts In WSL
 
+### Instagram share receipts
+
+The Android share target opens `DreamShareActivity`, a compact native receipt over
+the source app. It does not start React or wait for Instagram parsing. **Done**
+returns to the source app; **View in Dreams** opens all places from that reel.
+The link is saved locally before upload, and WorkManager sends each receipt
+independently when connected. Parsing and place lookup run on the server.
+
+Open Trotter and authenticate once after installing this native implementation.
+Only a verified account session is copied into the device-only encrypted native
+credential store. A share without that session is retained and offers sign-in;
+sign-out invalidates credentials and keeps receipts isolated by account and API.
+Pending receipts are never removed merely because the app was closed. Receipt
+removal follows a successful authoritative Dreams refresh containing its saved ID.
+
+Native changes require a new APK. Validate inbox behavior with
+`wsl -d Ubuntu -- bash /mnt/c/Users/natha/projects/trotter/mobile-v2/scripts/testNativeShareState.sh`
+and the bridge with `node scripts/testNativeDreamShare.cjs` from `mobile-v2`.
+
+### Maps and build configuration
+
 Dreams uses the native Google Maps SDK. Copy `android/google-maps.properties.example`
 to the ignored `android/google-maps.properties` and set `androidApiKey` to a key
 restricted to Maps SDK for Android, `com.trotter.mobilev2`, and the installed
