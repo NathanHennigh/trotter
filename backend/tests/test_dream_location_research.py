@@ -212,6 +212,17 @@ def test_accent_equivalent_comparison_is_not_positive_destination_support():
     assert not research.source_area_intent(place_name="Lake Atitlán", source_caption=caption, category="nature")
 
 
+def test_actual_ta_xua_caption_with_comparison_prefix_and_comma_adjectives_is_an_area():
+    caption = ("While everyone flocks to Sa Pa or Ha Giang, Ta Xua remains a peaceful, mist-covered mountain paradise hidden in Northern Vietnam.\n"
+               "Visit Dinosaur Spine ridge and Hiên Coffee for the views.")
+    quote = "Ta Xua remains a peaceful, mist-covered mountain paradise"
+    assert research.source_area_intent(place_name="Ta Xua", source_caption=caption, category="attraction")
+    raw = area_query("Ta Xua", quote, country="Vietnam")
+    raw['region_or_neighborhood'] = 'Northern Vietnam'
+    assert len(validate(raw, source_caption=caption, place_name="Ta Xua", city=None, country="Vietnam",
+                        category="attraction", region_or_neighborhood="Northern Vietnam")) == 1
+
+
 @pytest.mark.parametrize("name,city,category,caption", [
     (None, "Tropea", "unknown", "This unnamed hotel in Tropea has the best views."),
     (None, "Lake Atitlan", "unknown", "This Airbnb overlooking Lake Atitlan is a dream."),
@@ -312,7 +323,9 @@ def test_one_async_venice_request_with_source_only_schema_and_hard_timeout_cap(m
     assert payload["response_format"]["json_schema"]["strict"] is True
     assert payload["venice_parameters"]["enable_web_search"] == "off"
     user = json.loads(payload["messages"][1]["content"])
-    assert set(user) == {"saved_place", "source_caption", "literal_local_aliases", "source_area_name", "protected_fields"}
+    assert set(user) == {"saved_place", "source_caption", "literal_local_aliases", "source_area_name", "protected_fields", "query_intent"}
+    assert user['query_intent'] == 'place'
+    assert payload['response_format']['json_schema']['schema']['properties']['queries']['items']['properties']['intent']['enum'] == ['place']
     assert "coordinates" not in user and "google_results" not in user
 
 
@@ -321,6 +334,15 @@ def test_one_async_ollama_request(monkeypatch):
     assert len(plan(provider="ollama")) == 1
     assert calls[0]["url"].endswith("/api/chat")
     assert calls[0]["json"]["stream"] is False
+
+
+def test_known_source_area_intent_constrains_provider_schema(monkeypatch):
+    calls, _ = provider(monkeypatch, {"message": {"content": '{"queries": []}'}})
+    assert plan(provider='ollama', place_name='Ta Xua', city=None, category='attraction',
+                source_caption='Ta Xua remains a peaceful, mist-covered mountain paradise hidden in Northern Vietnam.') == []
+    payload = calls[0]['json']
+    assert payload['format']['properties']['queries']['items']['properties']['intent']['enum'] == ['area']
+    assert json.loads(payload['messages'][1]['content'])['query_intent'] == 'area'
 
 
 @pytest.mark.parametrize("body", [None, [], "bad", {}, {"message": None}, {"message": "bad"}, {"message": []}, {"message": {"content": []}}])

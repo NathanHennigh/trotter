@@ -68,20 +68,29 @@ def test_optional_ai_failure_preserves_normal_not_found(failure):
         return NOT_FOUND
     async def planner(**kwargs):
         raise failure
-    assert run(search, planner) == NOT_FOUND
+    result = run(search, planner)
+    assert {key: result[key] for key in NOT_FOUND} == NOT_FOUND
+    assert result["_research"]["outcome"] == "unavailable"
 
 
 def test_initial_area_mode_keeps_named_lake_from_becoming_exact_venue():
     async def search(*args, **kwargs):
-        assert args[0] == "Lake Atitlan" and kwargs["allow_area"] is True
+        assert args[:3] == ("Lake Atitlan", None, "Guatemala") and kwargs["allow_area"] is True
         return FOUND
-    result = asyncio.run(lookup.lookup_dream_location("Lake Atitlan", None, "Guatemala", None, "nature",
-                         source_caption="Explore Lake Atitlan, Guatemala", searcher=search))
+    result = asyncio.run(lookup.lookup_dream_location("Lake Atitlan", "San Marcos", "Guatemala", None, "nature",
+                         source_caption="Explore Lake Atitlan, Guatemala, from San Marcos", searcher=search))
     assert result["status"] == "resolved"
 
 
 def test_blank_name_uses_supported_region_instead_of_unrelated_saved_city():
     assert lookup.area_search_name(None, "Sa Pa", "Ta Xua", "unknown", "Explore Ta Xua, a mountain region.") == "Ta Xua"
+
+
+def test_area_keeps_concrete_region_but_not_cardinal_country_as_parent_locality():
+    assert lookup.area_region_constraint("Northern Vietnam", "Vietnam") is None
+    assert lookup.area_region_constraint("Son La", "Vietnam") == "Son La"
+    assert lookup.area_region_constraint("Northern Ireland", "United Kingdom") == "Northern Ireland"
+    assert lookup.area_region_constraint("Central Java", "Indonesia") == "Central Java"
 
 
 def test_new_caption_evidence_restarts_unresolved_area_lookup(sessions):

@@ -562,6 +562,26 @@ def _country_only_identity(name: str, actual: str) -> bool:
     return bool(distinctive and wanted == _normal(actual))
 
 
+def _same_lake_name(wanted: str, actual: str, types: set[str]) -> bool:
+    """Translate only a lake's type prefix; its proper identity stays exact."""
+    if not types & {"lake", "natural_feature"}:
+        return False
+
+    def proper_name(value):
+        value = _normal(value)
+        for prefix in (r"lake\s+(?:of\s+)?", r"lago\s+(?:(?:de|del|di)\s+)?", r"lac\s+(?:(?:de|du|des|d)\s+)?"):
+            match = re.fullmatch(prefix + r"(.+)", value)
+            if match:
+                name = match.group(1)
+                if (sum(char.isalpha() for char in name) >= 3
+                        and name not in _GENERIC | _AREA_GENERIC_NAMES | {"water", "waters", "view", "views"}):
+                    return name
+        return None
+
+    left, right = proper_name(wanted), proper_name(actual)
+    return bool(left and right and left == right)
+
+
 def _match_area(candidate: GoogleCandidate, name: str, city: str, country: str, region: str, category: str):
     """A named area is its own result, never the location of a nearby business."""
     if candidate.precision != "area" or _normal(category) not in _AREA_CATEGORIES:
@@ -573,7 +593,7 @@ def _match_area(candidate: GoogleCandidate, name: str, city: str, country: str, 
     if not wanted or re.findall(r"\d+", wanted) != re.findall(r"\d+", actual):
         return None
     admin_area = any(kind.startswith("administrative_area_level_") for kind in candidate._types)
-    if wanted != actual and not (admin_area and _same_admin(wanted, actual)):
+    if wanted != actual and not (admin_area and _same_admin(wanted, actual)) and not _same_lake_name(name, candidate.name, candidate._types):
         return None
     kind = _normal(category)
     if kind in {"city", "town", "village"} and not candidate._types & {"locality", "postal_town", "sublocality"}:

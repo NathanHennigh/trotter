@@ -406,7 +406,8 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
                 # Only original source evidence and query inputs, never Google
                 # result content, enter the durable audit trail.
                 row.history = [*(row.history or []), {"reason": "source_location_research", "at": finished.isoformat(),
-                               "queries": research["queries"], "matched": bool(research.get("matched"))}]
+                               "queries": research["queries"], "matched": bool(research.get("matched")),
+                               "outcome": research.get("outcome")}]
                 if result["status"] == "resolved" and research.get("matched"):
                     apply_researched_context(db, item, row, research["matched"], finished)
             row.status = result["status"]

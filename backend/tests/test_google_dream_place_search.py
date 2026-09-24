@@ -982,3 +982,46 @@ def test_area_lookup_retains_bounded_source_local_name_fallback(monkeypatch):
                     source_caption="Mirror Lake (Lago Espejo) is in Mexico.")
     assert result.status == "resolved" and result.candidates[0].precision == "area"
     assert len(calls) == 2 and calls[-1]["json"]["textQuery"] == "Lago Espejo, Mexico"
+
+
+@pytest.mark.parametrize("wanted,actual,kind", [
+    ("Lake Atitlan", "Lago de Atitlán", "lake"),
+    ("Lake Atitlán", "Lago Atitlan", "natural_feature"),
+    ("Lago de Atitlan", "Lake Atitlán", "lake"),
+    ("Lake Como", "Lago di Como", "lake"),
+    ("Lake Annecy", "Lac d’Annecy", "natural_feature"),
+    ("Lake Bourget", "Lac du Bourget", "lake"),
+])
+def test_lake_type_prefix_may_translate_while_proper_name_stays_exact(monkeypatch, wanted, actual, kind):
+    calls, _ = singleton(monkeypatch, area_place(name=actual, kind=kind))
+    result = lookup(place_name=wanted, city=None, category="nature", allow_area=True)
+    assert result.status == "resolved" and result.candidates[0].precision == "area"
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("wanted,actual,kind", [
+    ("Lake Atitlan", "Lago de Atitlan Viewpoint", "lake"),
+    ("Lake Atitlan", "Lago de Atitlan 2", "lake"),
+    ("Lake Atitlan", "Lago de Atitlan Norte", "lake"),
+    ("Lake Atitlan", "Lago de Atitlan", "locality"),
+    ("Lake Atitlan", "Lago de Atitlan", "administrative_area_level_1"),
+    ("Lake Atitlan", "Lago de Atitlan Resort", "natural_feature"),
+    ("Lake Atitlan", "Lago de Atitlon", "lake"),
+    ("Lake Blue", "Lago Azul", "lake"),
+    ("Lake Water", "Lago de Water", "lake"),
+    ("Lake AB", "Lago de AB", "lake"),
+])
+def test_lake_prefix_matching_is_not_fuzzy_identity_or_any_geography_type(monkeypatch, wanted, actual, kind):
+    singleton(monkeypatch, area_place(name=actual, kind=kind))
+    assert lookup(place_name=wanted, city=None, category="nature", allow_area=True).status == "not_found"
+
+
+def test_translated_lake_name_still_rejects_conflicting_country(monkeypatch):
+    singleton(monkeypatch, area_place(name="Lago de Atitlan", kind="lake",
+        addressComponents=[component("country", "Other Country")]))
+    assert lookup(place_name="Lake Atitlan", city=None, category="nature", allow_area=True).status == "not_found"
+
+
+def test_lake_prefix_translation_cannot_rebind_a_venue_search(monkeypatch):
+    singleton(monkeypatch, place(displayName={"text": "Lago de Atitlan"}, types=["cafe"]))
+    assert lookup(place_name="Lake Atitlan", category="cafe").status == "not_found"
