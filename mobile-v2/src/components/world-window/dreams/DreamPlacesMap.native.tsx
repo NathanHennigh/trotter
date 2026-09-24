@@ -5,7 +5,7 @@ import MapView, { Marker, PROVIDER_GOOGLE, type MapPressEvent } from "react-nati
 import { colors, fonts } from "../../../theme/trotterTheme";
 import { WWIcon } from "../WorldWindowUI";
 import { PlaceSymbol } from "./DreamPhoto";
-import { cleanMapPoints, clusterPlaces, googleMapUrl, placesMapStyle, placesRegion, validMapCoordinate, type DreamPlacesMapProps, type PlaceCluster, type PlacesRegion } from "./dreamMapModel";
+import { cleanMapPoints, clusterPlaces, focusPlaceRegion, googleMapUrl, placesMapStyle, placesRegion, validMapCoordinate, type DreamPlacesMapProps, type PlaceCluster, type PlacesRegion } from "./dreamMapModel";
 
 export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, onSelect, onPlace, height = 240, overview }: DreamPlacesMapProps) {
   const configured = Constants.expoConfig?.extra?.[Platform.OS === "ios" ? "googleMapsIosConfigured" : "googleMapsAndroidConfigured"] === true;
@@ -51,13 +51,13 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     if (!ready || placing) return;
     const point = clean.find(p => p.id === selectedId);
     if (!point) return;
-    const key = `${point.id}:${point.lat}:${point.lon}`;
+    const key = `${point.id}:${point.lat}:${point.lon}:${Boolean(point.area)}`;
     if (focusedPoint.current === key) return;
     focusedPoint.current = key;
     userFramed.current = true;
     if (selectedFromMap.current === selectedId) { selectedFromMap.current = undefined; return; }
-    move({ ...currentRegion.current, latitude: point.lat, longitude: point.lon }, true);
-  }, [selectedId, ready, placing, clean, move]);
+    move(focusPlaceRegion(point, currentRegion.current, width, height), true);
+  }, [selectedId, ready, placing, clean, move, width, height]);
   const clusters = React.useMemo(() => placing ? clean.map(point => ({ id: point.id, points: [point], latitude: point.lat, longitude: point.lon })) : clusterPlaces(clean, region, width, height, selectedId), [clean, region, width, height, selectedId, placing]);
   const open = async () => {
     const url = googleMapUrl(clean.filter(p => !selectedId || p.id === selectedId), overview);
@@ -110,9 +110,10 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     </View>}
     {slow && <View style={s.status}><Text style={s.note}>Map detail is taking longer to load. Check your connection or try again.</Text><Pressable accessibilityRole="button" onPress={() => { setReady(false); setLoaded(false); setSlow(false); fittedKey.current = undefined; setAttempt(value => value + 1); }} style={s.action}><Text style={s.actionText}>Reload map</Text></Pressable></View>}
     {!clean.length && <Text style={s.empty}>{placing ? "Tap the exact location to place your pin." : "Saved places will appear here when their locations are ready."}</Text>}
+    {!placing && clean.some(point => point.area) && <Text style={s.empty}>Area markers show a general location.</Text>}
     {choices.length > 0 && <ScrollView style={s.choices} nestedScrollEnabled>
       {choices.map(id => clean.find(p => p.id === id)).filter(Boolean).map(point => point && <Pressable key={point.id} accessibilityRole="button" style={s.choice} onPress={() => { selectedFromMap.current = point.id; onSelect?.(point.id); setChoices([]); }}>
-        <PlaceSymbol category={point.category ?? "unknown"} size={18} /><Text style={s.choiceText}>{point.label}</Text>
+        {point.area ? <WWIcon name="globe" size={18} /> : <PlaceSymbol category={point.category ?? "unknown"} size={18} />}<Text style={s.choiceText}>{point.area ? `${point.label} · Area` : point.label}</Text>
       </Pressable>)}
     </ScrollView>}
     {linkError && <Text accessibilityRole="alert" style={s.empty}>Google Maps could not be opened.</Text>}
@@ -141,7 +142,8 @@ function PlaceMarker({ cluster, selected, mapReady, mapLoaded, onPress }: { clus
     accessibilityLabel={count > 1 ? `${count} saved places, zoom or choose a place` : `${point.label}${point.area ? ", approximate area" : ""}`}
     accessibilityRole="button" onPress={event => { event.stopPropagation(); onPress(); }}>
     <View collapsable={false} onLayout={() => setLaidOut(true)} style={[s.marker, selected && s.selectedMarker, point.area && count === 1 && s.areaMarker]}>
-      {count > 1 ? <Text allowFontScaling={false} style={s.count}>{count}</Text> : <PlaceSymbol category={point.category ?? "unknown"} size={20} color={colors.paper} />}
+      {count > 1 ? <Text allowFontScaling={false} style={s.count}>{count}</Text> : point.area
+        ? <WWIcon name="globe" size={20} color={colors.paper} /> : <PlaceSymbol category={point.category ?? "unknown"} size={20} color={colors.paper} />}
     </View>
   </Marker>;
 }

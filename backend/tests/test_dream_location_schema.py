@@ -45,7 +45,8 @@ def test_migration_preserves_every_old_table_schema_and_raw_row():
         assert set(after_schema) - set(before_schema) == {"dream_locations"}
     columns = inspect(engine).get_columns("dream_locations")
     assert {(column["name"], column["nullable"]) for column in columns} == {
-        (column.name, column.nullable) for column in DreamLocation.__table__.columns}
+        (column.name, column.nullable) for column in DreamLocation.__table__.columns
+        if column.name != "coordinate_precision"}  # Added later by migration 0014.
     engine.dispose()
 
 

@@ -37,8 +37,13 @@ export function placesRegion(points: MapPoint[], overview?: CountryRegion, width
   const clean = cleanMapPoints(points);
   let south = -45, north = 65, center = 0, span = 320;
   if (clean.length) {
-    south = Math.min(...clean.map(p => p.lat)); north = Math.max(...clean.map(p => p.lat));
-    ({ center, span } = longitudeSpan(clean.map(p => p.lon)));
+    // With no provider viewport, an area coordinate is a representative centre,
+    // never a building-sized target. This is camera padding, not a claimed boundary.
+    south = Math.max(-85.05112878, Math.min(...clean.map(p => p.lat - (p.area ? .09 : 0))));
+    north = Math.min(85.05112878, Math.max(...clean.map(p => p.lat + (p.area ? .09 : 0))));
+    ({ center, span } = longitudeSpan(clean.flatMap(p => p.area
+      ? [normalizeLongitude(p.lon - .09 / Math.max(.09, Math.cos(p.lat * Math.PI / 180))), normalizeLongitude(p.lon + .09 / Math.max(.09, Math.cos(p.lat * Math.PI / 180)))]
+      : [p.lon])));
   } else if (overview) {
     const [[s, w], [n, e]] = overview.bounds;
     if ([s, w, n, e].every(Number.isFinite) && n >= s) {
@@ -58,6 +63,13 @@ export function placesRegion(points: MapPoint[], overview?: CountryRegion, width
     latitudeDelta: Math.min(170, latitudeFromMercator(yCenter + fittedY / 2) - latitudeFromMercator(yCenter - fittedY / 2)),
     longitudeDelta: Math.min(359, fittedX * 180 / Math.PI),
   };
+}
+export function focusPlaceRegion(point: MapPoint, current: PlacesRegion, width = 320, height = 240): PlacesRegion {
+  if (!point.area) return { ...current, latitude: point.lat, longitude: point.lon };
+  const area = placesRegion([point], undefined, width, height);
+  return { ...current, latitude: point.lat, longitude: point.lon,
+    latitudeDelta: Math.max(current.latitudeDelta, area.latitudeDelta),
+    longitudeDelta: Math.max(current.longitudeDelta, area.longitudeDelta) };
 }
 export type PlaceCluster = { id: string; points: MapPoint[]; latitude: number; longitude: number };
 /** Spatial buckets keep dozens of saved places legible without changing their coordinates. */
@@ -79,6 +91,8 @@ export function clusterPlaces(points: MapPoint[], region: PlacesRegion, width: n
 }
 export function googleMapUrl(points: MapPoint[], overview?: CountryRegion) {
   const valid = cleanMapPoints(points);
+  if (valid.length === 1 && valid[0].googlePlaceId)
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(valid[0].label)}&query_place_id=${encodeURIComponent(valid[0].googlePlaceId)}`;
   const query = valid.length === 1 ? `${valid[0].lat},${valid[0].lon}` : overview?.label || (valid[0] ? `${valid[0].lat},${valid[0].lon}` : undefined);
   return query ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}` : undefined;
 }

@@ -80,6 +80,120 @@ def test_google_payload_is_never_stored_in_db_or_history_and_coordinate_cache_is
     assert ttl == 29 * 24 * 60 * 60
 
 
+def test_area_precision_survives_cache_read_and_expiry_without_storing_google_content(sessions, isolated_cache):
+    add_item(sessions,place_name="Tropea",city=None,country="Italy",category="unknown")
+    before=snapshot(sessions)
+    job_id,_=enqueue(sessions)
+    assert resolve(sessions,job_id,candidates=[{**CANDIDATE,"precision":"area"}]) == "resolved"
+    with sessions() as db:
+        item=db.get(DreamItem,1)
+        assert locations.location_coordinates(item) == (40.4,-3.7,"area")
+        assert item.location.coordinate_precision == "area"
+        assert item.location.message == "Area found on Google Maps."
+        item.location.google_identity.coordinates_expires_at=NOW-timedelta(seconds=1)
+        assert locations.location_coordinates(item) == (None,None,None)
+    assert snapshot(sessions) == before
+    assert set(isolated_cache.writes[0][1]) == {"latitude","longitude","expires_at"}
+
+
+def test_area_precision_is_invalidated_when_saved_place_identity_changes(sessions):
+    add_item(sessions)
+    job_id,_=enqueue(sessions)
+    assert resolve(sessions,job_id,candidates=[{**CANDIDATE,"precision":"area"}]) == "resolved"
+    with sessions() as db:
+        item=db.get(DreamItem,1)
+        item.place_name="A different place"
+        locations.enqueue_location(db,item,now=NOW)
+        assert item.location.coordinate_precision is None
+        assert locations.location_coordinates(item) == (None,None,None)
+
+
+@pytest.mark.parametrize("precision", ["area", "place"])
+def test_live_details_preserve_precision_and_fetch_outside_database_transaction(sessions, isolated_cache, monkeypatch, precision):
+    from app.services import google_dream_place_search as provider
+    add_item(sessions)
+    job_id, _ = enqueue(sessions)
+    candidate = {**CANDIDATE, "precision": precision}
+    assert resolve(sessions, job_id, candidates=[candidate]) == "resolved"
+    before = snapshot(sessions)
+    cached_before = copy.deepcopy(isolated_cache.values)
+    calls = []
+    with sessions() as db:
+        async def details(identity, *, allow_area=False):
+            assert not db.in_transaction(), "The Google request must not reopen the rolled-back transaction"
+            calls.append((identity, allow_area))
+            return provider.GoogleCandidate(**candidate)
+        monkeypatch.setattr(provider, "fetch_google_place_details", details)
+        result = asyncio.run(google.live_google_details(db, 1, 1))
+        assert result["coordinate_precision"] == precision
+        assert result["location_candidates"][0]["precision"] == precision
+        assert result["location_place_id"] == CANDIDATE["id"]
+        assert db.get(DreamLocation, job_id).coordinate_precision == precision
+    assert calls == [(CANDIDATE["id"], precision == "area")]
+    assert isolated_cache.values == cached_before
+    assert snapshot(sessions) == before
+
+
+def test_area_confirmation_captures_precision_before_rollback_and_preserves_area(sessions, monkeypatch):
+    from app.services import google_dream_place_search as provider
+    add_item(sessions)
+    job_id, _ = enqueue(sessions)
+    legacy_review(sessions, job_id)
+    with sessions() as db:
+        db.get(DreamLocation, job_id).coordinate_precision = "area"
+        db.commit()
+    calls = []
+    with sessions() as db:
+        async def details(identity, *, allow_area=False):
+            assert not db.in_transaction(), "Reading an expired ORM attribute must not restart a transaction before Google"
+            calls.append((identity, allow_area))
+            return provider.GoogleCandidate(**{**CANDIDATE, "precision": "area"})
+        monkeypatch.setattr(provider, "fetch_google_place_details", details)
+        item = asyncio.run(google.confirm_google_candidate(db, 1, 1, CANDIDATE["id"]))
+        db.commit()
+        assert item.location.status == "manual"
+        assert item.location.coordinate_precision == "area"
+        assert locations.location_coordinates(item) == (40.4, -3.7, "area")
+        assert item.location.google_identity.confirmed_place_id == CANDIDATE["id"]
+    assert calls == [(CANDIDATE["id"], True)]
+
+
+@pytest.mark.parametrize("refresh_path", ["missing_cache", "expired_enqueue"])
+def test_area_refresh_retains_precision_and_fetches_the_existing_area_identity(sessions, isolated_cache, monkeypatch, refresh_path):
+    from app.services import google_dream_place_search as provider
+    add_item(sessions)
+    job_id, _ = enqueue(sessions)
+    candidate = {**CANDIDATE, "precision": "area"}
+    assert resolve(sessions, job_id, candidates=[candidate]) == "resolved"
+    before = snapshot(sessions)
+    refreshed_at = NOW + (timedelta(minutes=6) if refresh_path == "missing_cache" else timedelta(days=29))
+    with sessions() as db:
+        if refresh_path == "missing_cache":
+            isolated_cache.values.clear()
+            assert google.queue_google_refreshes(db, now=refreshed_at, limit=10) == 1
+        else:
+            item = db.get(DreamItem, 1)
+            row, queued = locations.enqueue_location(db, item, now=refreshed_at)
+            assert queued
+        row = db.get(DreamLocation, job_id)
+        assert row.coordinate_precision == "area", "Refreshing the same Google identity must preserve area precision"
+        assert row.google_identity.selected_place_id == CANDIDATE["id"]
+        db.commit()
+    calls = []
+    async def details(identity, *, allow_area=False):
+        calls.append((identity, allow_area))
+        # A geographic Google result is intentionally unavailable to exact-venue requests.
+        return provider.GoogleCandidate(**candidate) if allow_area else None
+    monkeypatch.setattr(provider, "fetch_google_place_details", details)
+    assert asyncio.run(locations.resolve_location_job(job_id, session_factory=sessions, now=refreshed_at)) == "resolved"
+    assert calls == [(CANDIDATE["id"], True)]
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        assert item.location.coordinate_precision == "area"
+        assert locations.location_coordinates(item) == (40.4, -3.7, "area")
+    assert snapshot(sessions) == before
+
+
 @pytest.mark.parametrize("provider_status", ["resolved", "needs_review"])
 def test_google_match_populates_map_without_claiming_user_approval(sessions, provider_status):
     add_item(sessions)
@@ -209,7 +323,8 @@ def test_missing_cache_is_hidden_and_recovered_without_new_name_search(sessions,
         assert google.queue_google_refreshes(db, now=NOW + timedelta(minutes=6), limit=10) == 1
         db.commit()
     calls = []
-    async def details(identity):
+    async def details(identity, *, allow_area=False):
+        assert allow_area is False
         calls.append(identity)
         return provider.GoogleCandidate(**CANDIDATE)
     monkeypatch.setattr(provider, "fetch_google_place_details", details)

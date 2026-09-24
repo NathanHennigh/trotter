@@ -190,6 +190,7 @@ export type MapPoint = {
   category?: string;
   area?: boolean;
   provider?: string;
+  googlePlaceId?: string;
 };
 export type MapLine = { from: string; to: string; id: string };
 export const validPoint = (point?: {

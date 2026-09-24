@@ -86,6 +86,9 @@ export const categoryLabel = (category: string) =>
     : category === "unknown"
       ? "Place"
       : category.charAt(0).toUpperCase() + category.slice(1);
+export const dreamPlaceLabel = (item: DreamItem) => item.placeName || item.city ||
+  (item.coordinatePrecision === "area" ? item.regionOrNeighborhood || item.country : undefined) || "Saved place";
+export const dreamLocationType = (item: DreamItem) => item.coordinatePrecision === "area" ? "Area" : categoryLabel(item.category);
 export const categoryGroup = (category: string): DreamFilter =>
   category === "cafe"
     ? "Cafés"
@@ -132,12 +135,13 @@ export function exactMapPoint(item: DreamItem): MapPoint | undefined {
   ) {
     return {
       id: item.id,
-      label: item.placeName || item.city || "Saved place",
+      label: dreamPlaceLabel(item),
       lat: item.latitude,
       lon: item.longitude,
       category: item.category,
       area: item.coordinatePrecision === "area",
       ...(item.locationProvider ? { provider: item.locationProvider } : {}),
+      ...(item.locationProvider === "google_places" && item.locationPlaceId ? { googlePlaceId: item.locationPlaceId } : {}),
     };
   }
   // Google '@lat,lon' describes the camera, NOT the place. Never geocode by city centre.
@@ -171,10 +175,11 @@ export function exactMapPoint(item: DreamItem): MapPoint | undefined {
     return undefined;
   return {
     id: item.id,
-    label: item.placeName || item.city || "Saved place",
+    label: dreamPlaceLabel(item),
     lat,
     lon,
     category: item.category,
+    area: item.coordinatePrecision === "area",
     ...(item.locationProvider ? { provider: item.locationProvider } : {}),
   };
 }

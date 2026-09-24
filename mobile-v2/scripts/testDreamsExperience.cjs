@@ -171,6 +171,19 @@ test('fresh Google identity and coordinates replace the list pin together withou
   tree=h.render(); assert(!byType(tree, 'DreamPlacesMap')); h.dispose();
 });
 
+test('area detail keeps the broad marker, labels its precision and does not display a representative centre as a venue address', () => {
+  const h = host(editor, 'DreamEditor', { live: { details: { coordinatePrecision: 'area', locationProvider: 'google_places',
+    locationStatus: 'resolved', locationPlaceId: 'area-id', locationExpiresAt: '2099-01-01', locationAddress: 'Representative map centre',
+    locationCandidates: [{ id: 'area-id', latitude: 14.7, longitude: -91.2 }], locationAttributions: [] } } });
+  const tree = h.render(editorProps({ item: { ...item, placeName: 'Lake Atitlán', category: 'unknown',
+    locationProvider: 'google_places', coordinatePrecision: 'area', locationPlaceId: 'area-id', locationExpiresAt: '2099-01-01' } }));
+  assert.equal(byType(tree, 'DreamPlacesMap').props.points[0].area, true);
+  assert(text(tree).includes('Area')); assert(text(tree).includes('Area on map'));
+  assert(text(tree).includes('The marker shows the general area.'));
+  assert(!text(tree).includes('Representative map centre'));
+  h.dispose();
+});
+
 test('country Search focuses above the map; first resolution keeps map height and pin Details opens directly', () => {
   const located = { ...item, latitude: 38.71, longitude: -9.14, coordinatePrecision: 'place' };
   let selected; const h = host(screen, 'CountryPlaces'); const props = countryProps({ onSelect: (...value) => selected = value });

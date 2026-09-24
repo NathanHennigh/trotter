@@ -10,10 +10,10 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
-from sqlalchemy import or_, update
+from sqlalchemy import and_, or_, update
 from sqlalchemy.orm import Session
 
-from ..models import DreamItem, DreamLocation
+from ..models import DreamItem, DreamLocation, User
 
 IDENTITY_FIELDS = ("place_name", "city", "country", "region_or_neighborhood", "category")
 ACTIVE = {"queued", "running"}
@@ -181,21 +181,26 @@ def archive_resolution(row, reason, now):
     row.history = [*(row.history or []), entry]
 
 
-def enqueue_location(db: Session, item: DreamItem, *, force=False, now=None):
+def enqueue_location(db: Session, item: DreamItem, *, force=False, supersede=False, now=None):
     """Call while holding the item's row lock; same transaction as a user edit."""
     now = now or utcnow()
     row = db.query(DreamLocation).filter_by(item_id=item.id, user_id=item.user_id).with_for_update().first()
     identity, pin = fingerprint(item), pin_fingerprint(item)
     changed = row is not None and (row.fingerprint != identity or row.pin_fingerprint != pin)
     from .dream_place_aliases import caption_for_place, source_place_aliases
-    aliases = source_place_aliases(item.place_name, caption_for_place(item))
+    caption = caption_for_place(item)
+    aliases = source_place_aliases(item.place_name, caption)
+    source_identity = digest(caption)
+    previous_source_identity = next((entry["source_evidence_fingerprint"] for entry in reversed(row.history or [])
+                                     if "source_evidence_fingerprint" in entry), None) if row else None
+    source_changed = bool(row and row.status not in {"resolved", "manual"} and source_identity != previous_source_identity)
     alias_identity = digest(aliases)
     raw = item.raw_metadata_json or {}
     previous_alias_identity = raw.get("location_alias_fingerprint")
     alias_changed = bool(row and row.status not in {"resolved", "manual"}
                          and (aliases or previous_alias_identity)
                          and alias_identity != previous_alias_identity)
-    changed = changed or alias_changed
+    changed = changed or alias_changed or source_changed
     # This is derived only from the retained user caption, never Google data.
     # Adding/removing an alias retries unresolved saves without disturbing pins.
     if aliases or previous_alias_identity:
@@ -207,9 +212,12 @@ def enqueue_location(db: Session, item: DreamItem, *, force=False, now=None):
                                   and google.place_fingerprint == source_place_fingerprint(item))
     if row and not changed and not force and not google_expired:
         return row, False
-    if row and not changed and force and row.status in ACTIVE | {"manual", "resolved"} and not google_expired:
+    if row and not changed and force and not supersede and row.status in ACTIVE | {"manual", "resolved"} and not google_expired:
         return row, False
     if row:
+        if source_changed:
+            row.history = [*(row.history or []), {"reason": "source_lookup_context", "at": now.isoformat(),
+                           "source_evidence_fingerprint": source_identity}]
         archive_resolution(row, "location_inputs_changed" if changed else "requested_retry", now)
         row.generation += 1
     else:
@@ -217,9 +225,11 @@ def enqueue_location(db: Session, item: DreamItem, *, force=False, now=None):
                             pin_fingerprint=pin, generation=1, created_at=now)
         db.add(row)
         item.location = row
+        row.history = [{"reason": "source_lookup_context", "at": now.isoformat(), "source_evidence_fingerprint": source_identity}]
     row.fingerprint, row.pin_fingerprint = identity, pin
     row.attempts, row.lease_token, row.lease_expires_at = 0, None, None
     row.provider, row.address, row.latitude, row.longitude, row.google_maps_url = None, None, None, None, None
+    row.coordinate_precision = row.coordinate_precision if google and google.selected_place_id and (not changed or preserve_google_choice) else None
     row.candidates, row.message, row.checked_at, row.last_dispatched_at = [], None, None, None
     row.updated_at = now
     if google:
@@ -235,7 +245,7 @@ def enqueue_location(db: Session, item: DreamItem, *, force=False, now=None):
         row.provider = "manual" if row.status == "manual" else "saved_evidence"
         row.google_maps_url, row.checked_at, row.next_attempt_at = item.google_maps_url, now, None
         row.message = "Your saved pin is preserved."
-    elif not (item.place_name or "").strip():
+    elif not (item.place_name or "").strip() and not area_name_for_item(item):
         row.status, row.next_attempt_at = "not_found", None
         row.message = "Add a place name to find its location."
     else:
@@ -245,8 +255,18 @@ def enqueue_location(db: Session, item: DreamItem, *, force=False, now=None):
     return row, row.status == "queued"
 
 
+def area_name_for_item(item):
+    from .dream_location_lookup import area_search_name
+    from .dream_place_aliases import caption_for_place
+    return area_search_name(item.place_name, item.city, item.region_or_neighborhood, item.category, caption_for_place(item))
+
+
 def queue_missing(db: Session, *, user_id=None, limit=100, only_undiscovered=False, after_id=0, now=None):
-    query = db.query(DreamItem).filter(DreamItem.place_name.isnot(None), DreamItem.place_name != "", DreamItem.id > after_id)
+    query = db.query(DreamItem).filter(or_(
+        and_(DreamItem.place_name.isnot(None), DreamItem.place_name != ""),
+        and_(or_(DreamItem.category.is_(None), DreamItem.category.in_(["", "unknown", "nature", "attraction"])),
+             or_(DreamItem.city.isnot(None), DreamItem.region_or_neighborhood.isnot(None))),
+    ), DreamItem.id > after_id)
     if user_id is not None:
         query = query.filter(DreamItem.user_id == user_id)
     if only_undiscovered:
@@ -296,6 +316,8 @@ def claim_job(db: Session, job_id: int, *, now=None):
             "fingerprint": row.fingerprint, "pin_fingerprint": row.pin_fingerprint,
             "inputs": [item.place_name, item.city, item.country, item.region_or_neighborhood, item.category],
             "source_caption": caption_for_place(item),
+            "protected_fields": bool(item.status == "confirmed" or (item.raw_metadata_json or {}).get("dream_user_edited")),
+            "coordinate_precision": row.coordinate_precision,
             "google_place_id": row.google_identity.selected_place_id if row.provider == "google_places" and row.google_identity else None}
 
 
@@ -318,10 +340,12 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
     retryable = False
     try:
         if claim.get("google_place_id") and resolver is search_google_dream_place:
-            refreshed = await fetch_google_place_details(claim["google_place_id"])
+            refreshed = await fetch_google_place_details(claim["google_place_id"], allow_area=claim.get("coordinate_precision") == "area")
             result = {"status": "resolved" if refreshed else "not_found", "provider": "google_places", "candidates": [refreshed.model_dump()] if refreshed else []}
         elif resolver is search_google_dream_place:
-            result = await resolver(*claim["inputs"], source_caption=claim.get("source_caption"))
+            from .dream_location_lookup import lookup_dream_location
+            result = await lookup_dream_location(*claim["inputs"], source_caption=claim.get("source_caption"),
+                                                protected=claim.get("protected_fields", False))
         else:
             result = await resolver(*claim["inputs"])
         result = result.model_dump() if hasattr(result, "model_dump") else result
@@ -353,6 +377,7 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
         retryable, result = True, None
     finished = now or utcnow()
     with session_factory() as db:
+        db.query(User).filter_by(id=claim["user_id"]).with_for_update().first()
         item = db.query(DreamItem).filter_by(id=claim["item_id"], user_id=claim["user_id"]).with_for_update().first()
         row = db.query(DreamLocation).filter_by(id=job_id, user_id=claim["user_id"]).with_for_update().first()
         if not item or not row or row.lease_token != claim["token"]:
@@ -360,8 +385,10 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
         from .dream_place_aliases import caption_for_place, source_place_aliases
         alias_changed = source_place_aliases(item.place_name, caption_for_place(item)) != source_place_aliases(
             claim["inputs"][0], claim.get("source_caption"))
-        if fingerprint(item) != claim["fingerprint"] or pin_fingerprint(item) != claim["pin_fingerprint"] or alias_changed:
-            enqueue_location(db, item, force=alias_changed, now=finished)
+        caption_changed = caption_for_place(item) != claim.get("source_caption")
+        protection_changed = bool(item.status == "confirmed" or (item.raw_metadata_json or {}).get("dream_user_edited")) != claim.get("protected_fields", False)
+        if fingerprint(item) != claim["fingerprint"] or pin_fingerprint(item) != claim["pin_fingerprint"] or alias_changed or caption_changed or protection_changed:
+            enqueue_location(db, item, force=alias_changed or caption_changed or protection_changed, supersede=True, now=finished)
             db.commit()
             return "superseded"
         row.lease_token, row.lease_expires_at = None, None
@@ -374,6 +401,14 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
             else:
                 row.status, row.message = "failed", "Location lookup could not finish. You can retry."
         else:
+            research = result.get("_research") if result.get("provider") == "google_places" else None
+            if research and not claim.get("protected_fields"):
+                # Only original source evidence and query inputs, never Google
+                # result content, enter the durable audit trail.
+                row.history = [*(row.history or []), {"reason": "source_location_research", "at": finished.isoformat(),
+                               "queries": research["queries"], "matched": bool(research.get("matched"))}]
+                if result["status"] == "resolved" and research.get("matched"):
+                    apply_researched_context(db, item, row, research["matched"], finished)
             row.status = result["status"]
             row.candidates = result.get("candidates", []) if result["provider"] != "google_places" else []
             row.provider = result["provider"]
@@ -399,6 +434,26 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
                 row.attempts = 0
         db.commit()
         return row.status
+
+
+def apply_researched_context(db, item, row, plan, now):
+    """Correct only derived geographic hints after a source-backed match."""
+    changes = {}
+    for field in ("city", "country", "region_or_neighborhood"):
+        old, new = getattr(item, field), plan[field]
+        evidence = plan.get("evidence", {}).get(field, {})
+        if old != new and evidence.get("source") in {"caption", "removed"}:
+            changes[field] = {"before": old, "after": new, "evidence": evidence}
+            setattr(item, field, new)
+    if not changes:
+        return
+    raw = item.raw_metadata_json or {}
+    item.raw_metadata_json = {**raw, "dream_location_repairs": [*(raw.get("dream_location_repairs") or []),
+                              {"at": now.isoformat(), "changes": changes}]}
+    from ..routers.dreams import dream_group_location, get_or_create_dream
+    city, country, region = dream_group_location(item.city, item.country, item.region_or_neighborhood)
+    item.dream_id = get_or_create_dream(db, item.user_id, city, country, region).id
+    row.fingerprint, row.pin_fingerprint = fingerprint(item), pin_fingerprint(item)
 
 
 def confirm_candidate(db: Session, item: DreamItem, candidate_id: str):

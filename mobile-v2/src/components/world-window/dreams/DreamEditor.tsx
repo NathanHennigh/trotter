@@ -19,9 +19,9 @@ import { fitDisplayFont } from "../displayTextFit";
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 import { DreamPlacesMap } from "./DreamPlacesMap";
 import type { MapPoint } from "../trips/tripPresentation";
-import { categoryLabel, exactMapPoint, safeWebUrl } from "./dreamPresentation";
+import { categoryLabel, dreamLocationType, dreamPlaceLabel, exactMapPoint, safeWebUrl } from "./dreamPresentation";
 import { DreamPhoto } from "./DreamPhoto";
-import { isFindingLocation, locationExplanation } from "./locationPresentation";
+import { canFindLocation, isFindingLocation, locationExplanation } from "./locationPresentation";
 import { useLiveDreamLocation } from "./useLiveDreamLocation";
 import { countryRegion } from "./countryRegion";
 import { draftFingerprint, draftFromItem } from "./dreamDraft";
@@ -67,7 +67,7 @@ export function DreamEditor({
 }) {
   const insets = useSafeAreaInsets();
   const { width, fontScale } = useWindowDimensions();
-  const displayName = item.placeName || item.city || "Saved inspiration";
+  const displayName = item.coordinatePrecision === "area" ? dreamPlaceLabel(item) : item.placeName || item.city || "Saved inspiration";
   const titleSize = fitDisplayFont(displayName, 34, getMobileVisualWidth(width) - 48, fontScale);
   const mounted = React.useRef(true), closed = React.useRef(false), running = React.useRef(false);
   React.useEffect(() => {
@@ -123,7 +123,7 @@ export function DreamEditor({
     ...item,
     googleMapsUrl: maps,
     ...(maps !== item.googleMapsUrl
-      ? { latitude: undefined, longitude: undefined, locationProvider: undefined }
+      ? { latitude: undefined, longitude: undefined, locationProvider: undefined, coordinatePrecision: "place" as const }
       : {}),
   });
   const liveCandidate = liveLocation.details && ["resolved", "manual"].includes(liveLocation.details.locationStatus ?? "")
@@ -137,7 +137,7 @@ export function DreamEditor({
       ...points.filter((p) => p.id !== item.id),
       ...(point ? [point] : []),
     ],
-    [points, point?.lat, point?.lon, item.id],
+    [points, point?.lat, point?.lon, point?.area, item.id],
   );
   const run = async (action: () => Promise<void>, closeOnSuccess = true, complete?: () => void) => {
     if (running.current || closed.current) return;
@@ -221,7 +221,7 @@ export function DreamEditor({
               <View style={s.photo}>
                 <DreamPhoto item={item} />
               </View>
-              <Text style={s.category}>{categoryLabel(item.category)}</Text>
+              <Text style={s.category}>{dreamLocationType(locationItem)}</Text>
               <Text style={[s.title, { fontSize: titleSize, lineHeight: titleSize * 39 / 34 }]}>
                 {displayName}
               </Text>
@@ -250,18 +250,19 @@ export function DreamEditor({
                 <View style={s.locationPanel}>
                   <View style={s.locationHeading}>
                     <WWIcon name="pin" size={17} />
-                    <Text style={s.locationLabel}>Location</Text>
+                    <Text style={s.locationLabel}>{locationItem.coordinatePrecision === "area" ? "Area on map" : "Location"}</Text>
                   </View>
-                  {liveLocation.loading && <Text accessibilityLiveRegion="polite" style={s.locationHint}>{shownPoint ? "Loading address…" : "Loading location details…"}</Text>}
+                  {liveLocation.loading && <Text accessibilityLiveRegion="polite" style={s.locationHint}>{shownPoint && locationItem.coordinatePrecision !== "area" ? "Loading address…" : "Loading location details…"}</Text>}
                   {liveLocation.error && <View>
                     <Text accessibilityRole="alert" style={s.locationHint}>{liveLocation.error}</Text>
                     <View style={s.actions}><WWButton label="Retry details" secondary onPress={liveLocation.retry} /></View>
                   </View>}
-                  {locationItem.locationAddress && <Text selectable style={s.locationAddress}>{locationItem.locationAddress}</Text>}
+                  {locationItem.coordinatePrecision === "area" && shownPoint && <Text style={s.locationHint}>The marker shows the general area.</Text>}
+                  {locationItem.coordinatePrecision !== "area" && locationItem.locationAddress && <Text selectable style={s.locationAddress}>{locationItem.locationAddress}</Text>}
                   {shownPoint ? <DreamPlacesMap points={[shownPoint]} fitKey={`location-${item.id}`} height={248} /> : !liveLocation.loading && !liveLocation.error ? (
                     <>
                       <Text accessibilityLiveRegion="polite" style={s.locationHint}>{locationExplanation(locationItem)}</Text>
-                      {onLocate && !isFindingLocation(locationItem) && Boolean(item.placeName) &&
+                      {onLocate && canFindLocation(locationItem) &&
                         <View style={s.actions}><WWButton
                           label="Retry location"
                           secondary disabled={busy} onPress={() => void run(() => onLocate(item.id), false)} /></View>}

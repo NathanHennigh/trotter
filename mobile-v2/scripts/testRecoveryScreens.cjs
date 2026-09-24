@@ -33,8 +33,8 @@ function screen(file, exportName, overrides = {}) {
     './DreamPlacesMap': { DreamPlacesMap: 'DreamPlacesMap' }, './DreamPhoto': { DreamPhoto: 'DreamPhoto' },
     './useLiveDreamLocation': { useLiveDreamLocation: () => ({}) },
     './countryRegion': { countryRegion: () => undefined },
-    './dreamPresentation': { categoryLabel: x => x, exactMapPoint: () => undefined, safeWebUrl: x => x },
-    './locationPresentation': { isFindingLocation: item => ['queued','running'].includes(item.locationStatus), locationExplanation: item => item.locationStatus === 'needs_review' ? 'Which location is the one you saved?' : 'Looking for the address.' },
+    './dreamPresentation': { categoryLabel: x => x, dreamLocationType: item => item.coordinatePrecision === 'area' ? 'Area' : item.category, exactMapPoint: () => undefined, safeWebUrl: x => x },
+    './locationPresentation': { canFindLocation: item => Boolean(item.placeName || item.city || item.regionOrNeighborhood) && !['queued','running'].includes(item.locationStatus), isFindingLocation: item => ['queued','running'].includes(item.locationStatus), locationExplanation: item => item.locationStatus === 'needs_review' ? 'Which location is the one you saved?' : 'Looking for the address.' },
     '../displayTextFit': { fitDisplayFont: (_text, size) => size },
     '../../../utils/mobileLayout': { getMobileVisualWidth: width => width },
   };

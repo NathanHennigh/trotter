@@ -76,7 +76,8 @@ def cached_coordinates(row, *, now=None):
         payload = json.loads(encoded or "null")
         if not isinstance(payload, dict) or aware(datetime.fromisoformat(payload["expires_at"])) <= now:
             return None, None, None
-        return checked_coordinates(payload.get("latitude"), payload.get("longitude"))
+        precision = "area" if getattr(row, "coordinate_precision", None) == "area" else "place"
+        return checked_coordinates(payload.get("latitude"), payload.get("longitude"), precision)
     except Exception:
         # Redis failures, missing/expired keys and malformed values never leak old pins.
         return None, None, None
@@ -116,19 +117,24 @@ def apply_google_result(db, row, result, now):
     identity.refresh_after = None
     if result["status"] == "resolved" and len(candidates) == 1:
         candidate = candidates[0]
+        precision = candidate.get("precision", "place")
+        if precision not in {"place", "area"}:
+            raise ValueError("Invalid location precision")
         if identity.confirmed_place_id and candidate["id"] != identity.confirmed_place_id:
             raise ValueError("A confirmed place cannot be rebound")
         identity.selected_place_id = candidate["id"]
         identity.coordinates_expires_at = cache_coordinates(row, candidate, now)
+        row.coordinate_precision = precision
         identity.refresh_after = now + timedelta(minutes=5)
         if identity.confirmed_place_id:
             row.status = "manual"
             row.message = "Location confirmed by you."
         else:
             row.status = "resolved"
-            row.message = "Location found on Google Maps."
+            row.message = "Area found on Google Maps." if precision == "area" else "Location found on Google Maps."
     elif not identity.confirmed_place_id:
         identity.selected_place_id = None
+        row.coordinate_precision = None
 
 
 def google_public_fields(row):
@@ -230,12 +236,13 @@ async def live_google_details(db, item_id, user_id, *, fetcher=None):
     expected = (fingerprint(item), pin_fingerprint(item), row.generation if row else None)
     status = row.status if row else None
     selected = row.google_identity.selected_place_id if row and row.google_identity else None
+    area = bool(row and row.coordinate_precision == "area")
     db.rollback()  # No provider call while holding database locks or a transaction.
     candidates, message = [], None
     try:
         async with asyncio.timeout(18):
             for identity in ids:
-                candidate = await (fetcher or fetch_google_place_details)(identity)
+                candidate = await fetcher(identity) if fetcher else await fetch_google_place_details(identity, allow_area=area)
                 if candidate is not None:
                     candidate = candidate.model_dump() if hasattr(candidate, "model_dump") else candidate
                     if candidate.get("id") == identity:
@@ -250,6 +257,7 @@ async def live_google_details(db, item_id, user_id, *, fetcher=None):
     address = next((candidate.get("address") for candidate in candidates if candidate["id"] == selected), None)
     attributions = [entry for candidate in candidates for entry in candidate.get("attributions", [])]
     return {"location_provider": PROVIDER, "location_place_id": selected, "location_status": status,
+            "coordinate_precision": (row.coordinate_precision or "place") if row and selected else None,
             "location_address": address, "location_candidates": candidates,
             "location_expires_at": utcnow() + timedelta(seconds=CACHE_SECONDS) if candidates else None,
             "location_attributions": attributions, "location_message": message}
@@ -262,8 +270,9 @@ async def confirm_google_candidate(db, item_id, user_id, candidate_id, *, fetche
     if not row or row.status != "needs_review" or candidate_id not in ids:
         raise ValueError("This location choice is no longer current.")
     expected = (row.generation, fingerprint(item), pin_fingerprint(item))
+    area = row.coordinate_precision == "area"
     db.rollback()
-    candidate = await (fetcher or fetch_google_place_details)(candidate_id)
+    candidate = await fetcher(candidate_id) if fetcher else await fetch_google_place_details(candidate_id, allow_area=area)
     if candidate is None:
         raise ValueError("This location is no longer available. Find the place again.")
     candidate = candidate.model_dump() if hasattr(candidate, "model_dump") else candidate

@@ -376,6 +376,7 @@ class DreamLocation(Base):
     lease_expires_at = Column(DateTime(timezone=True), nullable=True)
     last_dispatched_at = Column(DateTime(timezone=True), nullable=True)
     provider = Column(String(32), nullable=True)
+    coordinate_precision = Column(String(16), nullable=True)
     address = Column(Text, nullable=True)
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)

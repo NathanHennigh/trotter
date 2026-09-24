@@ -67,6 +67,39 @@ test('invalid geometry never becomes a pin and category clusters preserve every 
   assert(groups.some(group => group.points.length > 1));
   assert.equal(model.cleanMapPoints([p('a', 0, 0), p('a', 2, 3)]).length, 1);
 });
+
+test('town, lake and region markers frame an area without changing exact venue framing or inventing boundaries', () => {
+  const venue = p('venue', 38.7, -9.1);
+  const area = p('town', 38.7, -9.1, { area: true });
+  const street = model.placesRegion([venue]);
+  const broad = model.placesRegion([area]);
+  assert(street.longitudeDelta < .02);
+  assert(broad.latitudeDelta >= .18 && broad.longitudeDelta > .18);
+  const selected = model.focusPlaceRegion(area, street);
+  assert(selected.latitudeDelta >= broad.latitudeDelta && selected.longitudeDelta >= broad.longitudeDelta);
+  const alreadyWide = { ...broad, latitudeDelta: 4, longitudeDelta: 5 };
+  assert.equal(model.focusPlaceRegion(area, alreadyWide).longitudeDelta, 5, 'Selecting an area preserves a wider user camera');
+  assert.equal(model.focusPlaceRegion(venue, street).longitudeDelta, street.longitudeDelta);
+  const crossing = model.placesRegion([p('island', -17.8, 179.99, { area: true })]);
+  assert(crossing.longitudeDelta < 2 && Math.abs(crossing.longitude) > 175);
+});
+
+test('area precision survives list and live detail mapping and opens the Google area ID instead of its centroid', async () => {
+  const h = service();
+  const item = h.api.mapItem({ id: 9, dream_id: 1, source_platform: 'instagram', source_url: 'https://instagram.com/reel/synthetic',
+    category: 'unknown', region_or_neighborhood: 'Lake Atitlán', country: 'Guatemala', summary: '', needs_review: false,
+    status: 'parsed', created_at: '2026-01-01', location_provider: 'google_places', latitude: 14.7, longitude: -91.2,
+    coordinate_precision: 'area', location_place_id: 'synthetic-lake-id', location_expires_at: '2099-01-01' });
+  const point = presentation.exactMapPoint(item);
+  assert.equal(point.area, true); assert.equal(point.label, 'Lake Atitlán'); assert.equal(presentation.dreamLocationType(item), 'Area');
+  const link = new URL(model.googleMapUrl([point]));
+  assert.equal(link.searchParams.get('query_place_id'), 'synthetic-lake-id'); assert.equal(link.searchParams.get('query'), 'Lake Atitlán');
+  h.respond(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ coordinate_precision: 'area', location_provider: 'google_places', location_candidates: [] }) }));
+  assert.equal((await h.api.fetchDreamLocationDetails('9')).coordinatePrecision, 'area');
+  h.respond(async () => ({ ok: true, status: 200, text: async () => '{}' }));
+  const oldServerDetails = await h.api.fetchDreamLocationDetails('9');
+  assert.equal({ ...item, ...oldServerDetails }.coordinatePrecision, 'area', 'Older detail responses cannot erase known area precision');
+});
 test('country map uses Google and waits for readiness before framing; selection does not repeatedly reset a panned camera', async () => {
   const h = nativeMap(); let tree = h.render(); assert.equal(find(tree, 'MapView').props.provider, 'google'); assert.equal(h.moves.length, 0);
   await flush(); tree = h.ready(); assert.equal(h.moves.length, 1);

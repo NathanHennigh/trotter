@@ -108,10 +108,23 @@ def test_singleton_uses_ids_only_then_details_pro_and_verifies_identity(monkeypa
     assert "query_place_id=synthetic-place-1" in result.candidates[0].google_maps_url
 
 
-@pytest.mark.parametrize("input_field", ["place_name", "city", "country"])
+@pytest.mark.parametrize("input_field", ["place_name", "country"])
 @pytest.mark.parametrize("value", [None, "", "---", "???", "Unknown", "N/A"])
 def test_missing_identity_never_queries(input_field, value):
     assert lookup(**{input_field: value}).status == "not_found"
+
+
+@pytest.mark.parametrize("city", [None, "", "---", "???"])
+def test_distinctive_country_only_venue_does_not_require_inventing_a_city(monkeypatch, city):
+    calls, _ = singleton(monkeypatch)
+    result = lookup(city=city)
+    assert result.status == "resolved" and result.candidates[0].precision == "place"
+    assert calls[0]["json"]["textQuery"] == "Casa Toro, Mexico"
+
+
+@pytest.mark.parametrize("city", ["Unknown", "N/A"])
+def test_explicit_unknown_city_is_not_treated_as_verified_context(city):
+    assert lookup(city=city).status == "not_found"
 
 
 @pytest.mark.parametrize(
@@ -822,3 +835,150 @@ def test_overall_deadline_is_retryable_without_response_details(monkeypatch, det
         else:
             lookup()
     assert error.value.__suppress_context__
+
+
+@pytest.mark.parametrize("region", [None, "Oaxaca"])
+def test_country_only_name_cannot_pick_between_same_name_branches(monkeypatch, region):
+    one, two = place(), place(id="synthetic-other-branch", formattedAddress="98 Another Road, Oaxaca, Mexico")
+    responses(monkeypatch, [{"places": [{"id": one["id"]}, {"id": two["id"]}]}, {"places": [one, two]}])
+    result = lookup(city=None, region=region)
+    assert result.status == "not_found" and not result.candidates
+
+
+def test_country_only_repeated_same_id_is_one_place(monkeypatch):
+    one = place()
+    responses(monkeypatch, [{"places": [{"id": one["id"]}, {"id": one["id"]}]}, {"places": [one, one]}])
+    assert lookup(city=None).status == "resolved"
+
+
+def test_country_only_truncated_candidates_are_not_proof_of_unique_branch(monkeypatch):
+    responses(monkeypatch, [{"places": [{"id": "synthetic-place-1"}], "nextPageToken": "more"},
+                           {"places": [place()], "nextPageToken": "more"}])
+    assert lookup(city=None).status == "not_found"
+
+
+@pytest.mark.parametrize("name", ["Starbucks", "Starbucks Reserve", "Hilton Garden Inn", "Momo", "Garden Cafe", "Terrace"])
+def test_country_only_weak_or_chain_names_need_more_context(monkeypatch, name):
+    singleton(monkeypatch, place(displayName={"text": name}))
+    assert lookup(place_name=name, city=None).status == "not_found"
+
+
+@pytest.mark.parametrize("updates", [
+    {"displayName": {"text": "Casa Toro Riverside"}},
+    {"displayName": {"text": "Casa Toro 2"}},
+    {"addressComponents": [component("country", "Spain", "ES")]},
+    {"types": ["hotel"]},
+])
+def test_country_only_still_rejects_wrong_identity_country_and_category(monkeypatch, updates):
+    singleton(monkeypatch, place(**updates))
+    assert lookup(city=None).status == "not_found"
+
+
+@pytest.mark.parametrize("region,expected", [("Oaxaca", "resolved"), ("Other Region", "not_found")])
+def test_country_and_region_venue_lookup_verifies_region(monkeypatch, region, expected):
+    singleton(monkeypatch)
+    assert lookup(city=None, region=region).status == expected
+
+
+def test_city_name_without_city_cannot_become_a_country_only_business_pin(monkeypatch):
+    singleton(monkeypatch, place(displayName={"text": "Oaxaca"}))
+    assert lookup(place_name="Oaxaca", city=None).status == "not_found"
+
+
+def area_place(name="Example Town", kind="locality", **updates):
+    return place(**{
+        "displayName": {"text": name}, "types": [kind, "political"] if kind == "locality" or kind.startswith("administrative_area_") else [kind, "point_of_interest"],
+        "addressComponents": [component("locality", "Example Town"), component("administrative_area_level_1", "Oaxaca"), component("country", "Mexico", "MX")],
+        "businessStatus": "", **updates,
+    })
+
+
+@pytest.mark.parametrize("name,kind,category,city", [
+    ("Example Town", "locality", "town", None),
+    ("Example Town", "locality", "attraction", "Example Town"),
+    ("Mirror Lake", "lake", "lake", None),
+    ("Mirror Lake", "natural_feature", "nature", None),
+    ("Oaxaca", "administrative_area_level_1", "region", None),
+    ("Oaxaca Province", "administrative_area_level_1", "region", None),
+])
+def test_explicit_area_lookup_returns_approximate_precision(monkeypatch, name, kind, category, city):
+    singleton(monkeypatch, area_place(name=name, kind=kind))
+    result = lookup(place_name=name, city=city, category=category, allow_area=True)
+    assert result.status == "resolved"
+    assert result.candidates[0].precision == "area"
+    assert result.candidates[0].id == "synthetic-place-1"
+
+
+@pytest.mark.parametrize("name,kind,category", [
+    ("Example Town", "locality", "town"), ("Mirror Lake", "lake", "nature"), ("Oaxaca", "administrative_area_level_1", "region"),
+])
+def test_area_lookup_does_not_borrow_business_coordinates(monkeypatch, name, kind, category):
+    singleton(monkeypatch, area_place(name=name, kind=kind, types=[kind, "hotel", "lodging", "establishment"]))
+    assert lookup(place_name=name, city=None, category=category, allow_area=True).status == "not_found"
+
+
+@pytest.mark.parametrize("category", ["hotel", "cafe", "restaurant", "bar"])
+def test_venue_request_cannot_be_represented_by_region_center(category):
+    assert lookup(place_name="Oaxaca", city=None, category=category, allow_area=True).status == "not_found"
+
+
+@pytest.mark.parametrize("updates", [
+    {"displayName": {"text": "Example Town Other"}},
+    {"displayName": {"text": "Example Town Hotel"}},
+    {"types": ["hotel", "lodging"]},
+    {"types": ["postal_code"]},
+    {"types": ["route"]},
+    {"types": ["political"]},
+    {"addressComponents": [component("country", "Spain", "ES")]},
+])
+def test_area_lookup_requires_named_area_type_and_country(monkeypatch, updates):
+    singleton(monkeypatch, area_place(**updates))
+    assert lookup(place_name="Example Town", city=None, category="town", allow_area=True).status == "not_found"
+
+
+@pytest.mark.parametrize("updates", [{"city": "Other Town"}, {"region": "Other Region"}])
+def test_area_mode_respects_conflicting_explicit_geography(monkeypatch, updates):
+    singleton(monkeypatch, area_place())
+    options = {"place_name": "Example Town", "city": None, "category": "town", "allow_area": True, **updates}
+    assert lookup(**options).status == "not_found"
+
+
+def test_multiple_same_named_areas_require_more_context(monkeypatch):
+    one, two = area_place(), area_place(id="synthetic-other-town", formattedAddress="Elsewhere, Mexico")
+    responses(monkeypatch, [{"places": [{"id": one["id"]}, {"id": two["id"]}]}, {"places": [one, two]}])
+    assert lookup(place_name="Example Town", city=None, category="town", allow_area=True).status == "not_found"
+
+
+def test_area_search_ignores_nearby_business_and_selects_actual_area(monkeypatch):
+    business = place(id="synthetic-business", displayName={"text": "Mirror Lake Hotel"}, types=["hotel", "lodging"])
+    area = area_place(name="Mirror Lake", kind="lake")
+    responses(monkeypatch, [{"places": [{"id": business["id"]}, {"id": area["id"]}]}, {"places": [business, area]}])
+    result = lookup(place_name="Mirror Lake", city=None, category="lake", allow_area=True)
+    assert result.status == "resolved" and result.candidates[0].id == area["id"]
+
+
+def test_area_details_refresh_is_explicit_and_keeps_same_id(monkeypatch):
+    responses(monkeypatch, [area_place()])
+    candidate = asyncio.run(search.fetch_google_place_details("synthetic-place-1", allow_area=True))
+    assert candidate.precision == "area" and candidate.id == "synthetic-place-1"
+    responses(monkeypatch, [area_place()])
+    assert asyncio.run(search.fetch_google_place_details("synthetic-place-1")) is None
+
+
+def test_existing_precise_natural_feature_details_are_not_silently_relabelled(monkeypatch):
+    responses(monkeypatch, [area_place(name="Example Viewpoint", kind="natural_feature")])
+    candidate = asyncio.run(search.fetch_google_place_details("synthetic-place-1"))
+    assert candidate.precision == "place"
+
+
+def test_area_refresh_cannot_silently_relabel_a_business(monkeypatch):
+    responses(monkeypatch, [place(types=["hotel", "lodging"])])
+    assert asyncio.run(search.fetch_google_place_details("synthetic-place-1", allow_area=True)) is None
+
+
+def test_area_lookup_retains_bounded_source_local_name_fallback(monkeypatch):
+    calls, _ = responses(monkeypatch, [{"places": []}, {"places": [area_place(name="Lago Espejo", kind="lake")]}])
+    result = lookup(place_name="Mirror Lake", city=None, category="lake", allow_area=True,
+                    source_caption="Mirror Lake (Lago Espejo) is in Mexico.")
+    assert result.status == "resolved" and result.candidates[0].precision == "area"
+    assert len(calls) == 2 and calls[-1]["json"]["textQuery"] == "Lago Espejo, Mexico"

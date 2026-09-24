@@ -25,6 +25,7 @@ from .dream_place_aliases import source_place_aliases
 
 from .dream_place_search import (
     RetryableDreamPlaceLookupError,
+    _CHAINS,
     _GENERIC,
     _VENUE_WORDS,
     _country,
@@ -49,6 +50,7 @@ class GoogleCandidate(BaseModel):
     longitude: float = Field(ge=-180, le=180, allow_inf_nan=False)
     google_maps_url: str
     provider: Literal["google_places"] = "google_places"
+    precision: Literal["place", "area"] = "place"
     city: str | None = None
     country: str | None = None
     score: float = Field(default=0, ge=0, le=1, allow_inf_nan=False)
@@ -71,7 +73,7 @@ _DETAIL_FIELDS = (
     "id,displayName,formattedAddress,addressComponents,location,types,"
     "businessStatus,pureServiceAreaBusiness,movedPlaceId,attributions"
 )
-_SEARCH_FIELDS = ",".join("places." + field for field in _DETAIL_FIELDS.split(","))
+_SEARCH_FIELDS = ",".join("places." + field for field in _DETAIL_FIELDS.split(",")) + ",nextPageToken"
 _TOTAL_TIMEOUT = 30
 _LOCAL_TYPES = {"locality", "postal_town", "sublocality", "sublocality_level_1"}
 _NEIGHBORHOOD_TYPES = {"neighborhood", "sublocality", "sublocality_level_1", "sublocality_level_2"}
@@ -84,6 +86,21 @@ _AREA_TYPES = {
     "route",
     "street_address",
 }
+_SUPPORTED_AREA_TYPES = {
+    "country", "locality", "postal_town", "neighborhood", "sublocality",
+    "colloquial_area", "archipelago", "natural_feature", "island", "lake",
+    "river", "mountain_peak", "woods", "nature_preserve", "national_park",
+    "state_park", "park", "beach",
+    *(f"administrative_area_level_{level}" for level in range(1, 8)),
+    *(f"sublocality_level_{level}" for level in range(1, 6)),
+}
+_AREA_AUXILIARY_TYPES = {"political", "geocode", "point_of_interest", "establishment", "tourist_attraction"}
+_AREA_CATEGORIES = {
+    "", "unknown", "area", "destination", "town", "city", "village", "region",
+    "country", "lake", "island", "mountain", "nature", "attraction", "activity",
+    "park", "beach",
+}
+_AREA_GENERIC_NAMES = {"area", "destination", "town", "city", "village", "region", "country", "lake", "river", "island", "mountain", "province", "district", "nature"}
 _AUXILIARY_TYPES = {
     "parking",
     "public_bathroom",
@@ -241,7 +258,7 @@ def _components(values: object) -> dict[str, set[str]]:
     return result
 
 
-def _candidate(place: object, *, expected_id: str | None = None) -> GoogleCandidate | None:
+def _candidate(place: object, *, expected_id: str | None = None, allow_area=False) -> GoogleCandidate | None:
     if not isinstance(place, dict):
         return None
     identity = _identifier(place.get("id"))
@@ -260,12 +277,17 @@ def _candidate(place: object, *, expected_id: str | None = None) -> GoogleCandid
     ):
         return None
     types = {kind for kind in types if isinstance(kind, str)}
-    if (
+    area = bool(types & _SUPPORTED_AREA_TYPES) and not types - (_SUPPORTED_AREA_TYPES | _AREA_AUXILIARY_TYPES)
+    if allow_area and area:
+        precision = "area"
+    elif (
         not types
         or types & (_AREA_TYPES | _AUXILIARY_TYPES)
         or any(kind.startswith("administrative_area_level_") for kind in types)
     ):
         return None
+    else:
+        precision = "place"
     # A named premise/address is not sufficient evidence of a visitable POI.
     meaningful = types - {
         "establishment",
@@ -330,6 +352,7 @@ def _candidate(place: object, *, expected_id: str | None = None) -> GoogleCandid
             None,
         ),
         country=sorted(countries, key=lambda text: (-len(text), text))[0],
+        precision=precision,
         attributions=attributions,
     )
     candidate._types, candidate._components, candidate._business_status = types, components, status
@@ -517,6 +540,56 @@ def _same_transport_brand(wanted: str, actual: str, types: set[str]) -> bool:
     return left == right and len(brand) >= 2 and len("".join(brand)) >= 8
 
 
+def _verified_region(region: str, components: dict[str, set[str]], country: str) -> bool:
+    wanted = _google_locality(region, country)
+    return bool(wanted and any(
+        wanted == _google_locality(value, country) or _same_admin(wanted, _google_locality(value, country))
+        for kind, values in components.items()
+        if kind in _LOCAL_TYPES | _NEIGHBORHOOD_TYPES or kind.startswith("administrative_area_level_")
+        for value in values
+    ))
+
+
+def _country_only_identity(name: str, actual: str) -> bool:
+    """Without a city, neither fuzzy brands nor a lone chain result is enough."""
+    wanted = _normal(name)
+    if any(wanted == chain or wanted.startswith(chain + " ") for chain in _CHAINS):
+        return False
+    words = _brand_words(name)
+    distinctive = (len(words) >= 2 and len("".join(words)) >= 8
+                   or len(words) == 1 and len(wanted.split()) == 1 and len(words[0]) >= 6
+                   and words[0] not in _GENERIC | _AREA_GENERIC_NAMES | {"rooftop", "terrace", "lounge", "garden"})
+    return bool(distinctive and wanted == _normal(actual))
+
+
+def _match_area(candidate: GoogleCandidate, name: str, city: str, country: str, region: str, category: str):
+    """A named area is its own result, never the location of a nearby business."""
+    if candidate.precision != "area" or _normal(category) not in _AREA_CATEGORIES:
+        return None
+    components = candidate._components
+    if _country(country) not in {_country(value) for value in components.get("country", set())}:
+        return None
+    wanted, actual = _google_locality(name, country), _google_locality(candidate.name, country)
+    if not wanted or re.findall(r"\d+", wanted) != re.findall(r"\d+", actual):
+        return None
+    admin_area = any(kind.startswith("administrative_area_level_") for kind in candidate._types)
+    if wanted != actual and not (admin_area and _same_admin(wanted, actual)):
+        return None
+    kind = _normal(category)
+    if kind in {"city", "town", "village"} and not candidate._types & {"locality", "postal_town", "sublocality"}:
+        return None
+    if kind == "region" and not (admin_area or candidate._types & {"colloquial_area", "natural_feature"}):
+        return None
+    if kind == "lake" and not candidate._types & {"lake", "natural_feature"}:
+        return None
+    if city and _google_locality(city, country) not in {wanted, actual} and not _verified_region(city, components, country):
+        return None
+    if region and not _verified_region(region, components, country):
+        return None
+    candidate.score = 1.0
+    return candidate
+
+
 def _match(
     candidate: GoogleCandidate, name: str, city: str, country: str, region: str, category: str,
     *, source_alias=False,
@@ -524,6 +597,8 @@ def _match(
     components = candidate._components
     countries = {_country(value) for value in components.get("country", set())} - {""}
     if not _country(country) or _country(country) not in countries:
+        return None
+    if candidate.precision != "place":
         return None
     # Branch numbers are identity evidence on every matching path, including a
     # high whole-name score that bypasses the transliteration comparison.
@@ -545,6 +620,15 @@ def _match(
     }
     administrative = any(_same_admin(wanted_city, _google_locality(value, country)) for value in admin_values)
     allowed, category_exact = _category_match(category, candidate._types)
+    if not city:
+        if not allowed or not _country_only_identity(name, candidate.name):
+            return None
+        if _verified_region(name, components, country):
+            return None
+        if region and not _verified_region(region, components, country):
+            return None
+        candidate.score = 1.0
+        return candidate
     geography_verified = city_exact or administrative
     brand_score = max(_brand_similarity(name, candidate.name),
                       1.0 if (_described_single_brand(name, candidate.name, city, country)
@@ -581,7 +665,7 @@ def _match(
     return candidate
 
 
-async def _details(client, key: str, place_id: str) -> GoogleCandidate | None:
+async def _details(client, key: str, place_id: str, *, allow_area=False) -> GoogleCandidate | None:
     payload = await _request(
         client,
         "GET",
@@ -590,11 +674,11 @@ async def _details(client, key: str, place_id: str) -> GoogleCandidate | None:
         _DETAIL_FIELDS,
         allow_missing=True,
     )
-    return _candidate(payload, expected_id=place_id) if payload is not None else None
+    return _candidate(payload, expected_id=place_id, allow_area=allow_area) if payload is not None else None
 
 
-async def fetch_google_place_details(place_id: str) -> GoogleCandidate | None:
-    """Fresh same-ID POI for display/confirmation; never follows a moved place."""
+async def fetch_google_place_details(place_id: str, *, allow_area=False) -> GoogleCandidate | None:
+    """Fresh same-ID place, or same-ID area when explicitly refreshing an area."""
     identity = _identifier(place_id)
     if not identity:
         return None
@@ -604,7 +688,10 @@ async def fetch_google_place_details(place_id: str) -> GoogleCandidate | None:
             async with httpx.AsyncClient(
                 timeout=12, follow_redirects=False, trust_env=False
             ) as client:
-                return await _details(client, key, identity)
+                candidate = await _details(client, key, identity, allow_area=allow_area)
+                if allow_area and candidate and candidate.precision != "area":
+                    return None
+                return candidate
     except TimeoutError:
         raise RetryableDreamPlaceLookupError(
             "Google place lookup is temporarily unavailable."
@@ -619,8 +706,9 @@ async def search_google_dream_place(
     category: str | None = None,
     *,
     source_caption: str | None = None,
+    allow_area: bool = False,
 ) -> GoogleSearchResult:
-    """Use Google's first compatible result, without a user-approval step.
+    """Resolve a named venue, or explicitly request a named area with allow_area.
 
     Google ranks its text results for the complete name and location query. Keep
     that order after rejecting mismatched countries, cities, names and venue
@@ -628,14 +716,19 @@ async def search_google_dream_place(
     At most two ordinary provider requests are made, including fresh details.
     If needed, up to two extra searches use local names explicitly attached to
     this place in the original caption. All attempts share one timeout budget.
+    Country-only venues require an exact distinctive name and one unambiguous
+    result. Area mode returns only verified named areas; it cannot substitute a
+    region's center for a hotel's location.
     """
     name, city, country, region, category = map(
         _text, (place_name, city, country, region, category)
     )
     if (
-        any(not _normal(value) for value in (name, city, country))
+        any(not _normal(value) for value in (name, country))
         or _normal(name) in _GENERIC
-        or _normal(name) in {_normal(city), _normal(country)}
+        or allow_area and _normal(name) in _AREA_GENERIC_NAMES
+        or not allow_area and _normal(name) in {_normal(city), _normal(country)}
+        or allow_area and _normal(category) not in _AREA_CATEGORIES
         or any(
             _normal(value) in {"unknown", "not specified", "n a", "anywhere", "worldwide"}
             for value in (city, country)
@@ -643,7 +736,7 @@ async def search_google_dream_place(
     ):
         return GoogleSearchResult(
             status="not_found",
-            message="Add a specific place name, city and country to find its location.",
+            message="Add a specific place name and country to find its location.",
         )
     if any(
         len(value) > 300 or any(ord(char) < 32 for char in value)
@@ -653,6 +746,8 @@ async def search_google_dream_place(
             status="not_found",
             message="Check the place name and location before searching again.",
         )
+    if not _normal(city):
+        city = ""
     query = {
         "textQuery": ", ".join(value for value in (name, region, city, country) if value),
         "pageSize": 5,
@@ -660,6 +755,8 @@ async def search_google_dream_place(
     }
     matches = []
     singleton = False
+    truncated = False
+    matcher = _match_area if allow_area else _match
     try:
         key = _key()
         async with asyncio.timeout(_TOTAL_TIMEOUT):
@@ -670,9 +767,10 @@ async def search_google_dream_place(
                     client, "POST", _SEARCH_URL, key, "places.id,nextPageToken", body=query
                 )
                 ids = _places(initial)
+                truncated = bool(initial.get("nextPageToken")) or len(ids) > 5
                 singleton = len(ids) == 1 and not initial.get("nextPageToken")
                 if singleton:
-                    candidate = await _details(client, key, ids[0]["id"])
+                    candidate = await _details(client, key, ids[0]["id"], allow_area=allow_area)
                     candidates = [candidate] if candidate else []
                 elif ids:
                     full = await _request(
@@ -681,27 +779,32 @@ async def search_google_dream_place(
                     candidates = [
                         candidate
                         for place in _places(full)[:5]
-                        if (candidate := _candidate(place)) is not None
+                        if (candidate := _candidate(place, allow_area=allow_area)) is not None
                     ]
+                    truncated = truncated or bool(full.get("nextPageToken")) or len(_places(full)) > 5
                 else:
                     candidates = []
                 for candidate in candidates:
-                    match = _match(candidate, name, city, country, region, category)
+                    match = matcher(candidate, name, city, country, region, category)
                     if match:
                         matches.append(match)
                 if not matches:
                     for alias in source_place_aliases(name, source_caption):
-                        if (_normal(alias) in _GENERIC or _google_locality(alias, country) == _google_locality(city, country)
-                                or _country(alias) == _country(country)):
+                        if (_normal(alias) in _GENERIC
+                                or not allow_area and (_google_locality(alias, country) == _google_locality(city, country)
+                                                       or _country(alias) == _country(country))):
                             continue
                         alias_query = {**query, "textQuery": ", ".join(value for value in (alias, region, city, country) if value)}
                         page = await _request(client, "POST", _SEARCH_URL, key, _SEARCH_FIELDS, body=alias_query)
+                        alias_truncated = bool(page.get("nextPageToken")) or len(_places(page)) > 5
                         for raw in _places(page)[:5]:
-                            candidate = _candidate(raw)
-                            match = candidate and _match(candidate, alias, city, country, region, category, source_alias=True)
+                            candidate = _candidate(raw, allow_area=allow_area)
+                            match = candidate and matcher(candidate, alias, city, country, region, category,
+                                                          **({} if allow_area else {"source_alias": True}))
                             if match:
                                 matches.append(match)
                         if matches:
+                            truncated = alias_truncated
                             break
     except GooglePlacesBlockedError:
         return GoogleSearchResult(
@@ -716,6 +819,9 @@ async def search_google_dream_place(
         return GoogleSearchResult(
             status="not_found", message="No reliable Google place match was found."
         )
+    matches = list({candidate.id: candidate for candidate in matches}.values())
+    if (not city or allow_area) and (len(matches) != 1 or truncated):
+        return GoogleSearchResult(status="not_found", message="More location detail is needed to distinguish these places.")
     return GoogleSearchResult(
         status="resolved",
         candidates=[matches[0]],

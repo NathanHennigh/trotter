@@ -88,6 +88,22 @@ def test_lookup_and_duplicate_delivery_preserve_all_original_rows(sessions):
         assert db.query(DreamLocation).count() == 1
 
 
+def test_caption_context_change_during_lookup_supersedes_and_requeues_without_changing_saved_fields(sessions):
+    add_item(sessions)
+    job_id,_=enqueue(sessions)
+    def edit_caption():
+        with sessions() as db:
+            db.get(DreamItem,1).caption="Updated source context with a different neighborhood"
+            db.commit()
+    assert run_job(sessions,job_id,callback=edit_caption) == "superseded"
+    with sessions() as db:
+        item=db.get(DreamItem,1)
+        assert item.caption == "Updated source context with a different neighborhood"
+        assert item.location.status == "queued" and item.location.generation == 2
+        assert item.location.lease_token is None
+        assert location_coordinates(item) == (None,None,None)
+
+
 def test_backfill_covers_false_legacy_flag_and_preserves_manual_and_unnamed_saves(sessions):
     add_item(sessions)
     add_item(sessions, item_id=2, google_maps_url="https://maps.google.com/?q=48.85,2.35")
@@ -228,7 +244,8 @@ def test_google_worker_receives_only_retained_caption_alias_evidence(sessions, m
     add_item(sessions, caption="Garden Cafe (Café Jardín)")
     job_id, _ = enqueue(sessions)
     calls = []
-    async def google(*inputs, source_caption=None):
+    async def google(*inputs, source_caption=None, allow_area=False):
+        assert allow_area is False
         calls.append((inputs, source_caption))
         return {"status": "not_found", "provider": "google_places", "candidates": []}
     monkeypatch.setattr(google_dream_place_search, "search_google_dream_place", google)

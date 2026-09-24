@@ -33,7 +33,8 @@ import {
   PlaceSymbol,
 } from "../components/world-window/dreams/DreamPhoto";
 import {
-  categoryLabel,
+  dreamLocationType,
+  dreamPlaceLabel,
   cityNames,
   countryBoards,
   countryKey,
@@ -507,8 +508,8 @@ function CountryPlaces({
                 style={s.mapPreview} onPress={() => onSelect(selectedPlace.id, "view")}>
                 <View style={s.previewPhoto}><DreamPhoto item={selectedPlace} compact /></View>
                 <View style={s.placeCopy}>
-                  <Text style={s.placeType}>{categoryLabel(selectedPlace.category)}</Text>
-                  <Text style={[s.previewTitle, { fontSize: previewSize, lineHeight: previewSize * 25 / 21 }]}>{selectedPlace.placeName || "Saved place"}</Text>
+                  <Text style={s.placeType}>{dreamLocationType(selectedPlace)}</Text>
+                  <Text style={[s.previewTitle, { fontSize: previewSize, lineHeight: previewSize * 25 / 21 }]}>{dreamPlaceLabel(selectedPlace)}</Text>
                   <Text style={s.placeCity}>{selectedPlace.city}</Text>
                   <Text style={s.previewAction}>Details →</Text>
                 </View>
@@ -573,10 +574,10 @@ function CountryPlaces({
         </View>
         <View style={s.placeCopy}>
           <View style={s.placeCategory}>
-            <Text style={s.placeType}>{categoryLabel(item.category)}</Text>
+            <Text style={s.placeType}>{dreamLocationType(item)}</Text>
           </View>
           <Text style={s.placeTitle} numberOfLines={2}>
-            {item.placeName || item.city || "Saved inspiration"}
+            {item.coordinatePrecision === "area" ? dreamPlaceLabel(item) : item.placeName || item.city || "Saved inspiration"}
           </Text>
           <Text style={s.placeCity} numberOfLines={1}>
             {[item.city, item.regionOrNeighborhood]
@@ -618,11 +619,11 @@ function CountryPlaces({
             </Pressable>
             {showOriginal && <Text selectable style={s.placeSummary}>{copy.original}</Text>}
           </View>}
-          {item.locationAddress || item.regionOrNeighborhood ? (
+          {(item.coordinatePrecision !== "area" && item.locationAddress) || item.regionOrNeighborhood ? (
             <View style={s.addressLine}>
               <WWIcon name="pin" size={15} />
               <Text style={s.addressText}>
-                {item.locationAddress || [item.regionOrNeighborhood, item.city]
+                {(item.coordinatePrecision !== "area" && item.locationAddress) || [item.regionOrNeighborhood, item.city]
                   .filter(Boolean)
                   .join(", ")}
               </Text>

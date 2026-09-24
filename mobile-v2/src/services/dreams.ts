@@ -30,6 +30,7 @@ export type DreamLocationCandidate = {
   attributions?: DreamLocationAttribution[];
 };
 export type DreamLocationDetails = {
+  coordinatePrecision?: 'place' | 'area';
   locationProvider?: string;
   locationAddress?: string;
   locationCandidates: DreamLocationCandidate[];
@@ -606,11 +607,13 @@ export async function fetchDreamLocationDetails(id: string, signal?: AbortSignal
   const data = await readJson(response);
   if (!response.ok) throw new Error(readError(data, 'Location details could not load. Your saved place is unchanged.'));
   const value = data as {
+    coordinate_precision?: 'place' | 'area';
     location_provider?: string; location_address?: string; location_candidates?: ApiLocationCandidate[];
     location_attributions?: { display_name: string; uri?: string }[]; location_place_id?: string;
     location_expires_at?: string; location_status?: DreamLocationStatus; location_message?: string;
   };
   return {
+    ...(value.coordinate_precision ? { coordinatePrecision: value.coordinate_precision } : {}),
     locationProvider: value.location_provider, locationAddress: value.location_address || undefined,
     locationCandidates: mapLocationCandidates(value.location_candidates),
     locationAttributions: mapLocationAttributions(value.location_attributions),
