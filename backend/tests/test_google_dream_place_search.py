@@ -1328,3 +1328,102 @@ def test_region_hierarchy_aliases_match_but_missing_levels_are_not_invented(monk
     target = place(addressComponents=[component("administrative_area_level_3", "Cephalonia"), component("country", "Greece", "GR")])
     result, _ = context_lookup(monkeypatch, target=target, region_results={"places": [region]}, country="Greece")
     assert result.status == "resolved"
+
+
+@pytest.mark.parametrize("wanted,actual", [
+    ("Cobalt", "Paralia Cobalt"), ("Cobalt Beach", "Paralia Cobalt"),
+    ("Paralia Cobalt", "Cobalt Beach"), ("Cobalt", "Παραλία Cobalt"),
+])
+def test_greek_beach_type_prefix_translates_without_changing_proper_name(monkeypatch, wanted, actual):
+    singleton(monkeypatch, area_place(name=actual, kind="beach", addressComponents=[component("country", "Greece", "GR")]))
+    result = lookup(place_name=wanted, city=None, country="Greece", category="beach", allow_area=True)
+    assert result.status == "resolved" and result.candidates[0].precision == "area"
+
+
+@pytest.mark.parametrize("wanted,actual,kind,country", [
+    ("Cobalt", "Paralia Cobalt", "beach", "Mexico"),
+    ("Cobalt", "Paralia Cobalt", "locality", "Greece"),
+    ("Cobalt", "Paralia Cobalt", "natural_feature", "Greece"),
+    ("Cobalt", "Paralia Cobalt North", "beach", "Greece"),
+    ("Cobalt", "Paralia Cobalto", "beach", "Greece"),
+    ("Cobalt", "Paralia Cobalt 2", "beach", "Greece"),
+    ("Cobalt", "Paralia Cobalt Hotel", "beach", "Greece"),
+    ("Paralia", "Cobalt", "beach", "Greece"),
+])
+def test_greek_beach_prefix_requires_exact_identity_country_and_independent_type(monkeypatch, wanted, actual, kind, country):
+    singleton(monkeypatch, area_place(name=actual, kind=kind, addressComponents=[component("country", country)]))
+    assert lookup(place_name=wanted, city=None, country=country, category="beach", allow_area=True).status == "not_found"
+
+
+def test_greek_beach_prefix_cannot_rebind_an_ordinary_business_lookup(monkeypatch):
+    singleton(monkeypatch, place(displayName={"text": "Paralia Cobalt"}, types=["cafe"], addressComponents=[component("country", "Greece", "GR")]))
+    assert lookup(place_name="Cobalt", city=None, country="Greece", category="cafe").status == "not_found"
+
+
+@pytest.mark.parametrize("wanted,actual,kind", [
+    ("Volcan Santa Ana", "Santa Ana Volcano", "natural_feature"),
+    ("Volcán Santa Ana", "Santa Ana Volcano", "volcano"),
+    ("Santa Ana Volcano", "Volcan Santa Ana", "natural_feature"),
+])
+def test_volcano_type_word_translates_only_with_exact_proper_identity(monkeypatch, wanted, actual, kind):
+    singleton(monkeypatch, area_place(name=actual, kind=kind))
+    result = lookup(place_name=wanted, city=None, category="nature", allow_area=True)
+    assert result.status == "resolved" and result.candidates[0].precision == "area"
+
+
+@pytest.mark.parametrize("actual,kind", [
+    ("Santa Ana Volcano", "locality"), ("Santa Ana Volcano", "tourist_attraction"),
+    ("Santa Ana Viewpoint", "natural_feature"), ("Santa Ana Volcano Hotel", "natural_feature"),
+    ("Santa Ana North Volcano", "natural_feature"), ("Santa Ana 2 Volcano", "natural_feature"),
+    ("Santa Anna Volcano", "natural_feature"),
+])
+def test_volcano_type_word_preserves_spelling_branch_and_independent_natural_type(monkeypatch, actual, kind):
+    singleton(monkeypatch, area_place(name=actual, kind=kind))
+    assert lookup(place_name="Volcan Santa Ana", city=None, category="nature", allow_area=True).status == "not_found"
+
+
+@pytest.mark.parametrize("name", ["Cafe Albania", "Albania Cafe", "Albania Coffee Shop"])
+def test_exact_distinctive_brand_with_generic_venue_words_is_valid_country_only(monkeypatch, name):
+    calls, _ = singleton(monkeypatch, place(displayName={"text": name}))
+    assert lookup(place_name=name, city=None).status == "resolved" and len(calls) == 2
+
+
+@pytest.mark.parametrize("name", [
+    "Cafe Rooftop", "Cafe Garden", "Cafe Terrace", "Cafe Momo", "Cafe Starbucks",
+    "Starbucks Cafe", "Cafe Costa Coffee", "Cafe Blue Bottle Coffee", "Hotel Hilton",
+])
+def test_generic_venue_words_never_make_a_weak_or_chain_brand_distinctive(monkeypatch, name):
+    singleton(monkeypatch, place(displayName={"text": name}))
+    assert lookup(place_name=name, city=None).status == "not_found"
+
+
+@pytest.mark.parametrize("category", [None, "unknown", "hotel"])
+def test_country_only_single_brand_with_venue_label_requires_compatible_known_category(monkeypatch, category):
+    singleton(monkeypatch, place(displayName={"text": "Cafe Albania"}))
+    assert lookup(place_name="Cafe Albania", city=None, category=category).status == "not_found"
+
+
+@pytest.mark.parametrize("actual", ["Albania", "Cafe Albania Riverside", "Cafe Albania 2", "Cafe Albenia"])
+def test_country_only_brand_plus_venue_words_still_requires_entire_name_exact(monkeypatch, actual):
+    singleton(monkeypatch, place(displayName={"text": actual}))
+    assert lookup(place_name="Cafe Albania", city=None).status == "not_found"
+
+
+def test_country_only_brand_plus_venue_words_cannot_choose_between_city_branches(monkeypatch):
+    first = place(displayName={"text": "Cafe Albania"})
+    second = place(id="second-city-branch", displayName={"text": "Cafe Albania"}, addressComponents=[
+        component("locality", "Another City"), component("country", "Mexico", "MX"),
+    ])
+    responses(monkeypatch, [{"places": [{"id": first["id"]}, {"id": second["id"]}]}, {"places": [first, second]}])
+    assert lookup(place_name="Cafe Albania", city=None).status == "not_found"
+
+
+def test_country_only_brand_plus_venue_words_does_not_ignore_incomplete_results(monkeypatch):
+    target = place(displayName={"text": "Cafe Albania"})
+    responses(monkeypatch, [{"places": [{"id": target["id"]}], "nextPageToken": "more"}, {"places": [target]}])
+    assert lookup(place_name="Cafe Albania", city=None).status == "not_found"
+
+
+def test_brand_plus_venue_words_does_not_override_an_explicit_wrong_city(monkeypatch):
+    singleton(monkeypatch, place(displayName={"text": "Cafe Albania"}))
+    assert lookup(place_name="Cafe Albania", city="Another City").status == "not_found"

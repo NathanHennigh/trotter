@@ -473,6 +473,51 @@ def test_low_information_rental_sources_remain_unpinned(name, city, category, ca
     assert not research.source_area_intent(place_name=name, city=city, category=category, source_caption=caption)
 
 
+def test_exact_account_handle_supports_spaced_name_context_but_not_fuzzy_brand():
+    fields, _, dropped, _ = research.source_search_context(place_name="Eden Boutique Hotel and Spa", city="Dades Valley",
+        country="Morocco", region_or_neighborhood="Dades Valley", category="hotel",
+        source_caption="Add @edenboutiquehotelandspa in the Dades Valley to your list.")
+    assert fields["city"] is None and fields["region_or_neighborhood"] == "Dades Valley" and dropped == ["city"]
+    fields, *_ = research.source_search_context(place_name="Hotel Genesis", city="Dades Valley", country="Morocco",
+        category="hotel", source_caption="@hotelgenessis is in Dades Valley.")
+    assert fields["city"] == "Dades Valley"
+
+
+def test_direct_town_declaration_repairs_inferred_hotel_category_without_inventing_hotel_pin():
+    caption = "ALTEA – ONE OF THE MOST BEAUTIFUL TOWNS IN SPAIN! Whitewashed houses and beautiful restaurants. Altea, Alicante."
+    assert research.source_area_intent(place_name="Altea", category="hotel", source_caption=caption)
+    assert not research.source_area_intent(place_name="Altea", category="hotel", source_caption="An unnamed hotel! " + caption)
+
+
+@pytest.mark.parametrize("category,caption", [
+    ("restaurant", "This unnamed restaurant in Altea has the best sunset views. Altea - one of the most beautiful towns in Spain!"),
+    ("cafe", "This hidden cafe in Altea is our favorite. Altea is a beautiful town in Spain."),
+    ("unknown", "This secret coffee shop overlooking Altea is lovely. Altea is a charming town in Spain."),
+    ("unknown", "This hidden cafe in Altea is our favorite. Altea is a town in Spain. Explore Altea!"),
+])
+def test_town_declaration_does_not_approximate_unknown_food_business(category, caption):
+    assert not research.source_area_intent(place_name="Altea", category=category, source_caption=caption)
+
+
+@pytest.mark.parametrize("category", ["restaurant", "cafe", "hotel", "unknown"])
+def test_town_guide_with_incidental_plural_restaurants_remains_area(category):
+    caption = "ALTEA – ONE OF THE MOST BEAUTIFUL TOWNS IN SPAIN! Whitewashed houses and some beautiful restaurants. Altea, Alicante."
+    assert research.source_area_intent(place_name="Altea", category=category, source_caption=caption)
+
+
+@pytest.mark.parametrize("name", ["El Tunco", "Volcan Santa Ana", "El Zonte"])
+def test_specific_natural_list_entries_are_areas_among_unrelated_hotels(name):
+    caption = ("🍻 Cadejo Brewery - beer and views! 🌞 Sunsets in El Tunco - the sunsets are amazing. "
+               "🌋 Volcan Santa Ana - a day hike to the tallest volcano in the country! "
+               "🛖 Day pass at Atami Resort - ocean pools. 🌊 Sea caves - both El Zonte and El Tunco have some huge sea caves to explore.")
+    assert research.source_area_intent(place_name=name, category="activity", source_caption=caption)
+
+
+def test_emoji_inside_rental_caption_does_not_crop_lodging_evidence_into_area_pin():
+    caption = "This dreamy lakeside stay 🌅 Lake Atitlan 🌴 with private rooms 🏡 @airbnb"
+    assert not research.source_area_intent(place_name="Lake Atitlan", category="hotel", source_caption=caption)
+
+
 @pytest.mark.parametrize("kwargs", [{"protected": True}, {"manual": True}, {"source_caption": ""},
     {"place_name": "hotel"}, {"timeout_seconds": 0}, {"timeout_seconds": float("nan")},
     {"timeout_seconds": float("inf")}, {"protected_fields": "city"}])

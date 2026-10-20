@@ -155,6 +155,23 @@ def _business_focus(caption):
         caption, re.IGNORECASE))
 
 
+def _lodging_focus(caption):
+    return bool(re.search(r"\b(?:hotels?|airbnb\w*|resorts?|accommodation|cabins?|propert(?:y|ies)|rentals?|"
+                          r"villas?|hideaway|riads?|suites?|rooms?|stays?|lodg(?:e|ing))\b", caption, re.IGNORECASE))
+
+
+def _source_target_mentioned(name, caption):
+    if _positive(name, caption):
+        return True
+    # An account handle may carry the exact same proper name without spaces.
+    # This supports context only, never fuzzy spelling or a different brand.
+    compact = re.sub(r"[^\w]", "", _identity(name))
+    if len(compact) < 8 or len(_identity(name).split()) < 2:
+        return False
+    return any(re.sub(r"[_.]", "", match.group(1)).casefold() == compact and _positive(match.group(0), caption)
+               for match in re.finditer(r"(?<!\w)@([\w.]{3,100})", caption))
+
+
 def _subject_clauses(name, caption):
     return [clause.strip() for clause in re.split(r"[.!?;\n✨•]+", caption)
             if _positive(name, clause)]
@@ -222,6 +239,46 @@ def _explicit_area_evidence(name, caption):
     return None
 
 
+def _unnamed_business_in_target(name, caption):
+    subject = re.escape(_source_text(name))
+    # A town description later in the caption does not identify an unnamed
+    # business in that town. Plural incidental recommendations in an actual
+    # destination guide ("beautiful restaurants") do not imply this focus.
+    business_subject = (r"\b(?:this|our|the|an?|unnamed|hidden|secret)(?:\s+[\w-]+){0,3}\s+"
+                        r"(?:restaurant|cafe|coffee shop|bar|bakery|shop)\b[^.!?;\n]{0,80}"
+                        r"\b(?:in|near|at|overlooking)\s+" + subject + r"(?!\w)")
+    return bool(re.search(business_subject, _source_text(caption, preserve_lines=True)))
+
+
+def _declared_town_evidence(name, caption):
+    if _lodging_focus(caption) or _unnamed_business_in_target(name, caption):
+        return None
+    subject = re.escape(_source_text(name))
+    pattern = (subject + r"\s*(?:[,—–-]\s*|\s+is\s+)(?:one of (?:the )?(?:most )?(?:beautiful |charming |historic )*"
+               r"(?:towns|cities|villages)|(?:a|an) (?:beautiful |charming |historic |small )*(?:town|city|village))\b")
+    return next((clause for clause in _area_clauses(name, caption) if re.search(pattern, _source_text(clause))), None)
+
+
+def _natural_list_evidence(name, caption, category):
+    if category not in AREA_CATEGORIES:
+        return None
+    entries = re.split(r"[\n•\u2600-\u27bf\U0001f300-\U0001faff]+", caption)
+    if len(entries) < 3:
+        return None
+    subject = re.escape(_source_text(name))
+    for entry in entries:
+        if not _positive(name, entry) or _business_focus(entry):
+            continue
+        text = _source_text(entry).strip(" \ufe0f")
+        if re.search(r"^(?:volcan|volcano)\s+", _source_text(name)) and re.match(subject + r"\s*[-—–:]", text):
+            return entry.strip()
+        if re.match(r"sunsets?\s+in\s+" + subject + r"(?!\w)", text):
+            return entry.strip()
+        if re.match(r"sea caves\s*[-—–:]\s*both\s+", text) and re.search(r"\bhave\b.{0,50}\bsea caves\b", text):
+            return entry.strip()
+    return None
+
+
 def _island_context(caption):
     """Read a single explicit island introduction, never comparison hashtags.
 
@@ -259,7 +316,11 @@ def _listed_island_destination(name, caption, category):
 
 
 def _supported_area_evidence(name, caption, category):
-    evidence = _explicit_area_evidence(name, caption) or _listed_island_destination(name, caption, category)
+    declaration = _declared_town_evidence(name, caption)
+    if declaration:
+        return declaration
+    evidence = (_explicit_area_evidence(name, caption) or _listed_island_destination(name, caption, category)
+                or _natural_list_evidence(name, caption, category))
     if not evidence or category in AREA_CATEGORIES:
         return evidence
     # A parser can call regional lodging advice a hotel ("stay up in Plaka,
@@ -297,7 +358,7 @@ def source_search_context(*, source_caption, place_name, city=None, country=None
     values = dict(place_name=place_name, city=city, country=country, region_or_neighborhood=region_or_neighborhood, category=category)
     evidence, dropped = {}, []
     area = source_area_intent(source_caption=caption, **values)
-    if not place_name or not _positive(place_name, caption):
+    if not place_name or not _source_target_mentioned(place_name, caption):
         return values, evidence, dropped, area
     label, section = _target_section(place_name, caption)
     if label and label in {"where to eat", "restaurants", "restaurant", "cafes", "cafe"} and category in {None, "", "unknown", "activity", "attraction"} and not _explicit_area_evidence(place_name, caption):
@@ -362,7 +423,7 @@ def _area_seed(saved, caption):
 
 def _area_supported(saved, quote, caption):
     name = saved["place_name"] or _area_seed(saved, caption)
-    if not name:
+    if not name or _unnamed_business_in_target(name, caption):
         return False
     explicit = _supported_area_evidence(name, caption, saved["category"])
     if (saved["category"] not in AREA_CATEGORIES and not explicit) or not _quote_valid(quote, caption) or not _positive(name, quote):
@@ -412,6 +473,8 @@ def source_area_intent(*, place_name, source_caption, city=None, region_or_neigh
     caption = str(source_caption or "")[:MAX_CAPTION_CHARS]
     saved = dict(place_name=place_name, city=city, region_or_neighborhood=region_or_neighborhood, category=category)
     name = place_name or _area_seed(saved, caption)
+    if name and _unnamed_business_in_target(name, caption):
+        return False
     if name and _supported_area_evidence(name, caption, category):
         return True
     return bool(name and any(_area_supported(saved, clause, caption) for clause in _subject_clauses(name, caption)))

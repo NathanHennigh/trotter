@@ -116,6 +116,8 @@ def test_area_keeps_concrete_region_but_not_cardinal_country_as_parent_locality(
     assert lookup.area_region_constraint("Son La", "Vietnam") == "Son La"
     assert lookup.area_region_constraint("Northern Ireland", "United Kingdom") == "Northern Ireland"
     assert lookup.area_region_constraint("Central Java", "Indonesia") == "Central Java"
+    assert lookup.area_region_constraint("Pacific Coast", "El Salvador") is None
+    assert lookup.area_region_constraint("La Libertad", "El Salvador") == "La Libertad"
 
 
 def test_new_caption_evidence_restarts_unresolved_area_lookup(sessions):

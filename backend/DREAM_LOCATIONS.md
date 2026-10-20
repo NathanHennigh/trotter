@@ -70,6 +70,13 @@ were omitted; deduplicate by source and preserve manual/confirmed/user-edited
 records. Existing resolved pins are not part of recovery. Verify original item
 IDs, confirmed choices, and unrelated trip/flight data after the jobs finish.
 
+Caption parsing rejects truncated JSON. An explicit Venice output-length failure
+raises only the existing fallback request's output ceiling to 6,000 tokens;
+ordinary requests retain their configured budget, and timeouts/request counts do
+not increase. Broad guides spanning multiple destinations remain one inspiration
+save with no invented venue or singular geography. A mixed-country guide must not
+be represented by one arbitrary country or pin.
+
 ## Offline verification
 
 Run with `DATABASE_URL=sqlite:///:memory:`, empty provider keys, dotenv disabled, and network blocked. Allow only Windows asyncio's internal socketpair if testing on Windows. From the repository root:

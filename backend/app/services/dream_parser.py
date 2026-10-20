@@ -23,8 +23,9 @@ DEFAULT_OLLAMA_FALLBACK_MODEL = "qwen3.5:27b"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_ATTEMPTS = 2
 DEFAULT_MAX_COMPLETION_TOKENS = 2400
+TRUNCATION_FALLBACK_COMPLETION_TOKENS = 6000
 DEFAULT_MAX_CAPTION_CHARS = 20_000
-PROMPT_VERSION = "dream-places-v3"
+PROMPT_VERSION = "dream-places-v4"
 
 TRANSIENT_HTTP_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
 
@@ -58,7 +59,8 @@ Extraction rules:
 - Preserve proper names as written, apart from obvious whitespace cleanup.
 - A named stay listed on Airbnb is category hotel, not activity. Airbnb Experiences are activities. Generic descriptions such as "deluxe room with view" do not establish a property name or destination.
 - A city, country, region, neighborhood, or broad destination is not a place_name.
-- If the source contains only a broad destination, return one unknown item with place_name null.
+- If the source contains only broad destinations, return exactly one unknown inspiration item with place_name null, not one item per destination.
+- A broad-destination-only guide covering multiple cities or regions must leave singular city and region_or_neighborhood null. If it covers multiple countries, country must also be null. Never choose one list entry to represent the entire guide. Summarize the guide's actual scope without inventing a venue or map pin.
 - If no exact place can be supported, set needs_review true and confidence to 0.65 or lower.
 - If place_name is null, google_maps_search_query must be null and needs_google_places_lookup false.
 - If an exact place is present, build google_maps_search_query from place, city, and country when known.
@@ -147,6 +149,10 @@ class DreamParserError(RuntimeError):
 
 class DreamParserConfigurationError(DreamParserError):
     pass
+
+
+class DreamParserTruncatedError(DreamParserError):
+    """The provider explicitly exhausted its output budget; partial data is unusable."""
 
 
 def _extract_json_object(content: str) -> dict[str, Any]:
@@ -436,7 +442,9 @@ def _chat_message_content(body: dict[str, Any], provider: str) -> tuple[str, dic
 
     choice = choices[0]
     finish_reason = choice.get("finish_reason")
-    if finish_reason in {"length", "content_filter"}:
+    if finish_reason == "length":
+        raise DreamParserTruncatedError(f"{provider} parser stopped with finish reason: length")
+    if finish_reason == "content_filter":
         raise DreamParserError(f"{provider} parser stopped with finish reason: {finish_reason}")
 
     message = choice.get("message")
@@ -514,6 +522,7 @@ def parse_caption_with_venice(
     api_key: Optional[str] = None,
     timeout_seconds: Optional[float] = None,
     max_attempts: Optional[int] = None,
+    max_completion_tokens: Optional[int] = None,
 ) -> DreamParseResponse:
     """Parse a caption through Venice using a strict response schema."""
     clean_caption = caption.strip()
@@ -538,9 +547,13 @@ def parse_caption_with_venice(
     if max_attempts is not None and max_attempts <= 0:
         raise DreamParserConfigurationError("max_attempts must be greater than zero")
     attempts = max_attempts or _positive_int_env("DREAM_AI_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS)
-    max_completion_tokens = _positive_int_env(
-        "DREAM_AI_MAX_COMPLETION_TOKENS", DEFAULT_MAX_COMPLETION_TOKENS
-    )
+    if max_completion_tokens is None:
+        max_completion_tokens = _positive_int_env(
+            "DREAM_AI_MAX_COMPLETION_TOKENS", DEFAULT_MAX_COMPLETION_TOKENS
+        )
+    elif (not isinstance(max_completion_tokens, int) or isinstance(max_completion_tokens, bool)
+          or not 0 < max_completion_tokens <= TRUNCATION_FALLBACK_COMPLETION_TOKENS):
+        raise DreamParserConfigurationError("The completion token override must be between 1 and 6000")
 
     source_payload = {"source_url": source_url, "caption": clean_caption}
     payload = {
@@ -733,6 +746,7 @@ def parse_caption(
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
     timeout_seconds: Optional[float] = None,
+    max_completion_tokens: Optional[int] = None,
 ) -> DreamParseResponse:
     """Parse a caption with the configured provider."""
     selected_provider = _configured_provider(provider)
@@ -744,6 +758,7 @@ def parse_caption(
             base_url=base_url,
             api_key=api_key,
             timeout_seconds=timeout_seconds,
+            **({"max_completion_tokens": max_completion_tokens} if max_completion_tokens is not None else {}),
         )
     return parse_caption_with_ollama(
         caption, source_url, model=model, base_url=base_url, timeout_seconds=timeout_seconds
@@ -960,6 +975,16 @@ def parse_caption_with_fallback_model(
     except DreamParserError as primary_error:
         if not fallback_enabled or selected_fallback == selected_primary:
             raise
+        # A larger model with the same exhausted output ceiling repeats the
+        # failure. Reuse the existing fallback request, increasing only its
+        # ceiling after an explicit provider length signal. Ordinary errors,
+        # weak results, configured larger budgets and timeout limits stay as-is.
+        completion_override = {}
+        truncated = isinstance(primary_error, DreamParserTruncatedError)
+        if truncated and selected_provider == "venice":
+            configured_limit = _positive_int_env("DREAM_AI_MAX_COMPLETION_TOKENS", DEFAULT_MAX_COMPLETION_TOKENS)
+            if configured_limit < TRUNCATION_FALLBACK_COMPLETION_TOKENS:
+                completion_override["max_completion_tokens"] = TRUNCATION_FALLBACK_COMPLETION_TOKENS
         try:
             fallback = parse_caption(
                 caption,
@@ -969,12 +994,14 @@ def parse_caption_with_fallback_model(
                 base_url=base_url,
                 api_key=api_key,
                 timeout_seconds=timeout_seconds,
+                **completion_override,
             )
         except DreamParserError as fallback_error:
             raise DreamParserError(
                 f"Primary Dreams parser failed ({primary_error}); fallback failed ({fallback_error})"
             ) from fallback_error
-        return complete(_annotate_fallback(fallback, primary_model=selected_primary, reason="primary_error"))
+        return complete(_annotate_fallback(fallback, primary_model=selected_primary,
+                                          reason="primary_output_limit" if truncated else "primary_error"))
 
     if (
         not fallback_enabled

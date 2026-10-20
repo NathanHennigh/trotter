@@ -91,7 +91,7 @@ _AREA_TYPES = {
 _SUPPORTED_AREA_TYPES = {
     "country", "locality", "postal_town", "neighborhood", "sublocality",
     "colloquial_area", "archipelago", "natural_feature", "island", "lake",
-    "river", "mountain_peak", "woods", "nature_preserve", "national_park",
+    "river", "mountain_peak", "volcano", "woods", "nature_preserve", "national_park",
     "state_park", "park", "beach",
     *(f"administrative_area_level_{level}" for level in range(1, 8)),
     *(f"sublocality_level_{level}" for level in range(1, 6)),
@@ -635,11 +635,14 @@ def _verified_region(region: str, components: dict[str, set[str]], country: str)
 def _country_only_identity(name: str, actual: str) -> bool:
     """Without a city, neither fuzzy brands nor a lone chain result is enough."""
     wanted = _normal(name)
-    if any(wanted == chain or wanted.startswith(chain + " ") for chain in _CHAINS):
-        return False
     words = _brand_words(name)
+    brand = " ".join(words)
+    chain_brands = {" ".join(_brand_words(chain)) for chain in _CHAINS} - {""}
+    if (any(wanted == chain or wanted.startswith(chain + " ") for chain in _CHAINS)
+            or any(brand == chain or brand.startswith(chain + " ") for chain in chain_brands)):
+        return False
     distinctive = (len(words) >= 2 and len("".join(words)) >= 8
-                   or len(words) == 1 and len(wanted.split()) == 1 and len(words[0]) >= 6
+                   or len(words) == 1 and len(words[0]) >= 6
                    and words[0] not in _GENERIC | _AREA_GENERIC_NAMES | {"rooftop", "terrace", "lounge", "garden"})
     return bool(distinctive and wanted == _normal(actual))
 
@@ -676,6 +679,8 @@ def _same_area_type_name(wanted: str, actual: str, types: set[str], country: str
         families.append({"beach"})
     if "natural_feature" in types:
         families.append({"cave", "caves"})
+    if types & {"natural_feature", "volcano"}:
+        families.append({"volcan", "volcano"})
     if types & {"locality", "postal_town", "sublocality"}:
         families.append({"town", "village"})
     if not families:
@@ -683,6 +688,12 @@ def _same_area_type_name(wanted: str, actual: str, types: set[str], country: str
 
     def core(value, labels):
         parts = _normal(value).split()
+        # Google's Greek beaches often retain the literal type prefix
+        # "Paralia" in English results. Translate only that prefix with an
+        # independent beach type; never alter a venue or an unrelated area.
+        if (labels == {"beach"} and "beach" in types and _country(country) in {"gr", "greece"}
+                and parts and parts[0] in {"paralia", "παραλια"}):
+            parts = parts[1:]
         if parts and parts[0] in labels:
             parts = parts[1:]
         if parts and parts[-1] in labels:
@@ -757,6 +768,12 @@ def _match(
     administrative = any(_same_admin(wanted_city, _google_locality(value, country)) for value in admin_values)
     allowed, category_exact = _category_match(category, candidate._types)
     if not city:
+        # A single distinctive brand with a generic venue label still needs
+        # a known compatible business category. The entire display name must
+        # match exactly; removing Cafe/Hotel is not a fuzzy identity shortcut.
+        if (len(_brand_words(name)) == 1 and len(_normal(name).split()) > 1
+                and (_normal(category) not in _CATEGORY_TYPES or not allowed)):
+            return None
         region_verified = _verified_region(region, components, country) or context_verified
         exact_identity = (_country_only_identity(name, candidate.name)
                           or _same_dessert_brand(name, candidate.name, candidate._types))

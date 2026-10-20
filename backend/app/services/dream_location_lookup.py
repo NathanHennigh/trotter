@@ -36,6 +36,10 @@ def area_region_constraint(region, country):
     # component. Preserve concrete districts/provinces as disambiguators.
     if region and country and re.fullmatch(r"(?:north(?:ern)?|south(?:ern)?|east(?:ern)?|west(?:ern)?|central)\s+" + re.escape(country.strip()), region.strip(), re.IGNORECASE):
         return None
+    # Ocean-wide coastal descriptions are not an administrative locality.
+    # Country plus the exact geographic target remains mandatory in area mode.
+    if region and re.fullmatch(r"(?:Pacific|Atlantic|Indian Ocean|Mediterranean)\s+Coast", region.strip(), re.IGNORECASE):
+        return None
     return region
 
 

@@ -96,7 +96,7 @@ def test_parse_caption_with_venice_uses_schema_and_sanitizes_metadata(monkeypatc
     assert result.provider == "venice"
     assert result.items[0].place_name == "Casa Dani"
     assert result.items[0].needs_review is False
-    assert result.raw["prompt_version"] == "dream-places-v3"
+    assert result.raw["prompt_version"] == "dream-places-v4"
     assert result.raw["attempts"] == 1
     assert result.raw["latency_ms"] >= 0
     assert result.raw["request_id"] == "chatcmpl-test"
@@ -240,6 +240,140 @@ def test_parse_caption_with_venice_rejects_truncated_output(monkeypatch):
         dream_parser.parse_caption_with_venice(
             "Casa Dani in Madrid, Spain.", api_key="test-key", max_attempts=1
         )
+
+
+def test_truncated_primary_uses_larger_existing_fallback_and_discards_partial_items(monkeypatch):
+    monkeypatch.setenv("DREAM_AI_MAX_COMPLETION_TOKENS", "2400")
+    monkeypatch.setenv("DREAM_AI_ENABLE_FALLBACK", "true")
+    monkeypatch.setenv("DREAM_AI_ENABLE_COMPLETENESS", "false")
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append((json, timeout))
+        body = venice_response(url).json()
+        if len(calls) == 1:
+            body["choices"][0]["finish_reason"] = "length"
+            # Even a parseable prefix cannot become a saved partial result.
+            body["choices"][0]["message"]["content"] = json_module.dumps({"items": [
+                parsed_place(place_name="Unfinished Partial")
+            ]})
+        else:
+            body["choices"][0]["message"]["content"] = json_module.dumps({"items": [
+                parsed_place(), parsed_place(place_name="Hola Coffee", category="cafe")
+            ]})
+        return httpx.Response(200, request=httpx.Request("POST", url), json=body)
+
+    json_module = json
+    monkeypatch.setattr(dream_parser.httpx, "post", fake_post)
+    result = dream_parser.parse_caption_with_fallback_model(
+        "Casa Dani and Hola Coffee in Madrid, Spain.", provider="venice",
+        primary_model="primary", fallback_model="fallback", api_key="test-key", timeout_seconds=17,
+    )
+    assert len(calls) == 2
+    assert [(payload["model"], payload["max_completion_tokens"], timeout)
+            for payload, timeout in calls] == [("primary", 2400, 17), ("fallback", 6000, 17)]
+    assert [item.place_name for item in result.items] == ["Casa Dani", "Hola Coffee"]
+    assert result.raw["fallback_reason"] == "primary_output_limit"
+
+
+def test_truncated_fallback_still_fails_without_another_request_or_partial_result(monkeypatch):
+    monkeypatch.setenv("DREAM_AI_MAX_COMPLETION_TOKENS", "2400")
+    monkeypatch.setenv("DREAM_AI_ENABLE_FALLBACK", "true")
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(json["max_completion_tokens"])
+        body = venice_response(url).json()
+        body["choices"][0]["finish_reason"] = "length"
+        return httpx.Response(200, request=httpx.Request("POST", url), json=body)
+
+    monkeypatch.setattr(dream_parser.httpx, "post", fake_post)
+    with pytest.raises(dream_parser.DreamParserError, match="fallback failed.*finish reason: length"):
+        dream_parser.parse_caption_with_fallback_model(
+            "Casa Dani in Madrid, Spain.", provider="venice", primary_model="primary",
+            fallback_model="fallback", api_key="test-key",
+        )
+    assert calls == [2400, 6000]
+
+
+@pytest.mark.parametrize("failure", ["content_filter", "invalid_json"])
+def test_non_truncation_failure_does_not_raise_fallback_output_budget(monkeypatch, failure):
+    monkeypatch.setenv("DREAM_AI_MAX_COMPLETION_TOKENS", "2400")
+    monkeypatch.setenv("DREAM_AI_ENABLE_FALLBACK", "true")
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(json["max_completion_tokens"])
+        body = venice_response(url).json()
+        if len(calls) == 1:
+            if failure == "content_filter":
+                body["choices"][0]["finish_reason"] = "content_filter"
+            else:
+                body["choices"][0]["message"]["content"] = "not JSON"
+        return httpx.Response(200, request=httpx.Request("POST", url), json=body)
+
+    monkeypatch.setattr(dream_parser.httpx, "post", fake_post)
+    result = dream_parser.parse_caption_with_fallback_model(
+        "Casa Dani in Madrid, Spain.", provider="venice", primary_model="primary",
+        fallback_model="fallback", api_key="test-key",
+    )
+    assert calls == [2400, 2400]
+    assert result.raw["fallback_reason"] == "primary_error"
+
+
+def test_truncation_does_not_reduce_an_already_larger_configured_budget(monkeypatch):
+    monkeypatch.setenv("DREAM_AI_MAX_COMPLETION_TOKENS", "8000")
+    monkeypatch.setenv("DREAM_AI_ENABLE_FALLBACK", "true")
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(json["max_completion_tokens"])
+        body = venice_response(url).json()
+        if len(calls) == 1:
+            body["choices"][0]["finish_reason"] = "length"
+        return httpx.Response(200, request=httpx.Request("POST", url), json=body)
+
+    monkeypatch.setattr(dream_parser.httpx, "post", fake_post)
+    dream_parser.parse_caption_with_fallback_model(
+        "Casa Dani in Madrid, Spain.", provider="venice", primary_model="primary",
+        fallback_model="fallback", api_key="test-key",
+    )
+    assert calls == [8000, 8000]
+
+
+@pytest.mark.parametrize("budget", [0, -1, True, 6001, 1.5])
+def test_completion_budget_override_is_bounded_before_provider_request(monkeypatch, budget):
+    monkeypatch.setattr(dream_parser.httpx, "post", lambda *args, **kwargs: pytest.fail("No request expected"))
+    with pytest.raises(dream_parser.DreamParserConfigurationError, match="completion token override"):
+        dream_parser.parse_caption_with_venice(
+            "Casa Dani in Madrid, Spain.", api_key="test-key", max_completion_tokens=budget,
+        )
+
+
+def test_mixed_country_broad_guide_contract_keeps_one_unpinned_inspiration(monkeypatch):
+    captured = []
+
+    def fake_post(url, headers, json, timeout):
+        captured.append(json["messages"][0]["content"])
+        return venice_response(url, item=parsed_place(
+            category="unknown", place_name=None, city=None, country=None, region_or_neighborhood=None,
+            summary="Warm-weather October destinations across Spain, Portugal, and France.",
+            tags=["travel guide", "october"], confidence=0.65, needs_review=True,
+            google_maps_search_query=None, needs_google_places_lookup=False,
+        ))
+
+    monkeypatch.setattr(dream_parser.httpx, "post", fake_post)
+    result = dream_parser.parse_caption_with_venice(
+        "October in Europe: Mallorca and Barcelona in Spain; Lisbon in Portugal; Nice in France.",
+        api_key="test-key", max_attempts=1,
+    )
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.category == "unknown"
+    assert (item.place_name, item.city, item.country, item.region_or_neighborhood) == (None, None, None, None)
+    assert item.google_maps_search_query is None and item.needs_google_places_lookup is False
+    assert "exactly one unknown inspiration item" in captured[0]
+    assert "multiple countries, country must also be null" in captured[0]
 
 
 def test_parse_caption_with_ollama_uses_local_default_and_normalizes(monkeypatch):
