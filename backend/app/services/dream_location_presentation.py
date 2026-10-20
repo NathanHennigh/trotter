@@ -40,20 +40,74 @@ def _usable_caption(caption):
     return bool(_URL.sub("", caption).strip())
 
 
+def _explicit_named_evidence(name, caption):
+    """A source can establish a property's name even when it is also a town."""
+    target = re.escape(_normalized(name))
+    if re.search(r"\b(?:called|named|name is)\s+" + target + r"(?!\w)", _normalized(caption)):
+        return True
+    compact = re.sub(r"\W", "", _normalized(name))
+    return any(re.sub(r"[_.]", "", handle).casefold() == compact
+               for handle in re.findall(r"(?<!\w)@([\w.]+)", caption))
+
+
+def _source_only_lodging_label(item, name, caption):
+    """Reject geography/CTA keywords copied as a hotel's name, not real brands.
+
+    No city dictionary is needed: the source itself must use this label only
+    as geographic context or as a comment keyword. Other name occurrences
+    keep the item unresolved rather than presuming an unnamed property.
+    """
+    if getattr(item, "category", None) != "hotel" or not _LODGING.search(caption):
+        return False
+    if re.search(r"\b(?:hotel|resort|inn|lodge|suites?|rooms?|villa|riad|studio)\b", name, re.IGNORECASE):
+        return False
+    target = re.escape(_normalized(name))
+    name_pattern = r"(?<!\w)" + target + r"(?!\w)"
+    source = re.sub(r"(?<!\w)#[\w]+", "", caption)
+    cta_only = False
+    if _creator_details_required(caption):
+        clauses = re.findall(r"\b(?:comment|dm(?:\s+me)?|message\s+me)\b[^.!?\n]{0,220}", source, re.IGNORECASE)
+        for clause in clauses:
+            if re.search(name_pattern, _normalized(clause)):
+                source = source.replace(clause, "")
+                cta_only = True
+    residual = _normalized(source)
+    geography_patterns = [
+        r"\b(?:in|near|around|overlooking)\s+" + target + r"(?!\w)",
+        r"\b(?:best|boutique|unique|beautiful)\s+(?:airbnbs?|hotels?|stays?|riads?)\s+" + target + r"(?!\w)",
+    ]
+    geographic = any(re.search(pattern, residual) for pattern in geography_patterns)
+    for pattern in geography_patterns:
+        residual = re.sub(pattern, "", residual)
+    country = _normalized(getattr(item, "country", None))
+    if geographic and country:
+        # Having independently established geography, remove an additional
+        # caption tag such as "Taghazout Morocco". A brand-country caption
+        # alone is not enough to classify a real property as unnamed.
+        residual = re.sub(name_pattern + r"\s+" + re.escape(country) + r"(?!\w)", "", residual)
+    return bool((cta_only or geographic) and not re.search(name_pattern, residual))
+
+
 def _named_identity(item, caption):
     """Retain named misses; discard only obvious legacy descriptive labels."""
     name = _text(getattr(item, "place_name", None)).strip()
     normalized = _normalized(name)
     if not normalized or normalized in _GENERIC_NAMES:
         return False
+    if _explicit_named_evidence(name, caption):
+        return True
     # Older importers sometimes copied the whole caption into place_name.
     if re.match(r"^(?:(?:best|beautiful|aesthetic)\s+)?(?:coffee shops|cafes|restaurants|hotels|stays)\s+(?:in|near|around)\b", normalized):
+        return False
+    if re.match(r"^(?:(?:the|a|an|our|this)\s+)?(?:(?:most|very|beautiful|dreamy|hidden|best|perfect|unique|luxury)\s+){1,5}(?:riad|hotel|stay|room|airbnb)\s+(?:in|near|around|overlooking)\s+", normalized):
         return False
     area = source_area_intent(
         place_name=name, source_caption=caption,
         city=getattr(item, "city", None), category=getattr(item, "category", None),
         region_or_neighborhood=getattr(item, "region_or_neighborhood", None),
     )
+    if not area and _source_only_lodging_label(item, name, caption):
+        return False
     if not area and normalized in {
         _normalized(getattr(item, field, None))
         for field in ("city", "country", "region_or_neighborhood")

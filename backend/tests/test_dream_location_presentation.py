@@ -178,3 +178,42 @@ def test_untyped_failure_does_not_promise_retries_or_claim_provider_outage():
     assert result["location_reason"] == "processing_failed"
     assert "automatically" not in result["location_hint"]
     assert "temporarily unavailable" not in result["location_hint"]
+
+
+@pytest.mark.parametrize("name,city,country,caption,reason", [
+    ("the most beautiful riad in Marrakech", "Marrakech", "Morocco",
+     "the most beautiful riad in Marrakech 🧡 . . morocco | riad | best hotels | best stay #marrakech",
+     "identity_not_shared"),
+    ("Taghazout", None, "Morocco",
+     'A beautiful hideaway in taghazout Morocco. Follow + comment "Taghazout" and I’ll send the link to this unique stay. #taghazout Where to stay in taghazout | airbnb in Morocco',
+     "creator_link_required"),
+    ("Taghazout", None, "Morocco",
+     "The perfect slow Sunday with this ocean view • taghazout Morocco #taghazout #surftrip best airbnb taghazout • best boutique stays Morocco",
+     "identity_not_shared"),
+    ("Serifos", None, "Greece",
+     "This stay had been on my bucket list. September is a great time to visit Greece. Comment “SERIFOS” and I will send you the link 🔗 Greece | Greek Islands",
+     "creator_link_required"),
+])
+def test_post_reparse_geography_and_descriptions_are_not_property_names(name, city, country, caption, reason):
+    saved = item(place_name=name, city=city, country=country, caption=caption)
+    before = deepcopy(vars(saved))
+    result = location_presentation(saved, location_status="not_found", enrichment_status="completed", sorting_state="sorted")
+    assert result["location_state"] == "source_details" and result["location_reason"] == reason
+    assert vars(saved) == before
+
+
+@pytest.mark.parametrize("name,city,caption", [
+    ("Lakeview Lodge", "Lake Atitlan", "Lakeview Lodge, Lake Atitlan. Our Airbnb overlooks the lake. Comment LINK for details."),
+    ("Seaweed Studio", None, "Seaweed Studio on Airbnb. Comment STAY for the location."),
+    ("Serenya", "Marrakech", "Serenya is open in Marrakech. The riad has seven suites."),
+    ("Serenya", None, "Serenya Morocco. Beautiful hotel and suites."),
+    ("Taghazout Lodge", "Taghazout", "Taghazout Lodge in Taghazout Morocco. Comment TAGHAZOUT for the link."),
+    ("Serifos Resort", "Serifos", "Serifos Resort on the island. Comment SERIFOS for the link."),
+    ("Taghazout", "Taghazout", "Our hotel is called Taghazout. It is in Taghazout Morocco. Comment TAGHAZOUT for the link."),
+    ("Serifos", None, "This hotel is named Serifos. Comment SERIFOS for the booking link."),
+    ("Serenya", None, "Our stay at @serenya in Marrakech. Comment SERENYA for the address."),
+    ("Taghazout", None, "Our stay at Taghazout was lovely. Best airbnb Taghazout. Comment LINK for details."),
+])
+def test_lodging_context_does_not_hide_real_names_or_name_city_overlap(name, city, caption):
+    saved = item(place_name=name, city=city, country="Morocco", caption=caption)
+    assert location_presentation(saved, location_status="not_found")["location_reason"] == "named_unresolved"

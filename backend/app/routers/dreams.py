@@ -618,6 +618,16 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         has_pin=latitude is not None and longitude is not None,
         recovery_waiting=bool(processing_retry_at or location_retry_at),
     )
+    maps_url = location_maps_url(item)
+    if presentation["location_state"] == "source_details" and maps_url and not raw.get("dream_user_edited"):
+        parsed_maps = urlparse(maps_url)
+        maps_query = parse_qs(parsed_maps.query)
+        # Legacy imports generated searches from a caption or surrounding town.
+        # Those are not a location for an unnamed stay. Keep any chosen Place ID,
+        # original non-search link, and user-edited map link intact.
+        if (parsed_maps.hostname in {"google.com", "www.google.com", "maps.google.com"}
+                and parsed_maps.path.startswith("/maps/search") and not maps_query.get("query_place_id")):
+            maps_url = None
     return DreamItemOut(
         id=item.id,
         dream_id=item.dream_id,
@@ -636,7 +646,7 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         needs_review=item.needs_review,
         needs_google_places_lookup=item.needs_google_places_lookup,
         google_place_id=item.google_place_id,
-        google_maps_url=location_maps_url(item),
+        google_maps_url=maps_url,
         **location_fields,
         **presentation,
         processing_retry_at=processing_retry_at,

@@ -102,3 +102,17 @@ def test_fast_retry_is_not_a_deferred_provider_outage(sessions, monkeypatch):
         output = dream_item_out(item)
         assert output.processing_retry_at is None
         assert output.location_state == "processing"
+
+
+@pytest.mark.parametrize("user_edited", [False, True])
+def test_unnamed_inspiration_does_not_offer_a_generated_town_search_as_its_location(sessions, user_edited):
+    url = "https://www.google.com/maps/search/?api=1&query=Lake+Atitlan+Guatemala"
+    add_item(sessions, place_name="Lake Atitlan", city=None, country="Guatemala", category="hotel",
+             caption="This Airbnb in Lake Atitlan, Guatemala. Comment LINK for the address.",
+             status="parsed", google_maps_url=url, raw_metadata_json={"dream_user_edited": user_edited})
+    with sessions() as db:
+        item = db.get(DreamItem, 1)
+        output = dream_item_out(item)
+        assert output.location_state == "source_details"
+        assert output.google_maps_url == (url if user_edited else None)
+        assert item.google_maps_url == url and not db.dirty
