@@ -232,9 +232,11 @@ def reconcile_places(db: Session, anchor: DreamItem, parsed, *, preserve_anchor=
                 # Local aliases aid lookup; reparsing must not rename an
                 # existing English card or split it into translated duplicates.
                 entry = entry.model_copy(update={"place_name": item.place_name})
-            if normalized(item.place_name) == normalized(entry.place_name):
+            if normalized(item.place_name) and normalized(item.place_name) == normalized(entry.place_name):
                 # Equivalent spelling should not move an existing card from
                 # its country board or invalidate an already accurate pin.
+                # Two absent names do not establish a shared venue identity:
+                # a corrected broad guide must be able to clear stale hints.
                 old_parts, new_parts = identity_parts(item), identity_parts(entry)
                 entry = entry.model_copy(update={field: getattr(item, field)
                     for offset, field in enumerate(("city", "country", "region_or_neighborhood"), 1)

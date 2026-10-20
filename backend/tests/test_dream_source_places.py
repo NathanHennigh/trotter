@@ -130,6 +130,69 @@ def test_weaker_fallback_cannot_add_a_phantom_place_or_replace_known_venues(clie
     assert all(card["status"] != "processing" for card in cards)
 
 
+def test_unnamed_guide_reparse_clears_stale_geography_and_retains_original_save(client, test_db, test_user, monkeypatch):
+    saved, job_id, factory = capture(client, test_db, monkeypatch)
+    caption = "October in Europe: Barcelona in Spain, Lisbon in Portugal, and Nice in France."
+    stale = DreamParseItem(place_name=None, city="Barcelona", country="France", category="restaurant",
+                          summary="Incorrect automatic classification", needs_review=True)
+    value = {**output(), "caption": caption,
+             "parsed": DreamParseResponse(provider="synthetic", model="synthetic", items=[stale])}
+    assert run(factory, job_id, value) == "completed"
+    with factory() as db:
+        item = db.get(DreamItem, saved["dream_item_id"])
+        item.summary, item.tags_json = "Compare this guide with our October plans", ["anniversary"]
+        original_created_at, original_source_url = item.created_at, item.source_url
+        original_source_id = item.source_post_id
+        db.commit()
+    corrected = {**value, "parsed": DreamParseResponse(provider="synthetic", model="synthetic", items=[
+        DreamParseItem(category="unknown", place_name=None, city=None, country=None, region_or_neighborhood=None,
+                       summary="October destination ideas across Spain, Portugal, and France.",
+                       tags=["travel guide"], needs_review=True)
+    ])}
+    assert run(factory, retry(factory, saved["dream_item_id"]), corrected) == "completed"
+    cards = client.get("/dream-items").json()
+    assert len(cards) == 1 and cards[0]["id"] == saved["dream_item_id"]
+    with factory() as db:
+        item = db.get(DreamItem, saved["dream_item_id"])
+        assert (item.place_name, item.city, item.country, item.region_or_neighborhood) == (None, None, None, None)
+        assert item.category == "unknown" and item.caption == caption
+        assert item.summary == "Compare this guide with our October plans"
+        assert item.tags_json == ["anniversary", "travel guide"]
+        assert (item.created_at, item.source_url, item.source_post_id) == (
+            original_created_at, original_source_url, original_source_id)
+        assert item.google_maps_url is None and item.google_place_id is None
+        assert item.location.status == "not_found" and item.location.latitude is None
+
+
+def test_named_identity_reparse_retains_omitted_geography_and_existing_automatic_pin(client, test_db, test_user, monkeypatch):
+    saved, job_id, factory = capture(client, test_db, monkeypatch)
+    value = output(("Bacha Coffee",))
+    value["parsed"].items[0] = value["parsed"].items[0].model_copy(update={"region_or_neighborhood": "Medina"})
+    assert run(factory, job_id, value) == "completed"
+    with factory() as db:
+        item = db.get(DreamItem, saved["dream_item_id"])
+        item.summary = "Keep this personal note"
+        item.location.status, item.location.provider = "resolved", "geoapify"
+        item.location.latitude, item.location.longitude = 31.63, -7.98
+        item.location.google_maps_url = "https://www.google.com/maps/search/?api=1&query=31.63,-7.98"
+        original_dream_id, original_generation = item.dream_id, item.location.generation
+        db.commit()
+    missing_geography = deepcopy(value)
+    missing_geography["parsed"].items[0] = missing_geography["parsed"].items[0].model_copy(update={
+        "city": None, "country": None, "region_or_neighborhood": None,
+    })
+    assert run(factory, retry(factory, saved["dream_item_id"]), missing_geography) == "completed"
+    cards = client.get("/dream-items").json()
+    assert len(cards) == 1 and cards[0]["id"] == saved["dream_item_id"]
+    with factory() as db:
+        item = db.get(DreamItem, saved["dream_item_id"])
+        assert (item.place_name, item.city, item.country, item.region_or_neighborhood) == (
+            "Bacha Coffee", "Marrakech", "Morocco", "Medina")
+        assert item.summary == "Keep this personal note" and item.dream_id == original_dream_id
+        assert item.location.status == "resolved" and item.location.generation == original_generation
+        assert (item.location.latitude, item.location.longitude) == (31.63, -7.98)
+
+
 def test_saved_parser_backfill_adds_only_missing_places_and_preserves_primary(client, test_db, test_user, monkeypatch):
     saved, job_id, factory = capture(client, test_db, monkeypatch)
     # Reproduce an older completed save with all extracted items in parser_raw,
