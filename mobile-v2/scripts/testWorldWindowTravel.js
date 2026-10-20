@@ -140,13 +140,14 @@ test('location queue polls until resolved and automatically creates a real attri
   assert.equal(env.clock.pending().filter(ms=>ms===5000).length,0); env.dispose();
 });
 
-test('legacy candidates wait for automatic resolution, while malformed coordinates are excluded', async () => {
+test('legacy candidates remain unresolved without claiming active work, while malformed coordinates are excluded', async () => {
   const env=serviceEnvironment();
   const candidate={id:'one',name:'Cafe One',address:'1 Synthetic Road',latitude:38.7,longitude:-9.1,google_maps_url:'https://www.google.com/maps/search/?api=1&query=38.7,-9.1'};
   env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1,{location_status:'needs_review',location_candidates:[candidate,{...candidate,id:'bad',latitude:null}]})]:[]));
   env.render(); await flush(); let state=env.render();
   assert.equal(state.items[0].locationCandidates.length,1); assert.equal(dreams.exactMapPoint(state.items[0]),undefined);
-  assert.equal(locations.canFindLocation(state.items[0]),true); assert.equal(locations.locationNote(state.items[0]),'Finding location…');
+  assert.equal(locations.canFindLocation(state.items[0]),true); assert.equal(locations.locationNote(state.items[0]),'Not on map yet');
+  assert.equal(locations.isFindingLocation(state.items[0]),false);
   env.fetcher(async url=>response(200,url.endsWith('/dream-items')?[apiItem(1,{location_status:'resolved',location_provider:'google_places',
     location_place_id:'one',location_expires_at:'2099-01-01',location_user_confirmed:false,latitude:38.7,longitude:-9.1})]:[]));
   await state.refresh();
@@ -166,6 +167,23 @@ test('terminal Google review results stop polling, and an explicit refresh can d
   await state.refresh(); await flush(); state=env.render();
   assert.equal(state.locatingItems.length,0); assert.equal(dreams.exactMapPoint(state.items[0]).lat,38.7);
   assert(!env.calls.some(call=>call.init?.method==='POST')); env.dispose();
+});
+
+test('scheduled provider recovery polls quietly at one minute despite stale active states and stops after resolution', async () => {
+  const env = serviceEnvironment();
+  let rows = [apiItem(1, { status: 'processing', sorting_state: 'queued', processing_retry_at: '2026-09-23T12:10:00Z' }),
+    apiItem(2, { location_status: 'queued', location_state: 'unavailable', location_reason: 'provider_unavailable', location_retry_at: '2026-09-23T12:10:00Z' })];
+  env.fetcher(async url => response(200, url.endsWith('/dream-items') ? rows : []));
+  env.render(); await flush(); let state = env.render();
+  assert.equal(state.processingItems.length, 0); assert.equal(state.locatingItems.length, 0);
+  assert.equal(env.clock.pending().filter(ms => ms === 5000).length, 0);
+  assert.equal(env.clock.pending().filter(ms => ms === 60000).length, 1);
+  const before = env.calls.length; await env.clock.advance(59000); assert.equal(env.calls.length, before);
+  rows = rows.map(row => ({ ...row, status: 'confirmed', sorting_state: 'sorted', location_status: 'resolved',
+    processing_retry_at: null, location_retry_at: null, latitude: 38.7, longitude: -9.1 }));
+  await env.clock.advance(1000); state = env.render();
+  assert.equal(env.calls.length, before + 2); assert.equal(state.items.length, 2);
+  assert.equal(env.clock.pending().filter(ms => ms === 60000).length, 0); env.dispose();
 });
 
 test('location failures retain all saves and duplicate queue/edit writes are guarded', async () => {
@@ -199,7 +217,7 @@ test('large country location requests use bounded batches without losing saves',
 test('location actions preserve manual pins and incomplete saves without claiming false progress',()=>{
   assert.equal(locations.canFindLocation(place(1)),true);
   for(const changes of [{id:'dream-item-pending'}, {placeName:''}, {status:'processing'}, {locationStatus:'running'}, {locationStatus:'queued'}, {latitude:38,longitude:-9}, {googleMapsUrl:'https://www.google.com/maps/search/?query=38,-9'}]) assert.equal(locations.canFindLocation(place(1,changes)),false);
-  assert.equal(locations.locationNote(place(1,{locationStatus:'blocked'})),'Location lookup unavailable');
+  assert.equal(locations.locationNote(place(1,{locationStatus:'blocked'})),'Location temporarily unavailable');
   assert.equal(locations.isFindingLocation(place(1,{locationStatus:'failed'})),false);
 });
 test('slow Dreams polls apply completed results and concurrent refreshes share one request pair', async () => {

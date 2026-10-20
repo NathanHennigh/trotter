@@ -156,3 +156,54 @@ test('an unparsed long caption remains readable below a constrained source title
   nodes(tree).find(node => node.type === 'Pressable' && text(node).includes('Read more')).props.onPress(); tree = h.render();
   assert(text(tree).includes(caption.trim())); h.dispose();
 });
+
+test('a creator-gated location is quiet inspiration with the original reel and optional editing, never repeated lookup', async () => {
+  const hint = 'The creator offers location details by comment or message. Open the post for their instructions.';
+  const saved = { ...item, latitude: undefined, longitude: undefined, googleMapsUrl: undefined,
+    placeName: undefined, city: 'Serifos', country: 'Greece', caption: 'A little house by the sea',
+    locationState: 'source_details', locationReason: 'creator_link_required', locationHint: hint,
+    locationStatus: 'not_found', sortingState: 'needs_details', needsReview: true };
+  const h = host(); let tree = h.render(props({ item: saved, onLocate: async () => {} }));
+  assert(text(tree).includes('Saved inspiration')); assert(text(tree).includes('Location not shared')); assert(text(tree).includes(hint));
+  assert(!byType(tree, 'DreamPlacesMap')); assert(!action(tree, 'Open in Maps')); assert(action(tree, 'View reel'));
+  action(tree, 'View reel').props.onPress(); await flush(); assert.deepEqual(h.urls, [saved.sourceUrl]);
+  action(tree, 'More place options').props.onPress(); tree = h.render();
+  assert(action(tree, 'Edit details')); assert(action(tree, 'Remove saved place'));
+  assert(!action(tree, 'Retry location')); assert(!action(tree, 'Retry reading post'));
+  h.dispose();
+});
+
+test('unresolved matches and paused provider work do not masquerade as missing source information or active finding', () => {
+  const saved = { ...item, latitude: undefined, longitude: undefined, googleMapsUrl: undefined,
+    locationState: 'unresolved', locationReason: 'ambiguous_match', locationStatus: 'needs_review', locationProvider: 'google_places' };
+  const h = host(); let tree = h.render(props({ item: saved, onLocate: async () => {} }));
+  assert(text(tree).includes('Not on map yet')); assert(!text(tree).some(value => /Finding location|Location not shared/.test(value)));
+  action(tree, 'More place options').props.onPress(); tree = h.render(); assert(action(tree, 'Retry location'));
+  h.dispose();
+  const paused = host(); tree = paused.render(props({ item: { ...saved, status: 'failed', sortingState: 'failed',
+    locationState: 'unavailable', locationReason: 'provider_unavailable', processingRetryAt: '2099-01-01' }, onLocate: async () => {} }));
+  assert(text(tree).includes('Will retry automatically'));
+  assert(!text(tree).some(value => /Couldn’t sort|Finding location/.test(value)));
+  action(tree, 'More place options').props.onPress(); tree = paused.render();
+  assert(!action(tree, 'Retry location')); assert(!action(tree, 'Retry reading post')); assert(action(tree, 'Edit details')); paused.dispose();
+});
+
+test('an exhausted processing failure offers retry without blaming the caption or promising scheduled recovery', () => {
+  const h = host(); const saved = { ...item, latitude: undefined, longitude: undefined, googleMapsUrl: undefined,
+    locationState: 'unavailable', locationReason: 'processing_failed', locationStatus: 'failed',
+    locationHint: 'Saved. We couldn’t finish finding its location. You can try again.' };
+  let tree = h.render(props({ item: saved, onLocate: async () => {} }));
+  assert(text(tree).includes('Not on map yet')); assert(text(tree).includes(saved.locationHint));
+  assert(!text(tree).some(value => /Location not shared|retry automatically|temporarily unavailable/.test(value)));
+  action(tree, 'More place options').props.onPress(); tree = h.render(); assert(action(tree, 'Retry location')); h.dispose();
+});
+
+test('fresh detail data restores an expired Google pin without leaving its unavailable label behind', () => {
+  const h = host({ live: { details: { locationProvider: 'google_places', locationStatus: 'resolved', locationPlaceId: 'verified',
+    locationExpiresAt: '2099-01-01', locationAddress: 'A current address', locationCandidates: [{ id: 'verified', latitude: 38.8, longitude: -9.2 }], locationAttributions: [] } } });
+  const tree = h.render(props({ item: { ...item, latitude: undefined, longitude: undefined,
+    locationProvider: 'google_places', locationState: 'unavailable', locationReason: 'location_unavailable',
+    locationStatus: 'resolved', locationPlaceId: 'verified', locationExpiresAt: '2020-01-01' } }));
+  assert(byType(tree, 'DreamPlacesMap')); assert(text(tree).includes('A current address'));
+  assert(!text(tree).some(value => /unavailable|Not on map/.test(value))); h.dispose();
+});

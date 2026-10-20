@@ -6,7 +6,7 @@ from dataclasses import asdict
 import re
 
 from .dream_location_research import (
-    LocationQueryProposal, plan_location_queries, source_area_intent, source_search_context,
+    LocationQueryProposal, LocationResearchUnavailable, plan_location_queries, source_area_intent, source_search_context,
 )
 
 INITIAL_SECONDS = 30
@@ -78,6 +78,10 @@ async def lookup_dream_location(place_name, city, country, region, category, *, 
         try:
             async with asyncio.timeout(RESEARCH_SECONDS):
                 plans = await planner(**fields, source_caption=source_caption, protected=protected)
+        except (LocationResearchUnavailable, TimeoutError) as exc:
+            from .dream_provider_recovery import failure_kind
+            reason = "network" if isinstance(exc, TimeoutError) or getattr(exc, "reason", None) == "timeout_or_network" else failure_kind(getattr(exc, "reason", None)) or "provider"
+            return {**result, "_research": {"queries": [], "matched": None, "outcome": "unavailable", "failure_kind": reason}}
         except Exception:
             # Optional query planning cannot break ordinary Google lookup.
             return {**result, "_research": {"queries": [], "matched": None, "outcome": "unavailable"}}

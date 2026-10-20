@@ -713,6 +713,7 @@ def test_completeness_one_http_attempt_with_twenty_second_cap_and_quotes(monkeyp
     assert len(result.items) == 5 and len(requests) == 1
     payload, config = requests[0]
     assert config["max_attempts"] == 1 and config["timeout"] == 20
+    assert payload["max_completion_tokens"] == 6000
     item_schema = payload["response_format"]["json_schema"]["schema"]["properties"]["items"]["items"]
     assert "source_quote" in item_schema["required"]
     assert payload["venice_parameters"]["enable_web_search"] == "off"
@@ -731,7 +732,11 @@ def test_completeness_provider_failure_is_one_request_without_retries(monkeypatc
             "choices": [{"finish_reason": "stop", "message": {"content": "not JSON"}}]})
     monkeypatch.setattr(dream_parser.httpx, "post", post)
     original = multi_result()
-    assert dream_parser.complete_missing_places(original, MULTI_CAPTION, provider="venice", model="extra", api_key="fixture") is original
+    if failure == "unavailable":
+        with pytest.raises(dream_parser.DreamParserUnavailableError):
+            dream_parser.complete_missing_places(original, MULTI_CAPTION, provider="venice", model="extra", api_key="fixture")
+    else:
+        assert dream_parser.complete_missing_places(original, MULTI_CAPTION, provider="venice", model="extra", api_key="fixture") is original
     assert calls == [1]
 
 

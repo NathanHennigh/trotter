@@ -22,7 +22,7 @@ import type { MapPoint } from "../trips/tripPresentation";
 import { categoryLabel, dreamLocationType, exactMapPoint, safeWebUrl } from "./dreamPresentation";
 import { dreamCardTitle } from "./dreamCardPresentation";
 import { DreamPhoto } from "./DreamPhoto";
-import { canFindLocation, locationExplanation } from "./locationPresentation";
+import { canFindLocation, hasAutomaticLocationRetry, isSavedInspiration, locationExplanation, locationNote } from "./locationPresentation";
 import { dreamProcessingState } from "./dreamProcessing";
 import { useLiveDreamLocation } from "./useLiveDreamLocation";
 import { countryRegion } from "./countryRegion";
@@ -185,7 +185,9 @@ export function DreamEditor({
   const saved = /^\d+$/.test(item.id),
     processingState = dreamProcessingState(item),
     processing = processingState?.kind === "sorting" || (processingState?.kind === "upload" && item.uploadStatus !== "failed");
-  const canRetry = !processing && (item.status === "failed" || item.needsReview || item.uploadStatus === "failed" || processingState?.kind === "unreadable" || processingState?.kind === "failed");
+  const canRetry = !processing && !hasAutomaticLocationRetry(item) &&
+    (!isSavedInspiration(item) || item.locationReason === "caption_missing") &&
+    (item.status === "failed" || item.needsReview || item.uploadStatus === "failed" || processingState?.kind === "unreadable" || processingState?.kind === "failed");
   const locationLine = [...new Set([item.regionOrNeighborhood, item.city, item.country].filter(Boolean))].join(" · ");
   const sourceDescription = item.summary.trim() || item.caption?.trim() || "";
   const cleanedDescription = sourceDescription.replace(/https?:\/\/\S+/gi, "").replace(/(^|\s)#[\p{L}\p{N}_]+/gu, " ").replace(/\s+/g, " ").trim();
@@ -220,7 +222,7 @@ export function DreamEditor({
         <Pressable accessibilityLabel="Dismiss place details" accessibilityRole="button" onPress={requestClose} style={s.backdrop} />
         <View style={[s.screen, { maxHeight: height * .91 }]} accessibilityViewIsModal>
           <View style={s.toolbar}>
-            <Text style={s.sheetLabel}>{editing ? "Edit place" : "Saved place"}</Text>
+            <Text style={s.sheetLabel}>{editing ? "Edit place" : isSavedInspiration(item) ? "Saved inspiration" : "Saved place"}</Text>
             {!editing && !discarding && !confirmDelete && !processing && <Pressable
               accessibilityLabel="More place options"
               accessibilityRole="button"
@@ -284,7 +286,7 @@ export function DreamEditor({
                 onPress={() => { if (closed.current) return; close(); onShowSource(); }}
                 style={s.sourceLink}
               ><Text style={s.sourceText}>{sourceCount} places from this reel</Text><WWIcon name="chevron" size={14} color={colors.blue} /></Pressable>}
-              {processingState && !processing && (
+              {processingState && !processing && processingState.kind !== "deferred" && (
                 <Text style={s.review}>
                   {processingState.detail}
                 </Text>
@@ -299,8 +301,8 @@ export function DreamEditor({
               {saved && !processing && (
                 <View style={s.locationPanel}>
                   <View style={s.locationHeading}>
-                    <WWIcon name="pin" size={17} />
-                    <Text style={s.locationLabel}>{locationItem.coordinatePrecision === "area" ? "Area on map" : "Location"}</Text>
+                    {!isSavedInspiration(locationItem) && <WWIcon name="pin" size={17} />}
+                    <Text style={s.locationLabel}>{shownPoint ? (locationItem.coordinatePrecision === "area" ? "Area on map" : "Location") : locationNote(locationItem) || "Location"}</Text>
                   </View>
                   {liveLocation.loading && <Text accessibilityLiveRegion="polite" style={s.locationHint}>{shownPoint && locationItem.coordinatePrecision !== "area" ? "Loading address…" : "Loading location details…"}</Text>}
                   {liveLocation.error && <View>

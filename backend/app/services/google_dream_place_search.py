@@ -43,6 +43,15 @@ class GooglePlacesBlockedError(LookupError):
     """A configured service or credential needs attention; never contains a URL."""
 
 
+class GooglePlacesUnavailableError(RetryableDreamPlaceLookupError):
+    """Verified service availability issue, distinct from malformed responses."""
+
+    def __init__(self, reason="provider"):
+        from .dream_provider_recovery import failure_kind
+        self.reason = failure_kind(reason) or "provider"
+        super().__init__("Google place lookup is temporarily unavailable.")
+
+
 class GoogleCandidate(BaseModel):
     id: str
     name: str
@@ -231,11 +240,9 @@ async def _request(
     try:
         response = await client.request(method, url, headers=headers, json=body)
     except httpx.RequestError:
-        raise RetryableDreamPlaceLookupError(
-            "Google place lookup is temporarily unavailable."
-        ) from None
+        raise GooglePlacesUnavailableError("network") from None
     if response.status_code in {408, 425, 429} or response.status_code >= 500:
-        raise RetryableDreamPlaceLookupError("Google place lookup is temporarily unavailable.")
+        raise GooglePlacesUnavailableError("rate_limited" if response.status_code == 429 else "provider")
     if response.status_code == 404 and allow_missing:
         return None
     if response.status_code != 200:
@@ -950,9 +957,7 @@ async def fetch_google_place_details(place_id: str, *, allow_area=False) -> Goog
                     return None
                 return candidate
     except TimeoutError:
-        raise RetryableDreamPlaceLookupError(
-            "Google place lookup is temporarily unavailable."
-        ) from None
+        raise GooglePlacesUnavailableError("network") from None
 
 
 async def search_google_dream_place(

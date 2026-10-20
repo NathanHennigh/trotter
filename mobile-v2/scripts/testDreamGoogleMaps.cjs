@@ -267,3 +267,51 @@ test('live detail hook does not poll provider data, discards old view/account co
   calls[1].reject(new Error('Offline')); await flush(); const failed = render(); assert.equal(failed.error, 'Offline'); failed.retry(); render(); assert.equal(calls.length, 3);
   h.dispose(); assert(calls[2].signal.aborted); calls[2].resolve({ locationAddress: 'Late content' }); await flush();
 });
+
+test('structured source and recovery states survive API mapping without copying provider content or changing country', () => {
+  const h = service();
+  const item = h.api.mapItem({ id: 91, dream_id: 8, source_platform: 'instagram', source_url: 'https://instagram.com/reel/synthetic',
+    category: 'hotel', country: 'Greece', summary: 'A holiday stay.', needs_review: true, status: 'needs_review',
+    created_at: '2026-01-01', location_state: 'source_details', location_reason: 'creator_link_required',
+    location_hint: 'Open the reel for the creator’s instructions.', location_retry_at: null, processing_retry_at: null,
+    location_provider: 'google_places', location_address: 'Never store this', location_candidates: [] });
+  assert.equal(item.country, 'Greece'); assert.equal(item.locationState, 'source_details');
+  assert.equal(item.locationReason, 'creator_link_required'); assert.equal(item.locationHint, 'Open the reel for the creator’s instructions.');
+  assert.equal(item.locationRetryAt, undefined); assert.equal(item.locationAddress, undefined);
+  const deferred = h.api.mapItem({ id: 92, dream_id: 8, source_platform: 'instagram', source_url: 'https://instagram.com/reel/synthetic',
+    category: 'unknown', summary: '', needs_review: true, status: 'failed', created_at: '2026-01-01',
+    location_state: 'unavailable', location_reason: 'provider_unavailable', location_retry_at: '2026-10-21T12:00:00Z', processing_retry_at: '2026-10-21T13:00:00Z' });
+  assert.equal(deferred.locationRetryAt, '2026-10-21T12:00:00Z'); assert.equal(deferred.processingRetryAt, '2026-10-21T13:00:00Z');
+});
+
+test('source omissions, unresolved matches and deferred lookups never request live Google venue details', () => {
+  const h = hooks(), calls = [];
+  const hook = load('components/world-window/dreams/useLiveDreamLocation.ts', { react: h.react,
+    '../../../services/dreams': { fetchDreamLocationDetails: (id, signal) => { calls.push({ id, signal }); return new Promise(() => {}); } },
+    '../../../services/travelTrips': { getAuthRevision: () => 1, subscribeAuthToken: () => () => {} } });
+  const item = { id: '91', locationProvider: 'google_places', locationStatus: 'not_found' };
+  for (const state of ['source_details', 'unresolved', 'processing', 'unavailable']) {
+    const view = h.render(() => hook.useLiveDreamLocation({ ...item, locationState: state }));
+    assert(!view.loading); assert.equal(calls.length, 0);
+  }
+  h.render(() => hook.useLiveDreamLocation({ ...item, locationState: 'place', locationStatus: 'resolved', locationPlaceId: 'verified-id' }));
+  assert.equal(calls.length, 1, 'A later verified pin keeps normal live address and attribution loading');
+  h.render(() => hook.useLiveDreamLocation({ ...item, locationState: 'source_details' }));
+  assert(calls[0].signal.aborted); h.dispose();
+});
+
+test('a verified Google identity refreshes expired details but never rehydrates absent or deferred identities', async () => {
+  const h = hooks(), calls = [];
+  const hook = load('components/world-window/dreams/useLiveDreamLocation.ts', { react: h.react,
+    '../../../services/dreams': { fetchDreamLocationDetails: (id, signal) => { const wait = deferred(); calls.push({ id, signal, ...wait }); return wait.promise; } },
+    '../../../services/travelTrips': { getAuthRevision: () => 1, subscribeAuthToken: () => () => {} } });
+  const item = { id: '91', locationProvider: 'google_places', locationStatus: 'resolved',
+    locationState: 'unavailable', locationReason: 'location_unavailable', locationPlaceId: 'verified-id', locationExpiresAt: '2020-01-01' };
+  h.render(() => hook.useLiveDreamLocation(item)); assert.equal(calls.length, 1);
+  calls[0].resolve({ locationStatus: 'resolved', locationPlaceId: 'verified-id', locationCandidates: [{ id: 'verified-id', latitude: 36, longitude: 24 }], locationExpiresAt: '2099-01-01' });
+  await flush(); assert.equal(h.render(() => hook.useLiveDreamLocation(item)).details.locationCandidates[0].latitude, 36);
+  h.render(() => hook.useLiveDreamLocation({ ...item, locationPlaceId: undefined })); assert.equal(calls.length, 1);
+  h.render(() => hook.useLiveDreamLocation({ ...item, locationRetryAt: '2099-01-01' })); assert.equal(calls.length, 1);
+  h.render(() => hook.useLiveDreamLocation({ ...item, locationStatus: 'not_found' })); assert.equal(calls.length, 1);
+  h.dispose();
+});

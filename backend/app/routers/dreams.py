@@ -194,6 +194,11 @@ class DreamItemOut(BaseModel):
     location_candidate_ids: list[str] = Field(default_factory=list)
     location_expires_at: Optional[datetime] = None
     location_user_confirmed: bool = False
+    location_state: Literal["place", "area", "processing", "source_details", "unresolved", "unavailable"] = "unresolved"
+    location_reason: Optional[str] = None
+    location_hint: Optional[str] = None
+    location_retry_at: Optional[datetime] = None
+    processing_retry_at: Optional[datetime] = None
     status: str
     sorting_state: Literal["queued", "running", "sorted", "needs_details", "unavailable", "failed"] = "needs_details"
     processing_message: Optional[str] = None
@@ -584,7 +589,9 @@ def dream_item_coordinates(item: DreamItem) -> tuple[Optional[float], Optional[f
 
 def dream_item_out(item: DreamItem) -> DreamItemOut:
     from ..services.dream_source_places import source_fields
-    from ..services.dream_enrichment import public_sorting_state
+    from ..services.dream_enrichment import enrichment_recovery, public_sorting_state
+    from ..services.dream_locations import aware, current_resolution, location_recovery, utcnow
+    from ..services.dream_location_presentation import location_presentation
     raw = item.raw_metadata_json or {}
     metadata = raw.get("instagram_metadata") if isinstance(raw, dict) else None
     thumbnail_url = f"/dream-items/{item.id}/thumbnail" if isinstance(metadata, dict) and metadata.get("thumbnail_url") else None
@@ -593,6 +600,24 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
     if location_fields.get("location_provider") == "google_places" and not google_map_capable.get():
         latitude = longitude = coordinate_precision = None
         location_fields["location_expires_at"] = None
+    sorting = public_sorting_state(item)
+    now = utcnow()
+
+    def pending_retry(row, recovery):
+        retry_at = aware(row.next_attempt_at) if row else None
+        return retry_at if recovery and recovery["state"] == "waiting" and retry_at and retry_at > now else None
+
+    processing_retry_at = pending_retry(item.enrichment, enrichment_recovery(item))
+    location_row = current_resolution(item)
+    location_retry_at = pending_retry(location_row, location_recovery(location_row))
+    presentation = location_presentation(
+        item, location_status=location_fields.get("location_status"),
+        coordinate_precision=coordinate_precision,
+        sorting_state=sorting["sorting_state"],
+        enrichment_status=item.enrichment.status if item.enrichment else None,
+        has_pin=latitude is not None and longitude is not None,
+        recovery_waiting=bool(processing_retry_at or location_retry_at),
+    )
     return DreamItemOut(
         id=item.id,
         dream_id=item.dream_id,
@@ -613,12 +638,15 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         google_place_id=item.google_place_id,
         google_maps_url=location_maps_url(item),
         **location_fields,
+        **presentation,
+        processing_retry_at=processing_retry_at,
+        location_retry_at=location_retry_at,
         thumbnail_url=thumbnail_url,
         latitude=latitude,
         longitude=longitude,
         coordinate_precision=coordinate_precision,
         status=item.status,
-        **public_sorting_state(item),
+        **sorting,
         created_at=item.created_at,
         updated_at=item.updated_at,
     )

@@ -8,9 +8,15 @@ export function useLiveDreamLocation(item: DreamItem, enabled = true) {
   const [attempt, retry] = React.useReducer(value => value + 1, 0);
   const [state, setState] = React.useState<{ key: string; details?: DreamLocationDetails; error?: string; loading: boolean }>();
   const google = item.locationProvider === "google_places";
-  const key = JSON.stringify([item.id, revision, item.locationPlaceId, item.locationCandidateIds, item.locationStatus, enabled, attempt]);
+  // Source limitations and unfinished matches have no Google details to fetch.
+  // An expired coordinate is different: its verified identity can be refreshed.
+  const knownExpiredPlace = item.locationState === "unavailable" && item.locationReason === "location_unavailable" &&
+    Boolean(item.locationPlaceId) && ["resolved", "manual"].includes(item.locationStatus ?? "");
+  const deferred = [item.locationRetryAt, item.processingRetryAt].some(value => value && Number.isFinite(Date.parse(value)));
+  const canLoad = !deferred && (!item.locationState || item.locationState === "place" || item.locationState === "area" || knownExpiredPlace);
+  const key = JSON.stringify([item.id, revision, item.locationPlaceId, item.locationCandidateIds, item.locationStatus, canLoad, enabled, attempt]);
   React.useEffect(() => {
-    if (!enabled || !google || !/^\d+$/.test(item.id) || item.locationStatus === "queued" || item.locationStatus === "running") { setState(undefined); return; }
+    if (!enabled || !canLoad || !google || !/^\d+$/.test(item.id) || item.locationStatus === "queued" || item.locationStatus === "running") { setState(undefined); return; }
     let active = true;
     const controller = new AbortController();
     setState({ key, loading: true });

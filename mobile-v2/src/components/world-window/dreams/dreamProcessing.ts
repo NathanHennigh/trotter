@@ -1,7 +1,7 @@
 import type { DreamItem } from "../../../services/dreams";
 
 export type DreamProcessingState = {
-  kind: "upload" | "sorting" | "unreadable" | "failed" | "details";
+  kind: "upload" | "sorting" | "unreadable" | "failed" | "details" | "deferred";
   label: string;
   detail: string;
 };
@@ -13,6 +13,12 @@ export function dreamProcessingState(item: DreamItem): DreamProcessingState | un
     label: item.uploadStatus === "sending" ? "Sending reel…" : item.uploadStatus === "failed" ? "Upload needs retry" : "Waiting to send",
     detail: "Kept on this device until it reaches Trotter.",
   };
+  if (item.processingRetryAt && Number.isFinite(Date.parse(item.processingRetryAt))) return {
+    kind: "deferred", label: "Will retry automatically",
+    detail: "Your reel is saved. We’ll try sorting it again automatically.",
+  };
+  // Source limitations are shown in the location section, not as a failed save.
+  if (item.locationState === "source_details") return undefined;
   if (item.sortingState === "sorted") return undefined;
   if (item.sortingState === "queued" || item.sortingState === "running" ||
       (!item.sortingState && (item.status === "created" || item.status === "processing"))) return {
@@ -37,7 +43,7 @@ export function dreamProcessingState(item: DreamItem): DreamProcessingState | un
 }
 
 export function dreamProcessingSummary(items: DreamItem[]): string {
-  const counts = { upload: 0, sorting: 0, unreadable: 0, failed: 0, details: 0 };
+  const counts = { upload: 0, sorting: 0, unreadable: 0, failed: 0, details: 0, deferred: 0 };
   for (const item of items) {
     const state = dreamProcessingState(item);
     if (state) counts[state.kind]++;
@@ -45,6 +51,7 @@ export function dreamProcessingSummary(items: DreamItem[]): string {
   return [
     counts.upload && `${counts.upload} waiting to send`,
     counts.sorting && `${counts.sorting} sorting`,
+    counts.deferred && `${counts.deferred} will retry automatically`,
     counts.details && `${counts.details} ${counts.details === 1 ? "needs" : "need"} details`,
     counts.unreadable && `${counts.unreadable} couldn’t be read`,
     counts.failed && `${counts.failed} couldn’t be sorted`,

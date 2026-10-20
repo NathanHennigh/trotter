@@ -19,6 +19,34 @@ IDENTITY_FIELDS = ("place_name", "city", "country", "region_or_neighborhood", "c
 ACTIVE = {"queued", "running"}
 
 
+def location_recovery(row):
+    from .dream_provider_recovery import valid_record
+    if not row or row.status not in ACTIVE | {"blocked"}:
+        return None
+    entry = next((entry for entry in reversed(row.history or [])
+                  if entry.get("reason") == "provider_recovery" and entry.get("generation") == row.generation), None)
+    if not entry:
+        return None
+    return valid_record({**entry, "reason": entry.get("failure_kind")}, row.generation)
+
+
+def _store_location_recovery(row, recovery):
+    entry = {**recovery, "reason": "provider_recovery", "failure_kind": recovery["reason"]}
+    # Keep one current recovery record per generation, rather than accumulating
+    # the same outage forever. Original resolution/source audit entries remain.
+    row.history = [*[value for value in (row.history or []) if not (
+        value.get("reason") == "provider_recovery" and value.get("generation") == row.generation)], entry]
+
+
+def _defer_location(row, reason, now):
+    from .dream_provider_recovery import record, recovery_delay
+    recovery = record(row.generation, reason, location_recovery(row), now)
+    _store_location_recovery(row, recovery)
+    row.status = "blocked"
+    row.next_attempt_at = now + recovery_delay(recovery["cycle"])
+    row.message = "Saved. We will find its location automatically when the service is available."
+
+
 def utcnow():
     return datetime.now(timezone.utc)
 
@@ -298,7 +326,20 @@ def claim_job(db: Session, job_id: int, *, now=None):
     abandoned = row.status == "running" and row.lease_expires_at and aware(row.lease_expires_at) <= now
     if not due and not abandoned:
         return None
-    if row.attempts >= setting("DREAM_LOCATION_MAX_ATTEMPTS", 5, 10):
+    recovery = location_recovery(row)
+    deferred_probe = bool(due and recovery and recovery["state"] == "waiting")
+    if abandoned and recovery and recovery["state"] == "attempting":
+        lost = recovery.get("lost_leases", 0)
+        if isinstance(lost, int) and lost < 3:
+            _defer_location(row, recovery["reason"], now)
+            _store_location_recovery(row, {**location_recovery(row), "lost_leases": lost + 1})
+            row.lease_token = row.lease_expires_at = None
+            row.updated_at = now
+        else:
+            row.status, row.next_attempt_at, row.lease_token, row.lease_expires_at = "failed", None, None, None
+            row.message = "Location lookup could not finish. You can retry."
+        return None
+    if row.attempts >= setting("DREAM_LOCATION_MAX_ATTEMPTS", 5, 10) and not deferred_probe:
         row.status, row.next_attempt_at, row.lease_token = "failed", None, None
         row.message = "Location lookup could not finish. You can retry."
         return None
@@ -311,6 +352,8 @@ def claim_job(db: Session, job_id: int, *, now=None):
              attempts=row.attempts + 1, updated_at=now), execution_options={"synchronize_session": False}).rowcount
     if not changed:
         return None
+    if deferred_probe:
+        _store_location_recovery(row, {**recovery, "state": "attempting"})
     from .dream_place_aliases import caption_for_place
     return {"job_id": row.id, "item_id": item.id, "user_id": item.user_id, "token": token,
             "fingerprint": row.fingerprint, "pin_fingerprint": row.pin_fingerprint,
@@ -330,7 +373,8 @@ def apply_candidate(row, candidate):
 async def resolve_location_job(job_id, *, session_factory=None, resolver=None, now=None):
     from ..db import SessionLocal
     from .dream_place_search import RetryableDreamPlaceLookupError
-    from .google_dream_place_search import search_google_dream_place, fetch_google_place_details, GooglePlacesBlockedError
+    from .google_dream_place_search import search_google_dream_place, fetch_google_place_details, GooglePlacesBlockedError, GooglePlacesUnavailableError
+    from .dream_provider_recovery import failure_kind
     session_factory, resolver = session_factory or SessionLocal, resolver or search_google_dream_place
     with session_factory() as db:
         claim = claim_job(db, job_id, now=now)
@@ -338,6 +382,7 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
     if not claim:
         return "skipped"
     retryable = False
+    provider_reason = None
     try:
         if claim.get("google_place_id") and resolver is search_google_dream_place:
             refreshed = await fetch_google_place_details(claim["google_place_id"], allow_area=claim.get("coordinate_precision") == "area")
@@ -374,6 +419,11 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
         if (result["status"] == "not_found" and result["provider"] == "google_places"
                 and (result.get("_research") or {}).get("outcome") == "unavailable"):
             retryable = True
+            provider_reason = failure_kind((result.get("_research") or {}).get("failure_kind"))
+    except GooglePlacesUnavailableError as exc:
+        retryable, result, provider_reason = True, None, exc.reason
+    except TimeoutError:
+        retryable, result, provider_reason = True, None, "network"
     except RetryableDreamPlaceLookupError:
         retryable, result = True, None
     except GooglePlacesBlockedError:
@@ -406,7 +456,9 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
                     "reason": "source_location_research", "at": finished.isoformat(),
                     "queries": [], "matched": False, "outcome": "unavailable",
                 }]
-            if row.attempts < setting("DREAM_LOCATION_MAX_ATTEMPTS", 5, 10):
+            if provider_reason and (location_recovery(row) or row.attempts >= setting("DREAM_LOCATION_MAX_ATTEMPTS", 5, 10)):
+                _defer_location(row, provider_reason, finished)
+            elif row.attempts < setting("DREAM_LOCATION_MAX_ATTEMPTS", 5, 10):
                 row.status, row.next_attempt_at = "queued", finished + timedelta(seconds=min(3600, 60 * 2 ** (row.attempts - 1)))
                 row.message = "The location service is temporarily unavailable. We will retry."
             else:
@@ -442,8 +494,7 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
             elif row.status == "resolved" and len(row.candidates) == 1:
                 apply_candidate(row, row.candidates[0])
             if row.status == "blocked":
-                row.next_attempt_at = finished + timedelta(hours=6)
-                row.attempts = 0
+                _defer_location(row, "configuration", finished)
         db.commit()
         return row.status
 

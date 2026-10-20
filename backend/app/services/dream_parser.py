@@ -151,6 +151,15 @@ class DreamParserConfigurationError(DreamParserError):
     pass
 
 
+class DreamParserUnavailableError(DreamParserConfigurationError):
+    """Provider availability failure: retry later, never interpret it as content."""
+
+    def __init__(self, message, reason="provider"):
+        from .dream_provider_recovery import failure_kind
+        self.reason = failure_kind(reason) or "provider"
+        super().__init__(message)
+
+
 class DreamParserTruncatedError(DreamParserError):
     """The provider explicitly exhausted its output budget; partial data is unusable."""
 
@@ -336,11 +345,11 @@ def _secret_value(name: str, explicit: Optional[str] = None) -> str:
         try:
             value = Path(file_path).read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise DreamParserConfigurationError(f"{name}_FILE is not readable") from exc
+            raise DreamParserUnavailableError(f"{name}_FILE is not readable", "configuration") from exc
         if value:
             return value
 
-    raise DreamParserConfigurationError(f"{name} is not configured")
+    raise DreamParserUnavailableError(f"{name} is not configured", "configuration")
 
 
 def _fallback_needs_review_response(
@@ -399,11 +408,11 @@ def _venice_chat(
         try:
             response = httpx.post(url, headers=headers, json=payload, timeout=timeout)
         except httpx.TimeoutException as exc:
-            error = DreamParserError("Venice parser request timed out")
+            error = DreamParserUnavailableError("Venice parser request timed out", "network")
             if attempt >= max_attempts:
                 raise error from exc
         except httpx.TransportError as exc:
-            error = DreamParserError("Venice parser request failed")
+            error = DreamParserUnavailableError("Venice parser request failed", "network")
             if attempt >= max_attempts:
                 raise error from exc
         else:
@@ -413,6 +422,11 @@ def _venice_chat(
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
+                if response.status_code in {401, 402, 403, *TRANSIENT_HTTP_STATUSES} or response.status_code >= 500:
+                    reason = ("billing" if response.status_code == 402 else "rate_limited" if response.status_code == 429
+                              else "configuration" if response.status_code in {401, 403} else "provider")
+                    raise DreamParserUnavailableError(
+                        f"Venice parser request failed with HTTP {response.status_code}", reason) from exc
                 error_type = (
                     DreamParserConfigurationError
                     if response.status_code in {400, 401, 402, 403, 422}
@@ -608,6 +622,12 @@ def _ollama_chat(payload: dict[str, Any], ollama_base_url: str, timeout: float) 
     try:
         response = httpx.post(f"{ollama_base_url}/api/chat", json=payload, timeout=timeout)
         response.raise_for_status()
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        raise DreamParserUnavailableError("Ollama parser is temporarily unavailable", "network") from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in TRANSIENT_HTTP_STATUSES or exc.response.status_code >= 500:
+            raise DreamParserUnavailableError("Ollama parser is temporarily unavailable", "provider") from exc
+        raise DreamParserError("Ollama parser request failed") from exc
     except httpx.HTTPError as exc:
         raise DreamParserError(f"Ollama parser request failed: {exc}") from exc
     try:
@@ -857,7 +877,7 @@ def _request_missing_places(caption, source_url, existing, *, provider, model, b
         endpoint = (base_url or os.getenv("DREAM_AI_BASE_URL") or os.getenv("VENICE_API_BASE_URL") or DEFAULT_VENICE_BASE_URL).rstrip("/")
         payload = {"model": model, "messages": messages,
             "response_format": {"type": "json_schema", "json_schema": {"name": "trotter_missing_places", "strict": True, "schema": schema}},
-            "temperature": 0, "max_completion_tokens": 2400, "parallel_tool_calls": False, "store": False,
+            "temperature": 0, "max_completion_tokens": TRUNCATION_FALLBACK_COMPLETION_TOKENS, "parallel_tool_calls": False, "store": False,
             "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True, "enable_web_search": "off",
                 "enable_web_scraping": False, "enable_web_citations": False, "include_venice_system_prompt": False}}
         body, _, _, _ = _venice_chat(payload, base_url=endpoint, api_key=_secret_value("VENICE_API_KEY", api_key), timeout=timeout, max_attempts=1)
@@ -865,7 +885,7 @@ def _request_missing_places(caption, source_url, existing, *, provider, model, b
     else:
         endpoint = (base_url or os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)).rstrip("/")
         body = _ollama_chat({"model": model, "messages": messages, "stream": False, "format": schema, "think": False,
-                            "options": {"temperature": 0, "num_ctx": 8192, "num_predict": 2400}}, endpoint, timeout)
+                            "options": {"temperature": 0, "num_ctx": 8192, "num_predict": TRUNCATION_FALLBACK_COMPLETION_TOKENS}}, endpoint, timeout)
         message = body.get("message") if isinstance(body, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, str):
@@ -898,6 +918,10 @@ def complete_missing_places(result, caption, source_url=None, *, provider, model
         additions = output.get("items")
         if not isinstance(additions, list):
             return result
+    except (DreamParserUnavailableError, DreamParserTruncatedError):
+        # An outage or explicit incomplete response is not proof that no stops
+        # remain. The durable source job retries without deleting saved siblings.
+        raise
     except (DreamParserError, httpx.HTTPError, ValueError, TypeError):
         # A failed optional check must never discard a successfully parsed save
         # or trigger enrichment retries for content already extracted correctly.
@@ -996,6 +1020,8 @@ def parse_caption_with_fallback_model(
                 timeout_seconds=timeout_seconds,
                 **completion_override,
             )
+        except DreamParserUnavailableError:
+            raise
         except DreamParserError as fallback_error:
             raise DreamParserError(
                 f"Primary Dreams parser failed ({primary_error}); fallback failed ({fallback_error})"
@@ -1020,6 +1046,8 @@ def parse_caption_with_fallback_model(
             api_key=api_key,
             timeout_seconds=timeout_seconds,
         )
+    except DreamParserUnavailableError:
+        raise
     except DreamParserError as fallback_error:
         primary.raw = {
             **(primary.raw or {}),

@@ -20,6 +20,8 @@ export type DreamItemCategory =
 export type DreamItemStatus = 'created' | 'processing' | 'parsed' | 'needs_review' | 'confirmed' | 'failed';
 export type DreamSortingState = 'queued' | 'running' | 'sorted' | 'needs_details' | 'unavailable' | 'failed';
 export type DreamLocationStatus = 'queued' | 'running' | 'resolved' | 'needs_review' | 'not_found' | 'failed' | 'blocked' | 'manual';
+export type DreamLocationState = 'place' | 'area' | 'processing' | 'source_details' | 'unresolved' | 'unavailable';
+export type DreamLocationReason = 'resolved_place' | 'resolved_area' | 'processing' | 'creator_link_required' | 'identity_not_shared' | 'caption_missing' | 'broad_guide' | 'ambiguous_match' | 'named_unresolved' | 'provider_unavailable' | 'processing_failed' | 'location_unavailable';
 export type DreamLocationAttribution = { displayName: string; uri?: string };
 export type DreamLocationCandidate = {
   id: string;
@@ -92,6 +94,11 @@ type ApiDreamItem = {
   longitude?: number | null;
   coordinate_precision?: 'place' | 'area' | null;
   location_status?: DreamLocationStatus | null;
+  location_state?: DreamLocationState | null;
+  location_reason?: DreamLocationReason | null;
+  location_hint?: string | null;
+  location_retry_at?: string | null;
+  processing_retry_at?: string | null;
   location_address?: string | null;
   location_provider?: string | null;
   location_candidates?: ApiLocationCandidate[] | null;
@@ -132,6 +139,12 @@ export type DreamItem = {
   longitude?: number;
   coordinatePrecision?: 'place' | 'area';
   locationStatus?: DreamLocationStatus;
+  locationState?: DreamLocationState;
+  locationReason?: DreamLocationReason;
+  locationHint?: string;
+  /** Only present when the server has scheduled automatic provider recovery. */
+  locationRetryAt?: string;
+  processingRetryAt?: string;
   locationAddress?: string;
   locationProvider?: string;
   locationCandidates?: DreamLocationCandidate[];
@@ -263,7 +276,11 @@ function useDreamsState() {
   const needsReviewItems = React.useMemo(() => items.filter((item) => item.needsReview), [items]);
   const pendingUploadItems = React.useMemo(() => items.filter(item => item.uploadStatus), [items]);
   const processingItems = React.useMemo(() => items.filter(isSortingDreamItem), [items]);
-  const locatingItems = React.useMemo(() => items.filter((item) => item.locationStatus === 'queued' || item.locationStatus === 'running'), [items]);
+  const locatingItems = React.useMemo(() => items.filter((item) =>
+    !(item.locationRetryAt && Number.isFinite(Date.parse(item.locationRetryAt))) &&
+    (item.locationStatus === 'queued' || item.locationStatus === 'running')), [items]);
+  const deferredItems = React.useMemo(() => items.filter(item =>
+    [item.processingRetryAt, item.locationRetryAt].some(value => value && Number.isFinite(Date.parse(value)))), [items]);
   const awaitingReceiptDetails = recentlyAccepted.current.size;
 
   const refresh = React.useCallback((mode: 'loading' | 'refreshing' | 'quiet' = 'refreshing'): Promise<void> => {
@@ -314,16 +331,19 @@ function useDreamsState() {
   }, [refresh]);
 
   React.useEffect(() => {
-    if (!processingItems.length && !locatingItems.length && !awaitingReceiptDetails) return;
+    if (!processingItems.length && !locatingItems.length && !deferredItems.length && !awaitingReceiptDetails) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
+    // Provider recovery can wait minutes. Keep the result current while the
+    // app is open without treating that pause as active five-second work.
+    const delay = processingItems.length || locatingItems.length || awaitingReceiptDetails ? 5000 : 60000;
     const poll = async () => {
       if (AppState.currentState === 'active') await refresh('quiet');
-      if (!disposed) timer = setTimeout(() => void poll(), 5000);
+      if (!disposed) timer = setTimeout(() => void poll(), delay);
     };
-    timer = setTimeout(() => void poll(), 5000);
+    timer = setTimeout(() => void poll(), delay);
     return () => { disposed = true; clearTimeout(timer); };
-  }, [processingItems.length, locatingItems.length, awaitingReceiptDetails, refresh]);
+  }, [processingItems.length, locatingItems.length, deferredItems.length, awaitingReceiptDetails, refresh]);
 
   const drainUploads = React.useCallback((retry = false) => {
     if (!owner || !currentOwner()) return;
@@ -802,6 +822,11 @@ function mapApiDreamItem(item: ApiDreamItem): DreamItem {
     longitude: item.location_provider === 'google_places' && (!item.location_expires_at || Date.parse(item.location_expires_at) <= Date.now() || !Number.isFinite(Date.parse(item.location_expires_at))) ? undefined : item.longitude ?? undefined,
     coordinatePrecision: item.coordinate_precision ?? undefined,
     locationStatus: item.location_status ?? undefined,
+    locationState: item.location_state ?? undefined,
+    locationReason: item.location_reason ?? undefined,
+    locationHint: item.location_hint ?? undefined,
+    locationRetryAt: item.location_retry_at ?? undefined,
+    processingRetryAt: item.processing_retry_at ?? undefined,
     locationAddress: item.location_provider === 'google_places' ? undefined : item.location_address ?? undefined,
     locationProvider: item.location_provider ?? undefined,
     locationCandidates: item.location_provider === 'google_places' ? [] : mapLocationCandidates(item.location_candidates),
@@ -856,7 +881,7 @@ function mergeDreams(apiDreams: Dream[] | undefined, itemDreams: Dream[]) {
 }
 
 function isSortingDreamItem(item: DreamItem): boolean {
-  return !item.uploadStatus && (item.sortingState
+  return !item.uploadStatus && !(item.processingRetryAt && Number.isFinite(Date.parse(item.processingRetryAt))) && (item.sortingState
     ? item.sortingState === 'queued' || item.sortingState === 'running'
     : item.status === 'processing' || item.status === 'created');
 }

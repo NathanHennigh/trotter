@@ -122,3 +122,28 @@ test('the detail sheet owns multi-place reel navigation and returning preserves 
   collection.props.onBack(); tree = h.render(); collection = nodes(tree).find(node => typeof node.type === 'function' && node.type.name === 'CountryPlaces');
   assert.equal(collection.props.title, 'Thailand'); h.dispose();
 });
+
+test('source-limited saves keep their country, photo and recognizable title without a broken-pin or review warning', () => {
+  const saved = { ...item, placeName: undefined, category: 'hotel', country: 'Greece', city: 'Serifos',
+    caption: 'A little house by the sea', needsReview: true, sortingState: 'needs_details',
+    locationState: 'source_details', locationReason: 'creator_link_required', locationStatus: 'not_found' };
+  const h = host('PlaceRow'); const tree = h.render({ item: saved, onPress: noop, onShowMap: noop });
+  assert(text(tree).includes('A little house by the sea')); assert(text(tree).includes('Hotel · Serifos'));
+  assert(text(tree).includes('Location not shared')); assert.equal(find(tree, 'DreamPhoto').props.item, saved);
+  assert(!text(tree).some(value => /error|needs details|finding location|retry/i.test(value)));
+  assert.equal(nodes(tree).filter(node => node.type === 'Pressable').length, 1); h.dispose();
+  const home = host('DreamsScreen', [saved]); const homeTree = home.render({ active: 'dreams', onChange: noop });
+  assert.deepEqual(find(homeTree, 'FlatList').props.data.map(board => board.title), ['Greece']);
+  assert(!nodes(homeTree).some(node => node.props?.accessibilityLabel?.startsWith('Unsorted,'))); home.dispose();
+});
+
+test('a mixed collection retries only identifiable places and describes inspiration without demanding a pin', async () => {
+  const inspiration = { ...item, id: '2', placeName: undefined, locationState: 'source_details', locationReason: 'identity_not_shared', locationStatus: 'not_found' };
+  const unresolved = { ...item, id: '3', locationState: 'unresolved', locationReason: 'named_unresolved', locationStatus: 'not_found' };
+  const deferred = { ...unresolved, id: '4', locationState: 'unavailable', locationRetryAt: '2099-01-01' };
+  const calls = [], h = host('CountryPlaces'); let tree = h.render(countryProps({ items: [inspiration, unresolved, deferred], onLocateMissing: async ids => calls.push(ids) }));
+  assert(text(tree).includes('1 saved as inspiration · 2 not on map'));
+  assert(!text(tree).some(value => /needs? a pin/.test(value)));
+  await action(tree, 'Find locations').props.onPress(); assert.deepEqual(calls, [['3']]);
+  tree = h.render(countryProps({ items: [inspiration, deferred] })); assert(!action(tree, 'Find locations')); h.dispose();
+});

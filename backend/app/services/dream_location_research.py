@@ -288,12 +288,12 @@ def _island_context(caption):
     found = []
     # 'Meet Milos, ... this island' and 'Kefalonia Island' are source-backed;
     # names from a 'Santorini vs Mykonos' comparison are not introductions.
-    for match in re.finditer(r"\b(?:Meet|Welcome to)\s+([A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*(?:\s+[A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*){0,2})(?=[,!.\s])", caption):
+    for match in re.finditer(r"\b(?i:Meet|Welcome to)\s+([A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*(?:\s+[A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*){0,2})(?=[,!.\s])", caption):
         name = match.group(1)
         nearby = caption[max(0, match.start() - 150):match.end() + 500]
         if re.search(r"\b(?:this|little|the) island\b", nearby, re.IGNORECASE) and _positive(name, caption):
             found.append((name, match.group(0)))
-    for match in re.finditer(r"\b([A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*(?:\s+[A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*){0,2}) Island\b", caption):
+    for match in re.finditer(r"\b([A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*(?:\s+[A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*){0,2}) (?i:Island)\b", caption):
         name = match.group(1)
         if _positive(name, caption):
             found.append((name, match.group(0)))
@@ -668,11 +668,16 @@ An area proposal needs an exact intent quote describing the saved entity as an a
         return validate_location_proposals(output, source_caption=caption, **saved, protected=protected, manual=manual, protected_fields=protected_fields)
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
-        reason = "billing" if status == 402 else "rate_limited" if status == 429 else "provider"
-        raise LocationResearchUnavailable(reason) from None
-    except (TimeoutError, httpx.HTTPError):
+        if status in {401, 402, 403, 408, 429} or status >= 500:
+            reason = ("billing" if status == 402 else "rate_limited" if status == 429
+                      else "configuration" if status in {401, 403} else "provider")
+            raise LocationResearchUnavailable(reason) from None
+        # Bad request/schema/endpoint responses do not become permanent outage
+        # probes. Optional planning yields no new query, preserving normal lookup.
+        return []
+    except (TimeoutError, httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError, httpx.ProxyError):
         raise LocationResearchUnavailable("timeout_or_network") from None
-    except dream_parser.DreamParserConfigurationError:
-        raise LocationResearchUnavailable("configuration") from None
-    except (dream_parser.DreamParserError, ValueError, TypeError):
+    except dream_parser.DreamParserUnavailableError as exc:
+        raise LocationResearchUnavailable(exc.reason) from None
+    except (dream_parser.DreamParserError, httpx.HTTPError, httpx.InvalidURL, ValueError, TypeError):
         return []

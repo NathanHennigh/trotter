@@ -23,6 +23,33 @@ PROTECTED_FIELDS = (
 )
 
 
+def enrichment_recovery(item, row=None):
+    """Only current pending recovery is public; stale or successful work is not."""
+    from .dream_provider_recovery import valid_record
+    row = row or item.enrichment
+    if (not row or row.status not in ACTIVE or item.status != "processing"
+            or row.fingerprint != fingerprint(item) or (item.raw_metadata_json or {}).get("dream_user_edited")):
+        return None
+    if row.source_generation is not None and item.source_post and row.source_generation != item.source_post.generation:
+        return None
+    return valid_record((item.raw_metadata_json or {}).get("dream_enrichment_recovery"), row.generation)
+
+
+def _clear_recovery(item):
+    raw = item.raw_metadata_json or {}
+    if "dream_enrichment_recovery" in raw:
+        item.raw_metadata_json = {key: value for key, value in raw.items() if key != "dream_enrichment_recovery"}
+
+
+def _defer_provider(item, row, reason, now):
+    from .dream_provider_recovery import record, recovery_delay
+    recovery = record(row.generation, reason, enrichment_recovery(item, row), now)
+    item.raw_metadata_json = {**(item.raw_metadata_json or {}), "dream_enrichment_recovery": recovery}
+    row.status = "queued"
+    row.next_attempt_at = now + recovery_delay(recovery["cycle"])
+    row.message = "Saved. We will finish sorting automatically when the service is available."
+
+
 def public_sorting_state(item: DreamItem):
     """Current per-card outcome, including legacy jobs, without a DB write.
 
@@ -68,7 +95,9 @@ def enqueue_enrichment(db: Session, item: DreamItem, *, force=False, now=None):
         return None, False
     row = db.query(DreamEnrichmentJob).filter_by(item_id=item.id, user_id=item.user_id).with_for_update().first()
     identity = fingerprint(item)
-    if row and row.fingerprint == identity and (row.status in ACTIVE or not force):
+    recovery = enrichment_recovery(item, row) if row else None
+    explicit_waiting_retry = bool(force and row and row.status == "queued" and recovery and recovery["state"] == "waiting")
+    if row and row.fingerprint == identity and (row.status in ACTIVE or not force) and not explicit_waiting_retry:
         return row, False
     from .dream_source_places import ensure_source
     source = ensure_source(db, item)
@@ -77,6 +106,7 @@ def enqueue_enrichment(db: Session, item: DreamItem, *, force=False, now=None):
         db.add(row)
         item.enrichment = row
     row.generation += 1
+    _clear_recovery(item)
     source.generation += 1
     row.source_generation = source.generation
     row.fingerprint, row.status, row.attempts = identity, "queued", 0
@@ -91,6 +121,7 @@ def enqueue_enrichment(db: Session, item: DreamItem, *, force=False, now=None):
 
 def cancel_enrichment(db: Session, item: DreamItem, *, user_edited=False, now=None):
     now = now or utcnow()
+    _clear_recovery(item)
     if user_edited:
         item.raw_metadata_json = {**(item.raw_metadata_json or {}), "dream_user_edited": True}
     row = db.query(DreamEnrichmentJob).filter_by(item_id=item.id, user_id=item.user_id).with_for_update().first()
@@ -150,6 +181,7 @@ def due_enrichment_jobs(db: Session, *, now=None, limit=25):
 
 
 def _finish_failed(item, row, now):
+    _clear_recovery(item)
     row.status, row.message = "failed", FAILURE_MESSAGE
     row.next_attempt_at = row.lease_token = row.lease_expires_at = None
     row.updated_at = now
@@ -178,7 +210,20 @@ def claim_enrichment(db: Session, job_id: int, *, now=None):
     expired = row.status == "running" and row.lease_expires_at and aware(row.lease_expires_at) <= now
     if not due and not expired:
         return None
-    if row.attempts >= setting("DREAM_ENRICHMENT_MAX_ATTEMPTS", 3, 5):
+    recovery = enrichment_recovery(item, row)
+    deferred_probe = bool(due and recovery and recovery["state"] == "waiting")
+    if expired and recovery and recovery["state"] == "attempting":
+        lost = recovery.get("lost_leases", 0)
+        if isinstance(lost, int) and lost < 3:
+            _defer_provider(item, row, recovery["reason"], now)
+            item.raw_metadata_json = {**item.raw_metadata_json, "dream_enrichment_recovery": {
+                **item.raw_metadata_json["dream_enrichment_recovery"], "lost_leases": lost + 1}}
+            row.lease_token = row.lease_expires_at = None
+            row.updated_at = now
+        else:
+            _finish_failed(item, row, now)
+        return None
+    if row.attempts >= setting("DREAM_ENRICHMENT_MAX_ATTEMPTS", 3, 5) and not deferred_probe:
         _finish_failed(item, row, now)
         return None
     token = str(uuid.uuid4())
@@ -190,6 +235,9 @@ def claim_enrichment(db: Session, job_id: int, *, now=None):
              attempts=row.attempts + 1, updated_at=now), execution_options={"synchronize_session": False}).rowcount
     if not changed:
         return None
+    if deferred_probe:
+        item.raw_metadata_json = {**(item.raw_metadata_json or {}),
+                                  "dream_enrichment_recovery": {**recovery, "state": "attempting"}}
     return {"job_id": row.id, "item_id": item.id, "user_id": item.user_id,
             "generation": row.generation, "token": token, "fingerprint": row.fingerprint,
             "source_generation": row.source_generation,
@@ -198,9 +246,11 @@ def claim_enrichment(db: Session, job_id: int, *, now=None):
 
 
 class EnrichmentUnavailable(Exception):
-    def __init__(self, caption=None, metadata=None):
+    def __init__(self, caption=None, metadata=None, *, provider_reason=None):
+        from .dream_provider_recovery import failure_kind
         super().__init__(FAILURE_MESSAGE)
         self.caption, self.metadata = caption, metadata or {}
+        self.provider_reason = failure_kind(provider_reason)
 
 
 def read_source(claim):
@@ -212,7 +262,9 @@ def read_source(claim):
         caption, metadata = dreams.resolve_caption_for_parse(claim["source_url"], caption)
         parsed = dreams.parse_caption_with_fallback_model(caption, claim["source_url"])
     except Exception as exc:
-        raise EnrichmentUnavailable(caption, metadata) from exc
+        from .dream_parser import DreamParserUnavailableError
+        raise EnrichmentUnavailable(caption, metadata,
+            provider_reason=exc.reason if isinstance(exc, DreamParserUnavailableError) else None) from exc
     if metadata.get("thumbnail_url"):
         try:
             dreams.cache_thumbnail(claim["item_id"], metadata["thumbnail_url"])
@@ -296,20 +348,22 @@ def resolve_enrichment_job(job_id, *, session_factory=None, reader=None, now=Non
         row.updated_at = finished
         row.next_attempt_at = None
         if failure:
-            if row.attempts < setting("DREAM_ENRICHMENT_MAX_ATTEMPTS", 3, 5):
-                # A later AI retry must not depend on fetching an already-read
-                # Instagram caption again: that endpoint can become unavailable
-                # between attempts. The source/lease checks above protect edits.
-                if failure.caption:
-                    from ..routers.dreams import usable_caption_text
-                    if not usable_caption_text(item.caption, item.source_url):
-                        item.caption = failure.caption
-                        if item.source_post:
-                            item.source_post.caption = failure.caption
-                    metadata = {key: value for key, value in failure.metadata.items() if key != "error"}
-                    if metadata:
-                        item.raw_metadata_json = {**(item.raw_metadata_json or {}), "instagram_metadata": metadata}
-                    row.fingerprint = fingerprint(item)
+            # A provider outage must not force another Instagram fetch later.
+            # Preserve only public source metadata, including on a deferred retry.
+            if failure.caption:
+                from ..routers.dreams import usable_caption_text
+                if not usable_caption_text(item.caption, item.source_url):
+                    item.caption = failure.caption
+                    if item.source_post:
+                        item.source_post.caption = failure.caption
+                metadata = {key: value for key, value in failure.metadata.items() if key != "error"}
+                if metadata:
+                    item.raw_metadata_json = {**(item.raw_metadata_json or {}), "instagram_metadata": metadata}
+                row.fingerprint = fingerprint(item)
+            recovery = enrichment_recovery(item, row)
+            if failure.provider_reason and (recovery or row.attempts >= setting("DREAM_ENRICHMENT_MAX_ATTEMPTS", 3, 5)):
+                _defer_provider(item, row, failure.provider_reason, finished)
+            elif row.attempts < setting("DREAM_ENRICHMENT_MAX_ATTEMPTS", 3, 5):
                 row.status = "queued"
                 row.next_attempt_at = finished + timedelta(seconds=30 * 2 ** (row.attempts - 1))
                 row.message = "This save is taking longer to read. We will retry automatically."
@@ -321,6 +375,7 @@ def resolve_enrichment_job(job_id, *, session_factory=None, reader=None, now=Non
                                            "parsed": deterministic_caption_fallback(failure.caption, item.source_url, error=FAILURE_MESSAGE)})
                 _finish_failed(item, row, finished)
         else:
+            _clear_recovery(item)
             _apply_result(db, item, result)
             row.status = "completed"
             row.message = public_sorting_state(item)["processing_message"]

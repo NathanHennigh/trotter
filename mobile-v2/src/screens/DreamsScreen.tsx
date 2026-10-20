@@ -47,7 +47,7 @@ import {
 import { countryRegion } from "../components/world-window/dreams/countryRegion";
 import { dreamCardTitle, dreamCardMeta, dreamInboxSummary } from "../components/world-window/dreams/dreamCardPresentation";
 import { dreamProcessingState, dreamProcessingSummary } from "../components/world-window/dreams/dreamProcessing";
-import { canFindLocation, isFindingLocation } from "../components/world-window/dreams/locationPresentation";
+import { canFindLocation, isFindingLocation, locationNote, unmappedSummary } from "../components/world-window/dreams/locationPresentation";
 import { DreamPlacesMap } from "../components/world-window/dreams/DreamPlacesMap";
 import type { MapPoint } from "../components/world-window/trips/tripPresentation";
 import type { BottomNavTab } from "../data/trotterMock";
@@ -439,7 +439,7 @@ function CountryPlaces({
           refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={colors.blue} />}
           ListHeaderComponent={<>
             {unsorted && <View style={s.notice}>
-              <Text style={s.noticeText}>Your reels are saved here until a place can be identified.</Text>
+              <Text style={s.noticeText}>Your reels stay here until their country is known.</Text>
               <Text accessibilityLiveRegion="polite" style={s.unsortedStatus}>{dreamProcessingSummary(items)}</Text>
             </View>}
             {sourceReceipt && sourceReceipt.status !== "saved" && <View style={s.notice}>
@@ -463,7 +463,7 @@ function CountryPlaces({
               <View style={s.mapFoot}>
                 <Text style={s.mapCount}>{points.length ? `${points.length} on map` : "No pinned places yet"}</Text>
                 {points.length < visible.length && <Text style={s.mapNote}>
-                  {visible.length - points.length} {visible.length - points.length === 1 ? "place needs" : "places need"} a pin
+                  {unmappedSummary(visible)}
                 </Text>}
               </View>
               {finding > 0 && <Text accessibilityLiveRegion="polite" style={s.findingNote}>
@@ -515,6 +515,7 @@ function PlaceRow({ item, onPress, onShowMap }: {
   const state = dreamProcessingState(item);
   const title = dreamCardTitle(item);
   const point = exactMapPoint(item);
+  const note = state?.label || locationNote(item);
   return (
     <View style={s.placePaper}>
       <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Details for ${title}`}
@@ -523,7 +524,7 @@ function PlaceRow({ item, onPress, onShowMap }: {
         <View style={s.placeCopy}>
           <Text style={s.placeTitle} numberOfLines={2}>{title}</Text>
           <Text style={s.placeCity} numberOfLines={2}>{dreamCardMeta(item)}</Text>
-          {state && <Text style={[s.status, (state.kind === "unreadable" || state.kind === "failed") && s.statusError]} numberOfLines={2}>{state.label}</Text>}
+          {note && <Text style={[s.status, (state?.kind === "unreadable" || state?.kind === "failed") && s.statusError]} numberOfLines={2}>{note}</Text>}
         </View>
       </Pressable>
       {point && <Pressable accessibilityRole="button" accessibilityLabel={`Show ${title} on map`}

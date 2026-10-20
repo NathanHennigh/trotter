@@ -21,13 +21,14 @@ export function dreamCardMeta(item: DreamItem): string {
 }
 
 export function dreamInboxSummary(items: DreamItem[]): string {
-  const counts = { upload: 0, sorting: 0, unreadable: 0, failed: 0, details: 0 };
+  const counts = { upload: 0, sorting: 0, unreadable: 0, failed: 0, details: 0, deferred: 0 };
   for (const item of items) {
     const state = dreamProcessingState(item);
     if (state) counts[state.kind]++;
   }
   return [
     counts.sorting && `${counts.sorting} sorting`,
+    counts.deferred && `${counts.deferred} will retry automatically`,
     counts.details && `${counts.details} ${counts.details === 1 ? "needs" : "need"} details`,
     counts.unreadable && `${counts.unreadable} couldn’t be read`,
     counts.failed && `${counts.failed} couldn’t be sorted`,
