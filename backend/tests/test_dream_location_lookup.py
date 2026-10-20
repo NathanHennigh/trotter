@@ -62,6 +62,31 @@ def test_at_most_two_revised_google_searches_even_if_planner_returns_more():
     assert len(result["_research"]["queries"]) == 2
 
 
+def test_duplicate_plans_do_not_consume_revised_search_budget():
+    calls = []
+    async def search(*args, **kwargs):
+        calls.append(args)
+        return NOT_FOUND
+    async def planner(**kwargs):
+        return [proposal(city="Madrid"), proposal(), proposal(), proposal(city="Bilbao")]
+    result = run(search, planner)
+    assert len(calls) == 3
+    assert [call[1] for call in calls] == ["Madrid", None, "Bilbao"]
+    assert len(result["_research"]["queries"]) == 2
+
+
+def test_successful_source_context_has_auditable_plan_before_ai():
+    async def search(*args, **kwargs):
+        assert args == ("Egoist", None, "Greece", "Milos", "food")
+        return FOUND
+    async def forbidden(**kwargs):
+        pytest.fail("A source-grounded matched query needs no AI")
+    result = asyncio.run(lookup.lookup_dream_location("Egoist", "Milos", "Greece", None, "activity",
+        source_caption="Meet Milos, this island is wonderful. WHERE TO EAT: Egoist.", searcher=search, planner=forbidden))
+    assert result["_research"]["outcome"] == "matched"
+    assert result["_research"]["matched"]["evidence"]["city"]["source"] == "removed"
+
+
 @pytest.mark.parametrize("failure", [ValueError("bad model output"), TimeoutError()])
 def test_optional_ai_failure_preserves_normal_not_found(failure):
     async def search(*args, **kwargs):

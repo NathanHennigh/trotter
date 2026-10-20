@@ -360,17 +360,117 @@ def test_malformed_venice_is_nonfatal(monkeypatch, body):
 
 def test_network_failure_no_retry(monkeypatch):
     calls, _ = provider(monkeypatch, error=httpx.ConnectError("offline"))
-    assert plan() == [] and len(calls) == 1
+    with pytest.raises(research.LocationResearchUnavailable, match="timeout_or_network"):
+        plan()
+    assert len(calls) == 1
 
 
-def test_http_failure_no_retry(monkeypatch):
-    calls, _ = provider(monkeypatch, status=503)
-    assert plan() == [] and len(calls) == 1
+@pytest.mark.parametrize("status,reason", [(402, "billing"), (429, "rate_limited"), (503, "provider")])
+def test_http_failure_no_retry(monkeypatch, status, reason):
+    calls, _ = provider(monkeypatch, status=status, body={"error": "private provider details"})
+    with pytest.raises(research.LocationResearchUnavailable, match=reason) as error:
+        plan()
+    assert "private" not in str(error.value) and len(calls) == 1
 
 
 def test_real_async_timeout_cancels_without_waiting_for_thread_shutdown(monkeypatch):
     calls, _ = provider(monkeypatch, delay=1)
-    assert plan(timeout_seconds=0.001) == [] and len(calls) == 1
+    with pytest.raises(research.LocationResearchUnavailable, match="timeout_or_network"):
+        plan(timeout_seconds=0.001)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("name,category,caption", [
+    ("Adamas port", "hotel", "WHERE TO STAY: We based ourselves in Adamas port, the perfect spot to explore from."),
+    ("Plaka", "hotel", "WHERE TO STAY: Stay up in Plaka, the dreamy hilltop capital."),
+    ("Sarakiniko", "activity", "WHERE TO STAY: A small hotel. BEST BEACH: Sarakiniko, hands down. WHERE TO EAT: Cafe Blue."),
+    ("Firiplaka", "activity", "BEST BEACH: Sarakiniko, hands down. Also loved Firiplaka and Papafragkas! WHERE TO EAT: Cafe Blue."),
+    ("Myrtos Beach", "attraction", "Don't miss: • Myrtos Beach (go early or stay for sunset) • Cafe Blue"),
+    ("Kleftiko", "activity", "DON’T SKIP: A boat tour to Kleftiko. The sea caves are beautiful."),
+    ("Elafonissi", "attraction", "Elafonissi ha sabbia rosa e davanti c’è un isolotto con altre spiagge."),
+])
+def test_target_specific_area_evidence_survives_mixed_lists_and_inferred_category(name, category, caption):
+    assert research.source_area_intent(place_name=name, category=category, source_caption=caption)
+
+
+@pytest.mark.parametrize("name,caption", [
+    ("Lake Atitlan", "This unnamed hotel overlooks Lake Atitlan."),
+    ("Beach House", "This Airbnb is called Beach House."),
+    ("Beach House", "Stay at Beach House. BEST BEACH: White Beach."),
+    ("Plaka", "WHERE TO STAY: The best hotel in Plaka."),
+    ("Kleftiko", "Skip Kleftiko. Visit somewhere else."),
+])
+def test_target_repairs_do_not_create_area_pins_for_accommodation_or_negative_mentions(name, caption):
+    assert not research.source_area_intent(place_name=name, category="hotel", source_caption=caption)
+
+
+def test_shared_island_is_region_and_eating_section_repairs_activity_only():
+    caption = "Meet Milos, this little island is wonderful. WHERE TO EAT: Egoist (if you’re looking for breakfast heaven). WHERE TO STAY: Blue House."
+    fields, proof, dropped, area = research.source_search_context(place_name="Egoist", city="Milos", country="Greece", category="activity", source_caption=caption)
+    assert fields["city"] is None and fields["region_or_neighborhood"] == "Milos"
+    assert fields["category"] == "food" and not area and dropped == ["city"]
+    assert proof["region_or_neighborhood"] == {"source": "caption", "quote": "Meet Milos"}
+    fields, *_ = research.source_search_context(place_name="Blue House", country="Greece", category="hotel", source_caption=caption)
+    assert fields["category"] == "hotel"
+
+
+def test_comparison_islands_do_not_supply_shared_region():
+    caption = "Skip Santorini and Mykonos. WHERE TO EAT: Egoist."
+    fields, *_ = research.source_search_context(place_name="Egoist", country="Greece", category="activity", source_caption=caption)
+    assert fields["region_or_neighborhood"] is None
+
+
+def test_multiple_island_introductions_do_not_supply_shared_region():
+    caption = "Meet Alpha, this island is beautiful. Meet Beta, this island is great. WHERE TO EAT: Blue Cafe."
+    fields, *_ = research.source_search_context(place_name="Blue Cafe", country="Greece", category="cafe", source_caption=caption)
+    assert fields["region_or_neighborhood"] is None
+
+
+@pytest.mark.parametrize("city,caption", [
+    ("Athens", "Meet Milos, this island is beautiful. WHERE TO EAT: Blue Cafe in Athens."),
+    (None, "Meet Milos, this island is beautiful. Next stop: Athens. WHERE TO EAT: Blue Cafe."),
+])
+def test_island_context_does_not_cross_itinerary_or_saved_city(city, caption):
+    fields, *_ = research.source_search_context(place_name="Blue Cafe", city=city, country="Greece", category="cafe", source_caption=caption)
+    assert fields["region_or_neighborhood"] is None
+
+
+def test_valley_or_lake_context_is_not_a_street_address_city():
+    fields, *_ = research.source_search_context(place_name="Eden Boutique Hotel", city="Dades Valley", country="Morocco", region_or_neighborhood="Dades Valley", category="hotel", source_caption="Eden Boutique Hotel in Dades Valley, Morocco.")
+    assert fields["city"] is None and fields["region_or_neighborhood"] == "Dades Valley"
+
+
+def test_substring_of_venue_name_is_not_independent_city_evidence():
+    fields, *_ = research.source_search_context(place_name="Sipadan Kapalai Dive Resort", city="Sipadan Kapalai", country="Malaysia", category="hotel", source_caption="Sipadan Kapalai Dive Resort in Sabah, Malaysia.")
+    assert fields["city"] is None
+    fields, *_ = research.source_search_context(place_name="Bath Spa Hotel", city="Bath", country="UK", category="hotel", source_caption="Bath Spa Hotel in Bath, UK.")
+    assert fields["city"] == "Bath"
+
+
+@pytest.mark.parametrize("category", ["hotel", "unknown", "activity"])
+def test_unnamed_lakeside_rental_does_not_become_lake_pin(category):
+    caption = ("comment LINK and we’ll send you the link to this dreamy lakeside stay in Lake Atitlan, Guatemala! "
+               "(and other properties with the same view) #airbnbpartner What we loved about our stay: "
+               "- private lake access for swimming - room is spacious yet cozy perfect for couples "
+               "- accommodation is private w/ only one neighbor stay @airbnb #lakeatitlan #guatemala")
+    assert not research.source_area_intent(place_name="Lake Atitlan", category=category, source_caption=caption)
+    fields, _, _, area = research.source_search_context(place_name="Lake Atitlan", category=category, country="Guatemala", source_caption=caption)
+    assert not area and fields["category"] == category
+
+
+@pytest.mark.parametrize("name,city,category,caption", [
+    (None, None, "activity", "Comment link for info! This property on @airbnb is a treehouse in Costa Rica."),
+    ("Lake Atitlan", None, "hotel", "What a beautiful stay! Lake Atitlan is breathtaking. #AirbnbPartner"),
+    (None, None, "unknown", "Deluxe room with view #fyp"),
+    ("Seaweed Studio", None, "activity", "Seaweed studio on airbnb"),
+    (None, "Mallorca", "hotel", "Comment HOTEL to receive the island’s most beautiful hotels."),
+    (None, "Essaouira", "hotel", "The perfect itinerary, fly into Essaouira or Marrakesh!"),
+    (None, "Taghazout", "hotel", "A beautiful hideaway. Comment Taghazout for the link to this unique stay."),
+    ("Serifos", "Serifos", "hotel", "This stay had been on my bucket list. Comment SERIFOS and I will send the link. Greece | Greek Islands"),
+    (None, None, "hotel", "a seaside greek island dream #waterfronthomes #airbnbfinds #beachvilla"),
+])
+def test_low_information_rental_sources_remain_unpinned(name, city, category, caption):
+    assert not research.source_area_intent(place_name=name, city=city, category=category, source_caption=caption)
 
 
 @pytest.mark.parametrize("kwargs", [{"protected": True}, {"manual": True}, {"source_caption": ""},

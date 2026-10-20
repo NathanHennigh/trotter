@@ -12,6 +12,7 @@ https://developers.google.com/maps/documentation/places/web-service/policies
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import re
 import unicodedata
@@ -74,6 +75,7 @@ _DETAIL_FIELDS = (
     "businessStatus,pureServiceAreaBusiness,movedPlaceId,attributions"
 )
 _SEARCH_FIELDS = ",".join("places." + field for field in _DETAIL_FIELDS.split(",")) + ",nextPageToken"
+_REGION_SEARCH_FIELDS = _SEARCH_FIELDS + ",places.viewport"
 _TOTAL_TIMEOUT = 30
 _LOCAL_TYPES = {"locality", "postal_town", "sublocality", "sublocality_level_1"}
 _NEIGHBORHOOD_TYPES = {"neighborhood", "sublocality", "sublocality_level_1", "sublocality_level_2"}
@@ -117,7 +119,9 @@ _CATEGORY_TYPES = {
     "coffee": {"cafe", "coffee_shop"},
     "coffee shop": {"cafe", "coffee_shop"},
     "restaurant": {"restaurant", "meal_takeaway"},
-    "food": {"restaurant", "cafe", "bakery", "meal_takeaway"},
+    "food": {"restaurant", "cafe", "bakery", "meal_takeaway", "ice_cream_shop", "dessert_shop", "dessert_restaurant"},
+    "dessert": {"ice_cream_shop", "dessert_shop", "dessert_restaurant", "bakery"},
+    "gelato": {"ice_cream_shop", "dessert_shop"},
     "bar": {"bar", "pub", "wine_bar", "bar_and_grill"},
     "hotel": {
         "lodging",
@@ -152,6 +156,11 @@ _CATEGORY_TYPES = {
         "amusement_park",
         "zoo",
         "aquarium",
+        "natural_feature",
+        "beach",
+        "hiking_area",
+        "national_park",
+        "nature_preserve",
     },
     "activity": {
         "amusement_park",
@@ -165,6 +174,11 @@ _CATEGORY_TYPES = {
         "park",
         "movie_theater",
         "bowling_alley",
+        "natural_feature",
+        "beach",
+        "tourist_attraction",
+        "national_park",
+        "nature_preserve",
     },
     "nature": {
         "park",
@@ -277,7 +291,11 @@ def _candidate(place: object, *, expected_id: str | None = None, allow_area=Fals
     ):
         return None
     types = {kind for kind in types if isinstance(kind, str)}
-    area = bool(types & _SUPPORTED_AREA_TYPES) and not types - (_SUPPORTED_AREA_TYPES | _AREA_AUXILIARY_TYPES)
+    # Some named rocks/coves have only Google's generic tourism type. They
+    # become areas only when the caller has source-backed area intent; any
+    # explicit business type still prevents that classification.
+    area = (bool(types & _SUPPORTED_AREA_TYPES) and not types - (_SUPPORTED_AREA_TYPES | _AREA_AUXILIARY_TYPES)
+            or "tourist_attraction" in types and types <= _AREA_AUXILIARY_TYPES)
     if allow_area and area:
         precision = "area"
     elif (
@@ -380,6 +398,9 @@ def _category_match(category: str, types: set[str]) -> tuple[bool, bool]:
         "wine_bar",
         "bar_and_grill",
         "meal_takeaway",
+        "ice_cream_shop",
+        "dessert_shop",
+        "dessert_restaurant",
     }
     compatible = bool(expected & catering and actual & catering)
     return agrees or compatible, agrees
@@ -441,14 +462,16 @@ def _unverifiable_locality(wanted: str, values: set[str]) -> bool:
     )
 
 
-def _region_conflicts(wanted: str, components: dict[str, set[str]]) -> bool:
+def _region_conflicts(wanted: str, components: dict[str, set[str]], country: str = "") -> bool:
     """Reject comparable region evidence, not missing/mixed-level geography."""
     if not wanted:
         return False
     groups = {kind: values for kind, values in components.items()
               if kind in _NEIGHBORHOOD_TYPES | _LOCAL_TYPES or kind.startswith("administrative_area_level_")}
     values = {value for group in groups.values() for value in group}
-    if any(_normal(wanted) == _normal(value) or _same_admin(wanted, value) for value in values):
+    if any(_google_locality(wanted, country) == _google_locality(value, country)
+           or _same_admin(_google_locality(wanted, country), _google_locality(value, country))
+           for value in values):
         return False
     # region_or_neighborhood is freeform. Local neighborhood evidence is
     # comparable to it; a state's name alone is not proof that an unspecified
@@ -477,7 +500,66 @@ def _google_locality(value: str, country: str) -> str:
         return "marrakesh"
     if country_key == "vn" and normalized == "ha noi":
         return "hanoi"
+    if country_key in {"gr", "greece"}:
+        # Alternate Greek romanizations, scoped to geographic comparisons only.
+        # Never apply these substitutions to arbitrary business/branch names.
+        normalized = re.sub(r"\s+(?:village|town|island)$", "", normalized)
+        aliases = {
+            "adamas": "adamantas",
+            "assos": "asos",
+            "cephalonia": "kefalonia", "kefallonia": "kefalonia",
+            "kefallinia": "kefalonia",
+            "elafonissi": "elafonisi",
+            "mikonos": "mykonos",
+            "thera": "santorini", "thira": "santorini",
+            "tripiti": "trypiti",
+        }
+        return aliases.get(normalized, normalized)
     return normalized
+
+
+def _described_brand(wanted: str, actual: str, types: set[str]) -> bool:
+    """An exact distinctive name followed only by non-branch descriptions.
+
+    This is deliberately narrower than prefix/fuzzy matching: a location,
+    branch number, different brand or arbitrary marketing phrase is not an
+    optional suffix. The caller must independently verify local geography and
+    a compatible category before using this result.
+    """
+    name = _normal(wanted)
+    if not _country_only_identity(wanted, wanted):
+        return False
+    display = actual
+    if types & _CATEGORY_TYPES["hotel"]:
+        # Hotel membership is often a separate display-name annotation. Keep
+        # the delimiter/article/acronym/type grammar, not a specific hotel or
+        # collection name; an unqualified suffix remains identity evidence.
+        display = re.sub(r"\s*[,–—-]\s*an?\s+[A-Z]{2,5}\s+Hotel\s*$", "", display)
+    words, prefix = _normal(display).split(), name.split()
+    if words[:len(prefix)] != prefix:
+        return False
+    remaining = words[len(prefix):]
+    descriptors = _VENUE_WORDS | {"and", "rooftop", "terrace", "lounge", "spa", "boutique", "lodging"}
+    if types & _CATEGORY_TYPES["hotel"]:
+        # Amenities describe the accommodation, but compass directions,
+        # towns and words such as 'annex' never disappear from its identity.
+        tail = " ".join(remaining)
+        tail = re.sub(r"\bwith (?:sea|ocean|garden|mountain|pool) views?\b", "", tail)
+        remaining = tail.split()
+        descriptors |= {"rooms", "suites", "apartments", "villas"}
+    return all(word in descriptors for word in remaining)
+
+
+def _same_dessert_brand(wanted: str, actual: str, types: set[str]) -> bool:
+    """Translate a dessert-shop type label, never its distinctive brand."""
+    if not types & {"ice_cream_shop", "dessert_shop", "dessert_restaurant"}:
+        return False
+
+    def core(value):
+        value = re.sub(r"\s+(?:gelato|gelateria|ice cream(?: shop)?|dessert shop)$", "", _normal(value))
+        return value if _country_only_identity(value, value) else ""
+
+    return bool(core(wanted) and core(wanted) == core(actual))
 
 
 def _described_single_brand(wanted: str, actual: str, city: str, country: str) -> bool:
@@ -582,7 +664,37 @@ def _same_lake_name(wanted: str, actual: str, types: set[str]) -> bool:
     return bool(left and right and left == right)
 
 
-def _match_area(candidate: GoogleCandidate, name: str, city: str, country: str, region: str, category: str):
+def _same_area_type_name(wanted: str, actual: str, types: set[str], country: str) -> bool:
+    """An area's exact proper name may carry its geographic type label.
+
+    Google sometimes uses the beach/cave/village label while a caption omits
+    it, or vice versa. No direction, location, business descriptor or spelling
+    difference is removed, and the provider's type must support the label.
+    """
+    families = []
+    if types & {"beach", "natural_feature"}:
+        families.append({"beach"})
+    if "natural_feature" in types:
+        families.append({"cave", "caves"})
+    if types & {"locality", "postal_town", "sublocality"}:
+        families.append({"town", "village"})
+    if not families:
+        return False
+
+    def core(value, labels):
+        parts = _normal(value).split()
+        if parts and parts[0] in labels:
+            parts = parts[1:]
+        if parts and parts[-1] in labels:
+            parts = parts[:-1]
+        result = _google_locality(" ".join(parts), country)
+        return result if len(result) >= 4 and result not in _GENERIC | _AREA_GENERIC_NAMES else ""
+
+    return any(core(wanted, labels) and core(wanted, labels) == core(actual, labels) for labels in families)
+
+
+def _match_area(candidate: GoogleCandidate, name: str, city: str, country: str, region: str, category: str,
+                *, context_verified=False):
     """A named area is its own result, never the location of a nearby business."""
     if candidate.precision != "area" or _normal(category) not in _AREA_CATEGORIES:
         return None
@@ -593,7 +705,9 @@ def _match_area(candidate: GoogleCandidate, name: str, city: str, country: str, 
     if not wanted or re.findall(r"\d+", wanted) != re.findall(r"\d+", actual):
         return None
     admin_area = any(kind.startswith("administrative_area_level_") for kind in candidate._types)
-    if wanted != actual and not (admin_area and _same_admin(wanted, actual)) and not _same_lake_name(name, candidate.name, candidate._types):
+    if (wanted != actual and not (admin_area and _same_admin(wanted, actual))
+            and not _same_lake_name(name, candidate.name, candidate._types)
+            and not _same_area_type_name(wanted, actual, candidate._types, country)):
         return None
     kind = _normal(category)
     if kind in {"city", "town", "village"} and not candidate._types & {"locality", "postal_town", "sublocality"}:
@@ -604,7 +718,9 @@ def _match_area(candidate: GoogleCandidate, name: str, city: str, country: str, 
         return None
     if city and _google_locality(city, country) not in {wanted, actual} and not _verified_region(city, components, country):
         return None
-    if region and not _verified_region(region, components, country):
+    if region and not _verified_region(region, components, country) and not context_verified:
+        return None
+    if context_verified and _region_conflicts(region, components, country):
         return None
     candidate.score = 1.0
     return candidate
@@ -612,7 +728,7 @@ def _match_area(candidate: GoogleCandidate, name: str, city: str, country: str, 
 
 def _match(
     candidate: GoogleCandidate, name: str, city: str, country: str, region: str, category: str,
-    *, source_alias=False,
+    *, source_alias=False, context_verified=False,
 ):
     components = candidate._components
     countries = {_country(value) for value in components.get("country", set())} - {""}
@@ -624,7 +740,7 @@ def _match(
     # high whole-name score that bypasses the transliteration comparison.
     if re.findall(r"\d+", _normal(name)) != re.findall(r"\d+", _normal(candidate.name)):
         return None
-    if _region_conflicts(region, components):
+    if _region_conflicts(region, components, country):
         return None
     score = _name_score(name, candidate.name)
     wanted_city = _google_locality(city, country)
@@ -641,17 +757,27 @@ def _match(
     administrative = any(_same_admin(wanted_city, _google_locality(value, country)) for value in admin_values)
     allowed, category_exact = _category_match(category, candidate._types)
     if not city:
-        if not allowed or not _country_only_identity(name, candidate.name):
+        region_verified = _verified_region(region, components, country) or context_verified
+        exact_identity = (_country_only_identity(name, candidate.name)
+                          or _same_dessert_brand(name, candidate.name, candidate._types))
+        described_identity = (allowed and _normal(category) in _CATEGORY_TYPES and region_verified
+                              and _described_brand(name, candidate.name, candidate._types))
+        # A source-supported island/region is usable geography even when there
+        # is no city. It permits the same exact-name category correction used
+        # for cities, while country-only queries retain stricter type checks.
+        if not (exact_identity and (allowed or region_verified) or described_identity):
             return None
         if _verified_region(name, components, country):
             return None
-        if region and not _verified_region(region, components, country):
+        if region and not region_verified:
             return None
         candidate.score = 1.0
         return candidate
     geography_verified = city_exact or administrative
     brand_score = max(_brand_similarity(name, candidate.name),
-                      1.0 if (_described_single_brand(name, candidate.name, city, country)
+                      1.0 if (_same_dessert_brand(name, candidate.name, candidate._types)
+                              or _described_brand(name, candidate.name, candidate._types)
+                              or _described_single_brand(name, candidate.name, city, country)
                               or source_alias and _described_source_alias(name, candidate.name, city, country)) else 0.0)
     distinctive_exact = (
         _normal(name) == _normal(candidate.name)
@@ -683,6 +809,100 @@ def _match(
         return None
     candidate.score = round(max(score, brand_score if variant_brand_match else 0), 4)
     return candidate
+
+
+def _region_context_candidate(candidate, name, city, country, region, category, *, allow_area):
+    """Only missing regional evidence can trigger an independent area lookup."""
+    if (not region or _country(region) == _country(country)
+            or _normal(region) in _GENERIC | _AREA_GENERIC_NAMES
+            or _verified_region(region, candidate._components, country)
+            or _region_conflicts(region, candidate._components, country)):
+        return None
+    if not allow_area and not (
+        _country_only_identity(name, candidate.name)
+        or _described_brand(name, candidate.name, candidate._types)
+        or _same_dessert_brand(name, candidate.name, candidate._types)
+    ):
+        return None
+    matcher = _match_area if allow_area else _match
+    # This still checks the country, saved city, type, full name and branch
+    # qualifiers. A context viewport must never erase contradictory evidence.
+    return matcher(candidate, name, city, country, region, category, context_verified=True)
+
+
+def _context_viewport(raw: dict, area: GoogleCandidate):
+    """A small display viewport supplies search context, not a legal boundary.
+
+    Keep it transient and unpadded. Country-sized, malformed, inverted or
+    antimeridian rectangles provide insufficient local context. The exact
+    named area and its own point must independently agree with the rectangle.
+    """
+    viewport = raw.get("viewport")
+    if not isinstance(viewport, dict):
+        return None
+    low, high = viewport.get("low"), viewport.get("high")
+    if not isinstance(low, dict) or not isinstance(high, dict):
+        return None
+    south, west, north, east = (_number(low.get("latitude")), _number(low.get("longitude")),
+                                _number(high.get("latitude")), _number(high.get("longitude")))
+    if any(value is None for value in (south, west, north, east)):
+        return None
+    if not (-85 <= south < north <= 85 and -180 <= west < east <= 180):
+        return None
+    height = (north - south) * 111.2
+    width = (east - west) * 111.2 * math.cos(math.radians((north + south) / 2))
+    if not (0 < height <= 350 and 0 < width <= 350 and height * width <= 30_000):
+        return None
+    if not (south <= area.latitude <= north and west <= area.longitude <= east):
+        return None
+    return south, west, north, east
+
+
+async def _match_region_context(client, key, candidates, region, country):
+    """One bounded independent Google query; no returned area data is retained."""
+    page = await _request(client, "POST", _SEARCH_URL, key, _REGION_SEARCH_FIELDS, body={
+        "textQuery": ", ".join((region, country)), "pageSize": 5, "languageCode": "en",
+    })
+    places = _places(page)
+    if page.get("nextPageToken") or len(places) > 5:
+        return []
+    areas = {}
+    for raw in places:
+        area = _candidate(raw, allow_area=True)
+        if (not area or area.precision != "area" or "country" in area._types
+                or not area._types & _SUPPORTED_AREA_TYPES
+                or not _match_area(area, region, "", country, "", "area")):
+            continue
+        # Ambiguous regions stay ambiguous even when only one has a usable
+        # viewport. Missing geometry must not silently select a namesake.
+        areas[area.id] = (area, _context_viewport(raw, area))
+    if len(areas) != 1:
+        return []
+    area, bounds = next(iter(areas.values()))
+    if not bounds:
+        return []
+    south, west, north, east = bounds
+    matches = {candidate.id: candidate for candidate in candidates
+               if south <= candidate.latitude <= north and west <= candidate.longitude <= east
+               and _compatible_context_admin(area, candidate, country)}
+    return list(matches.values()) if len(matches) == 1 else []
+
+
+def _compatible_context_admin(area, candidate, country):
+    # A display rectangle can include a neighbouring island/district. Compare
+    # independently supplied administrative levels before admitting a point;
+    # matching coordinates never override an explicit competing hierarchy.
+    # Locality differs normally (village inside island) and is not comparable.
+    for kind, area_values in area._components.items():
+        if not kind.startswith("administrative_area_level_"):
+            continue
+        candidate_values = candidate._components.get(kind)
+        if candidate_values and not any(
+            _same_admin(_google_locality(left, country), _google_locality(right, country))
+            for left in area_values for right in candidate_values
+        ):
+            return False
+    return True
 
 
 async def _details(client, key: str, place_id: str, *, allow_area=False) -> GoogleCandidate | None:
@@ -735,7 +955,10 @@ async def search_google_dream_place(
     types; sorting opaque place IDs must never decide which branch is pinned.
     At most two ordinary provider requests are made, including fresh details.
     If needed, up to two extra searches use local names explicitly attached to
-    this place in the original caption. All attempts share one timeout budget.
+    this place in the original caption. One extra independent region query can
+    supply missing geographic context for a strong unambiguous result. Its
+    small viewport is search context, never an administrative boundary or a
+    replacement venue coordinate. All attempts share one timeout budget.
     Country-only venues require an exact distinctive name and one unambiguous
     result. Area mode returns only verified named areas; it cannot substitute a
     region's center for a hotel's location.
@@ -774,6 +997,7 @@ async def search_google_dream_place(
         "languageCode": "en",
     }
     matches = []
+    context_candidates = []
     singleton = False
     truncated = False
     matcher = _match_area if allow_area else _match
@@ -804,10 +1028,15 @@ async def search_google_dream_place(
                     truncated = truncated or bool(full.get("nextPageToken")) or len(_places(full)) > 5
                 else:
                     candidates = []
+                context_truncated = truncated
                 for candidate in candidates:
                     match = matcher(candidate, name, city, country, region, category)
                     if match:
                         matches.append(match)
+                    elif not truncated and (context_match := _region_context_candidate(
+                        candidate, name, city, country, region, category, allow_area=allow_area,
+                    )):
+                        context_candidates.append(context_match)
                 if not matches:
                     for alias in source_place_aliases(name, source_caption):
                         if (_normal(alias) in _GENERIC
@@ -817,15 +1046,24 @@ async def search_google_dream_place(
                         alias_query = {**query, "textQuery": ", ".join(value for value in (alias, region, city, country) if value)}
                         page = await _request(client, "POST", _SEARCH_URL, key, _SEARCH_FIELDS, body=alias_query)
                         alias_truncated = bool(page.get("nextPageToken")) or len(_places(page)) > 5
+                        context_truncated = context_truncated or alias_truncated
                         for raw in _places(page)[:5]:
                             candidate = _candidate(raw, allow_area=allow_area)
                             match = candidate and matcher(candidate, alias, city, country, region, category,
                                                           **({} if allow_area else {"source_alias": True}))
                             if match:
                                 matches.append(match)
+                            elif candidate and not alias_truncated and (context_match := _region_context_candidate(
+                                candidate, alias, city, country, region, category, allow_area=allow_area,
+                            )):
+                                context_candidates.append(context_match)
                         if matches:
                             truncated = alias_truncated
                             break
+                if not matches and context_candidates and not context_truncated:
+                    matches = await _match_region_context(client, key, context_candidates, region, country)
+                    if matches:
+                        truncated = False
     except GooglePlacesBlockedError:
         return GoogleSearchResult(
             status="blocked",

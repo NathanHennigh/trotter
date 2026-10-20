@@ -35,7 +35,7 @@ def source_place_aliases(place_name: str | None, caption: str | None) -> list[st
         if not normalized or normalized in seen or not 1 <= len(words) <= 10:
             continue
         if (sum(char.isalpha() for char in normalized) < 3 or any(char.isdigit() for char in alias)
-                or re.search(r"https?://|www\.|[@#=<>]|\b(?:not|formerly|closed|near|inside|behind|avoid|comment|click|link|free|entry|entrance|reservation|reservations|opening|hours|minute|minutes|km|tickets?|book|booking)\b", alias, re.IGNORECASE)):
+                or re.search(r"https?://|www\.|[@#=<>]|\b(?:not|formerly|closed|near|inside|behind|avoid|comment|click|link|free|entry|entrance|reservation|reservations|opening|hours|minute|minutes|km|tickets?|book|booking|go|stay|hike|early|sunset|looking|breakfast|if|you|your|you're|you’re)\b", alias, re.IGNORECASE)):
             continue
         # A whole instruction/sentence is not a place label.
         if any(char in alias for char in ".!?;:"):

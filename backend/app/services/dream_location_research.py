@@ -25,7 +25,15 @@ MAX_CAPTION_CHARS = 20_000
 FIELDS = ("place_name", "city", "country", "region_or_neighborhood")
 EVIDENCE_FIELDS = (*FIELDS, "intent")
 GENERIC_NAMES = {"hotel", "airbnb", "accommodation", "cafe", "coffee shop", "restaurant", "bar", "place", "unknown", "unnamed"}
-AREA_CATEGORIES = {None, "", "unknown", "nature", "attraction"}
+AREA_CATEGORIES = {None, "", "unknown", "nature", "attraction", "activity", "beach", "area", "destination", "town", "city", "village", "lake", "island", "region", "park"}
+
+
+class LocationResearchUnavailable(LookupError):
+    """Optional research failed; contains no provider payload or credential."""
+
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__(reason)
 
 
 @dataclass(frozen=True)
@@ -82,7 +90,10 @@ def _quote_valid(quote, source):
 
 def _positive(value, source):
     # Whole-name boundaries prevent e.g. LA from matching the word "palace".
-    return _contains(value, source) and dream_parser._positive_source_mention(_source_text(value), _source_text(source, preserve_lines=True))
+    normalized = _source_text(source, preserve_lines=True)
+    # 'Don't skip: X' recommends X; 'skip X' still excludes it.
+    normalized = re.sub(r"\b(?:don['’]t|do not)\s+(?:skip|miss)\s*:", "visit:", normalized)
+    return _contains(value, source) and dream_parser._positive_source_mention(_source_text(value), normalized)
 
 
 def _bound_quote(value, quote, caption, names):
@@ -137,7 +148,11 @@ def _bound_quote(value, quote, caption, names):
 
 
 def _business_focus(caption):
-    return bool(re.search(r"\b(?:hotel|hotels|airbnb|resort|resorts|accommodation|cabin|cabins|restaurant|restaurants|cafe|café|coffee shop|bar|bars)\b", caption, re.IGNORECASE))
+    return bool(re.search(
+        r"\b(?:hotels?|airbnb\w*|resorts?|accommodation|cabins?|restaurants?|cafe|café|coffee shop|bars?|"
+        r"propert(?:y|ies)|rentals?|treehouses?|villas?|hideaway|riads?|suites?|rooms?|stays)\b|"
+        r"\b(?:this|our|your|the|a|an|unique|dreamy|lakeside|boutique|private|unnamed)(?:\s+[\w-]+){0,3}\s+stay\b",
+        caption, re.IGNORECASE))
 
 
 def _subject_clauses(name, caption):
@@ -149,6 +164,186 @@ def _area_clauses(name, caption):
     # Read complete source clauses, not a cropped model quote that hides
     # "Airbnb overlooking" immediately before the name of a lake.
     return [clause for clause in _subject_clauses(name, caption) if not _business_focus(clause)]
+
+
+_SECTION_HEADING = re.compile(
+    r"\b(?P<label>where to (?:eat|stay)|best beach(?:es)?|beaches to (?:visit|see)|restaurants?|cafes?|hotels?|don['’]t (?:skip|miss))\s*:",
+    re.IGNORECASE,
+)
+
+
+def _target_section(name, caption):
+    """A list heading applies only to following entries, until the next heading.
+
+    This deliberately does not classify a whole mixed itinerary from the first
+    hotel or restaurant word it contains.
+    """
+    headings = list(_SECTION_HEADING.finditer(caption))
+    for index, heading in enumerate(headings):
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(caption)
+        section = caption[heading.end():end]
+        if _positive(name, section):
+            return heading.group("label").casefold(), section
+    return None, None
+
+
+def _explicit_area_evidence(name, caption):
+    """Return source text that describes this target, rather than its venue.
+
+    Strong structural evidence may repair a mistaken hotel/activity category.
+    Merely saying 'Explore X' is not enough to reinterpret a saved hotel.
+    """
+    if not name or _business_focus(name) or re.search(r"\b(?:rooms?|suites?|lodge|villa|retreat|studio|house|home)\b", name, re.IGNORECASE):
+        return None
+    clauses = _area_clauses(name, caption)
+    subject = re.escape(_source_text(name))
+    feature = r"(?:beach|village|port|island|lake|valley|cave|mountain|ridge|national park)"
+    for clause in clauses:
+        text = _source_text(clause)
+        if re.search(r"\b" + feature + r"\b", _source_text(name)):
+            return clause
+        if re.search(subject + r"\s*(?:[,—–-]\s*)?(?:(?:a|an|the|dreamy|small|hilltop|coastal|historic)\s+){0,5}(?:capital|village|town|island|beach|lake)\b", text):
+            return clause
+        if re.search(r"\b(?:island|lake|village|town|beach)\s+(?:of\s+)?" + subject + r"(?!\w)", text):
+            return clause
+        # Common travel-caption languages: the target is explicitly discussed
+        # as a beach, not a business that happens to overlook one.
+        if re.search(r"\b(?:spiagg(?:ia|e)|playa|praia|plage)\b", text) and not re.search(r"\b(?:hotel|appartamento|apartamento|alojamiento|ristorante|restaurante|bar|cafe)\b", text):
+            return clause
+        if re.search(r"\b(?:insieme a|junto a|together with)\b", text) and re.search(r"\b(?:zona|area|coast|beaches)\b", text):
+            return clause
+    label, section = _target_section(name, caption)
+    if label and "beach" in label and not any(_business_focus(clause) for clause in _subject_clauses(name, section)):
+        return next(iter(_subject_clauses(name, section)), None)
+    # An explicit boat excursion to named sea caves is a natural destination,
+    # not the identity of the tour operator or an unnamed accommodation.
+    if label and "skip" in label and re.search(r"\bboat tour to\s+" + subject + r"(?!\w)", _source_text(section)) and re.search(r"\b(?:sea )?caves\b", section, re.IGNORECASE):
+        return next(iter(_subject_clauses(name, section)), None)
+    return None
+
+
+def _island_context(caption):
+    """Read a single explicit island introduction, never comparison hashtags.
+
+    The region is a query constraint, still independently checked against the
+    provider address. Multiple introductions are intentionally ambiguous.
+    """
+    found = []
+    # 'Meet Milos, ... this island' and 'Kefalonia Island' are source-backed;
+    # names from a 'Santorini vs Mykonos' comparison are not introductions.
+    for match in re.finditer(r"\b(?:Meet|Welcome to)\s+([A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*(?:\s+[A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*){0,2})(?=[,!.\s])", caption):
+        name = match.group(1)
+        nearby = caption[max(0, match.start() - 150):match.end() + 500]
+        if re.search(r"\b(?:this|little|the) island\b", nearby, re.IGNORECASE) and _positive(name, caption):
+            found.append((name, match.group(0)))
+    for match in re.finditer(r"\b([A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*(?:\s+[A-ZÀ-ÖØ-Þ][\wÀ-ž'-]*){0,2}) Island\b", caption):
+        name = match.group(1)
+        if _positive(name, caption):
+            found.append((name, match.group(0)))
+    unique = {_identity(name): (name, quote) for name, quote in found}
+    return next(iter(unique.values())) if len(unique) == 1 else (None, None)
+
+
+def _listed_island_destination(name, caption, category):
+    # A stand-alone stop in a single island's sightseeing list can be a town.
+    # Named lodging/food categories cannot use this inference. Google must
+    # still return a geographic entity with the exact identity and context.
+    label, section = _target_section(name, caption)
+    island, _ = _island_context(caption)
+    if category not in AREA_CATEGORIES or not island or not label or "miss" not in label or _business_focus(name):
+        return None
+    for entry in re.split(r"[•\n]", section):
+        if _identity(entry) == _identity(name):
+            return entry.strip()
+    return None
+
+
+def _supported_area_evidence(name, caption, category):
+    evidence = _explicit_area_evidence(name, caption) or _listed_island_destination(name, caption, category)
+    if not evidence or category in AREA_CATEGORIES:
+        return evidence
+    # A parser can call regional lodging advice a hotel ("stay up in Plaka,
+    # the hilltop capital"). That repair needs a bounded section explicitly
+    # describing a base area. An unnamed rental beside a named lake cannot
+    # change from hotel to area merely because the lake name is recognizable.
+    label, section = _target_section(name, caption)
+    if category in {"hotel", "stay", "accommodation"} and label == "where to stay":
+        section_evidence = _explicit_area_evidence(name, section)
+        if section_evidence and re.search(r"\b(?:port|capital|village|town)\b", _source_text(section_evidence)):
+            return section_evidence
+    return None
+
+
+def _same_island_section(name, island, quote, caption, city):
+    if city and _identity(city) != _identity(island):
+        return False
+    text = _source_text(caption)
+    start, end = text.find(_source_text(quote)), text.find(_source_text(name))
+    if start < 0 or end < start:
+        return False
+    # Even one island introduction cannot label a later stop after an explicit
+    # itinerary transition. Keep missing context rather than borrow geography.
+    between = text[start:end]
+    return not re.search(r"\b(?:next stop|then (?:head|go|travel|visit|on)|onward to|off to|back (?:to|in)|now in|afterwards)\b", between)
+
+
+def source_search_context(*, source_caption, place_name, city=None, country=None, region_or_neighborhood=None, category=None):
+    """Prepare a source-backed query without modifying the saved item.
+
+    Broad island context is retained as a region, not treated as the venue's
+    municipality. No coordinates, aliases, or countries are invented here.
+    """
+    caption = str(source_caption or "")[:MAX_CAPTION_CHARS]
+    values = dict(place_name=place_name, city=city, country=country, region_or_neighborhood=region_or_neighborhood, category=category)
+    evidence, dropped = {}, []
+    area = source_area_intent(source_caption=caption, **values)
+    if not place_name or not _positive(place_name, caption):
+        return values, evidence, dropped, area
+    label, section = _target_section(place_name, caption)
+    if label and label in {"where to eat", "restaurants", "restaurant", "cafes", "cafe"} and category in {None, "", "unknown", "activity", "attraction"} and not _explicit_area_evidence(place_name, caption):
+        values["category"] = "food"
+    if area:
+        values["category"] = "nature" if category not in AREA_CATEGORIES else category
+    if category in {None, "", "unknown", "activity", "attraction", "hotel"} and not re.search(r"\b(?:hotel|resort|suites?|rooms?|inn)\b", place_name, re.IGNORECASE):
+        if re.search(r"\b(?:cafe|café|coffee)\b", place_name, re.IGNORECASE):
+            values["category"] = "cafe"
+        elif re.search(r"\b(?:restaurant|ristorante|restaurante)\b", place_name, re.IGNORECASE):
+            values["category"] = "restaurant"
+    island, quote = _island_context(caption)
+    # Only list entries after a unique island introduction inherit context.
+    # A second country/itinerary heading is not a safe single-region source.
+    if island and label and not region_or_neighborhood and _identity(place_name) != _identity(island) and _same_island_section(place_name, island, quote, caption, city):
+        values["region_or_neighborhood"] = island
+        evidence["region_or_neighborhood"] = {"source": "caption", "quote": quote}
+    if city and island and _identity(city) == _identity(island):
+        values["city"] = None
+        values["region_or_neighborhood"] = region_or_neighborhood or island
+        evidence["city"] = {"source": "removed", "quote": quote}
+        evidence.setdefault("region_or_neighborhood", {"source": "caption", "quote": quote})
+        dropped.append("city")
+    # Lakes/valleys are useful parent regions but not the street-address city.
+    # Keep the literal source's geography; do not infer the shore municipality.
+    if values["city"] and _positive(city, caption) and re.search(r"\b(?:lake|lago|lac|valley|island)\b", _source_text(city)):
+        values["city"] = None
+        if not values["region_or_neighborhood"]:
+            values["region_or_neighborhood"] = city
+            evidence["region_or_neighborhood"] = {"source": "caption", "quote": city}
+        evidence["city"] = {"source": "removed", "quote": city}
+        dropped.append("city")
+    constraint = values["region_or_neighborhood"]
+    if constraint and re.match(r"^(?:between\s+.+\s+and\s+|(?:off|along) the coast of\s+)", constraint, re.IGNORECASE):
+        values["region_or_neighborhood"] = None
+        evidence["region_or_neighborhood"] = {"source": "removed", "quote": constraint if _literal(constraint) in _literal(caption) else None}
+        dropped.append("region_or_neighborhood")
+    # A parser sometimes copies part of the venue's own name into city. It
+    # is not independent locality evidence if it appears only in that name.
+    if values["city"] and _identity(city) != _identity(place_name) and _contains(city, place_name):
+        without_name = re.sub(re.escape(_source_text(place_name)), "", _source_text(caption))
+        if not _contains(city, without_name):
+            values["city"] = None
+            evidence["city"] = {"source": "removed", "quote": None}
+            dropped.append("city")
+    return values, evidence, dropped, area
 
 
 def _area_seed(saved, caption):
@@ -169,7 +364,8 @@ def _area_supported(saved, quote, caption):
     name = saved["place_name"] or _area_seed(saved, caption)
     if not name:
         return False
-    if saved["category"] not in AREA_CATEGORIES or not _quote_valid(quote, caption) or not _positive(name, quote):
+    explicit = _supported_area_evidence(name, caption, saved["category"])
+    if (saved["category"] not in AREA_CATEGORIES and not explicit) or not _quote_valid(quote, caption) or not _positive(name, quote):
         return False
     if re.search(r"\b(?:unnamed|unknown|secret)\s+(?:hotel|stay|airbnb)|\b(?:hotel|airbnb|resort|cafe|restaurant)\b", name, re.IGNORECASE):
         return False
@@ -177,6 +373,8 @@ def _area_supported(saved, quote, caption):
                if _literal(quote) in _literal(clause) or _literal(clause) in _literal(quote)]
     if not clauses:
         return False
+    if explicit and (_literal(quote) in _literal(explicit) or _literal(explicit) in _literal(quote)):
+        return True
     if not saved["place_name"] or re.match(r"^(?:lake|lago|lac|island|isle|valley|mountain|mount)\s+\w", name, re.IGNORECASE):
         return True
     if any(_identity(name) == _identity(saved[field]) for field in ("city", "region_or_neighborhood") if saved[field]):
@@ -214,6 +412,8 @@ def source_area_intent(*, place_name, source_caption, city=None, region_or_neigh
     caption = str(source_caption or "")[:MAX_CAPTION_CHARS]
     saved = dict(place_name=place_name, city=city, region_or_neighborhood=region_or_neighborhood, category=category)
     name = place_name or _area_seed(saved, caption)
+    if name and _supported_area_evidence(name, caption, category):
+        return True
     return bool(name and any(_area_supported(saved, clause, caption) for clause in _subject_clauses(name, caption)))
 
 
@@ -403,5 +603,13 @@ An area proposal needs an exact intent quote describing the saved entity as an a
                         return []
                 output = dream_parser._extract_json_object(content)
         return validate_location_proposals(output, source_caption=caption, **saved, protected=protected, manual=manual, protected_fields=protected_fields)
-    except (TimeoutError, httpx.HTTPError, dream_parser.DreamParserError, ValueError, TypeError):
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        reason = "billing" if status == 402 else "rate_limited" if status == 429 else "provider"
+        raise LocationResearchUnavailable(reason) from None
+    except (TimeoutError, httpx.HTTPError):
+        raise LocationResearchUnavailable("timeout_or_network") from None
+    except dream_parser.DreamParserConfigurationError:
+        raise LocationResearchUnavailable("configuration") from None
+    except (dream_parser.DreamParserError, ValueError, TypeError):
         return []

@@ -14,7 +14,7 @@ This follows Google's [Place ID storage and attribution policy](https://develope
 
 ## Configuration and deployment
 
-New unresolved jobs use Google Places (New), with no legacy default key or provider fallback. Search starts with an IDs-only Text Search. A singleton gets Place Details Pro; ambiguous IDs get one bounded Text Search Pro. There are at most two requests per search, with explicit field masks and a 30-second total deadline. A singleton alone is not proof of a match. Country, name, locality, compatible category and precise-POI validation determine whether it resolves or has no reliable result. Administrative geography, local-script city names and distinctive transliteration matches can resolve automatically. The result is stored as resolved with location_user_confirmed=false; automatic matching never claims user confirmation. Parking, transport, street/area centres and moved/closed places are excluded. The [Text Search](https://developers.google.com/maps/documentation/places/web-service/text-search) and [Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details) docs define field-mask billing; no wildcard, rating, photo, review or phone fields are requested.
+New unresolved jobs use Google Places (New), with no legacy default key or provider fallback. Search starts with an IDs-only Text Search. A singleton gets Place Details Pro; ambiguous IDs get one bounded Text Search Pro. Each search permits at most two ordinary requests, two source-stated alias searches, and one independent region-context query, with explicit field masks and a shared 30-second deadline. A singleton alone is not proof of a match. Country, name, locality, compatible category and precise-POI validation determine whether it resolves or has no reliable result. Administrative geography, local-script city names and distinctive transliteration matches can resolve automatically. The result is stored as resolved with location_user_confirmed=false; automatic matching never claims user confirmation. Parking, transport, street/area centres and moved/closed places are excluded. The [Text Search](https://developers.google.com/maps/documentation/places/web-service/text-search) and [Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details) docs define field-mask billing; no wildcard, rating, photo, review or phone fields are requested.
 
 The scheduler checks selected-point cache health in bounded batches, normally every five minutes per selected item. It refreshes missing caches or coordinates within one day of expiry. Valid coordinates remain available during refresh; expired coordinates never reappear through URL or legacy-field fallbacks. Redis uses a shared connection pool, short timeouts and a fail-closed outage circuit so a large item list does not multiply cache timeouts. Existing Google needs_review rows are picked up in bounded scheduler batches and searched again with current saved inputs. They resolve automatically or end as not_found; the same row is not repeatedly reset. Original saves, manual pins and confirmed selections remain unchanged, and historical candidate IDs are retained in resolution history. This change needs no new schema migration. Other terminal results retain their existing explicit retry behavior.
 
@@ -41,6 +41,34 @@ Keep the default Gmail worker running. Verify API, default worker, location work
 Item responses retain existing location fields and add `location_place_id`, `location_candidate_ids`, `location_expires_at`, and `location_user_confirmed`. Google list/poll responses use provider `google_places`, retain original saved labels, and return null address/empty candidate payloads; only IDs and unexpired cached coordinates are serialized. Fresh details return `location_candidates`, `location_address`, `location_attributions`, status/selected ID and `location_expires_at`. Internal job leases/history are not exposed. List polling makes no Google requests. Normal item responses expose Google coordinates and expiry only to clients sending `X-Trotter-Maps: google`; older clients receive no Google pin coordinates or coordinate-derived URLs. Original manual and Geoapify pins are unaffected.
 
 When a named save has no existing or resolved Maps URL, responses provide an encoded Google Maps text search for its name, city, and country. This read-only fallback never writes a saved URL or coordinates; numeric-looking names are explicitly treated as place searches. Unnamed saves receive no city-only fallback, and existing saved or resolved links take precedence.
+
+## Source context and explicit recovery
+
+Search preparation distinguishes a named geographic destination from an unnamed
+property near it. Target-specific list headings can repair a search category;
+explicit lake, valley, and island context is retained as a region rather than
+silently treated as a municipality. These changes use retained caption evidence,
+preserve saved titles and notes, and are audited when corrected geography is
+applied. Unnamed stays never inherit the surrounding lake or town as their pin.
+
+Country-scoped geographic spellings, limited business descriptors, and natural
+feature types are supported without removing branch identifiers or accepting
+conflicting geography. If a strong candidate lacks regional address components,
+one independently verified named-region search may supply a modest, unpadded
+viewport as additional search context. It is not an administrative boundary;
+ambiguous regions, competing known geography, oversized viewports, and ambiguous
+place results remain unresolved. No region coordinates replace venue coordinates,
+and provider content stays transient.
+
+Failed optional AI research is recorded as unavailable and follows bounded
+durable retries instead of becoming a terminal no-match result. Once retries
+are exhausted, explicit recovery is still required. After a verified backup and
+code rollout, retry only the intended unresolved owned items through
+`enqueue_location(..., force=True)` under their row locks. Reparse a source via
+`enqueue_enrichment(..., force=True)` only when extraction failed or useful places
+were omitted; deduplicate by source and preserve manual/confirmed/user-edited
+records. Existing resolved pins are not part of recovery. Verify original item
+IDs, confirmed choices, and unrelated trip/flight data after the jobs finish.
 
 ## Offline verification
 

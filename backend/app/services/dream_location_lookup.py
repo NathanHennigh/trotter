@@ -5,7 +5,9 @@ import asyncio
 from dataclasses import asdict
 import re
 
-from .dream_location_research import plan_location_queries, source_area_intent
+from .dream_location_research import (
+    LocationQueryProposal, plan_location_queries, source_area_intent, source_search_context,
+)
 
 INITIAL_SECONDS = 30
 RESEARCH_SECONDS = 15
@@ -47,19 +49,26 @@ async def lookup_dream_location(place_name, city, country, region, category, *, 
     """
     from .google_dream_place_search import search_google_dream_place
     searcher, planner = searcher or search_google_dream_place, planner or plan_location_queries
-    area_name = area_search_name(place_name, city, region, category, source_caption)
+    fields = dict(place_name=place_name, city=city, country=country,
+                  region_or_neighborhood=region, category=category)
+    prepared, evidence, dropped, _ = source_search_context(**fields, source_caption=source_caption) if not protected else (fields, {}, [], False)
+    area_name = area_search_name(place_name, prepared["city"], prepared["region_or_neighborhood"], prepared["category"], source_caption)
     # A named area is the target itself. A lake can contain several towns;
     # treating a shore town as its parent locality can instead select that
     # town or reject the lake. Keep saved context intact and require Google's
     # exact area identity, verified country and an unambiguous result.
-    search_city = None if area_name and not protected else city
-    search_region = area_region_constraint(region, country) if area_name and not protected else region
-    fields = dict(place_name=place_name, city=city, country=country,
-                  region_or_neighborhood=region, category=category)
+    search_city = None if area_name and not protected else prepared["city"]
+    search_region = area_region_constraint(prepared["region_or_neighborhood"], country) if area_name and not protected else prepared["region_or_neighborhood"]
+    search_category = prepared["category"]
+    source_plan = None
+    if prepared != fields:
+        source_plan = LocationQueryProposal(**prepared, intent="area" if area_name else "place", evidence=evidence, dropped_fields=tuple(dropped))
     async with asyncio.timeout(TOTAL_SECONDS):
         async with asyncio.timeout(INITIAL_SECONDS):
-            result = _payload(await searcher(area_name or place_name, search_city, country, search_region, category,
+            result = _payload(await searcher(area_name or place_name, search_city, country, search_region, search_category,
                                             source_caption=source_caption, allow_area=bool(area_name)))
+        if result.get("status") == "resolved" and source_plan:
+            return {**result, "_research": {"queries": [asdict(source_plan)], "matched": asdict(source_plan), "outcome": "matched"}}
         if result.get("status") != "not_found" or protected or not source_caption:
             return result
         try:
@@ -69,13 +78,15 @@ async def lookup_dream_location(place_name, city, country, region, category, *, 
             # Optional query planning cannot break ordinary Google lookup.
             return {**result, "_research": {"queries": [], "matched": None, "outcome": "unavailable"}}
         attempts = []
-        initial = (area_name or place_name, search_city, country, search_region, category, bool(area_name))
+        initial = (area_name or place_name, search_city, country, search_region, search_category, bool(area_name))
         seen = {initial}
-        for plan in plans[:MAX_REVISED_SEARCHES]:
+        for plan in plans:
             inputs = (plan.place_name, None if plan.allow_area else plan.city, plan.country,
                       area_region_constraint(plan.region, plan.country) if plan.allow_area else plan.region, plan.category, plan.allow_area)
             if inputs in seen:
                 continue
+            if len(attempts) == MAX_REVISED_SEARCHES:
+                break
             seen.add(inputs)
             attempts.append(asdict(plan))
             async with asyncio.timeout(RETRY_SECONDS):

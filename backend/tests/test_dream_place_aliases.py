@@ -17,7 +17,7 @@ def test_aliases_are_bounded_case_accent_normalized_and_keep_original_spelling()
 
 
 def test_annotations_instructions_urls_and_guessed_translations_are_not_aliases():
-    for annotation in ["free entrance", "closed Monday", "near the square", "formerly Garden Cafe", "book now", "12 minutes", "https://evil.invalid", "click this link", "A full sentence."]:
+    for annotation in ["free entrance", "closed Monday", "near the square", "formerly Garden Cafe", "book now", "12 minutes", "https://evil.invalid", "click this link", "A full sentence.", "go early or stay for sunset", "boat or hike in", "if you’re looking for breakfast heaven"]:
         assert source_place_aliases("Cafe Blue", f"Cafe Blue ({annotation})") == []
     assert source_place_aliases("Cafe Blue", "The local name may be Cafe Azul") == []
     assert source_place_aliases(None, "Cafe Blue (Café Azul)") == []

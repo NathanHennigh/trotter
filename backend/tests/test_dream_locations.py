@@ -72,6 +72,28 @@ def run_job(sessions, job_id, status="resolved", candidates=None, now=NOW, callb
     return asyncio.run(resolve_location_job(job_id, session_factory=sessions, resolver=resolver, now=now))
 
 
+def test_unavailable_source_research_retries_without_becoming_not_found(sessions, monkeypatch):
+    monkeypatch.setenv("DREAM_LOCATION_MAX_ATTEMPTS", "2")
+    add_item(sessions)
+    job_id, _ = enqueue(sessions)
+    before = snapshot(sessions)
+
+    async def unavailable(*inputs):
+        return {"status": "not_found", "provider": "google_places", "candidates": [],
+                "_research": {"outcome": "unavailable", "queries": [], "matched": None}}
+
+    assert asyncio.run(resolve_location_job(job_id, session_factory=sessions,
+                       resolver=unavailable, now=NOW)) == "queued"
+    with sessions() as db:
+        row = db.get(DreamLocation, job_id)
+        assert row.next_attempt_at == NOW.replace(tzinfo=None) + timedelta(seconds=60)
+        assert row.history[-1]["outcome"] == "unavailable"
+    assert snapshot(sessions) == before
+    assert asyncio.run(resolve_location_job(job_id, session_factory=sessions,
+                       resolver=unavailable, now=NOW + timedelta(seconds=61))) == "failed"
+    assert snapshot(sessions) == before
+
+
 def test_lookup_and_duplicate_delivery_preserve_all_original_rows(sessions):
     add_item(sessions)
     before = snapshot(sessions)
@@ -240,7 +262,7 @@ def test_source_alias_does_not_invalidate_a_resolved_or_manual_pin(sessions):
 
 
 def test_google_worker_receives_only_retained_caption_alias_evidence(sessions, monkeypatch):
-    from app.services import google_dream_place_search
+    from app.services import dream_location_lookup, google_dream_place_search
     add_item(sessions, caption="Garden Cafe (Café Jardín)")
     job_id, _ = enqueue(sessions)
     calls = []
@@ -249,6 +271,9 @@ def test_google_worker_receives_only_retained_caption_alias_evidence(sessions, m
         calls.append((inputs, source_caption))
         return {"status": "not_found", "provider": "google_places", "candidates": []}
     monkeypatch.setattr(google_dream_place_search, "search_google_dream_place", google)
+    async def no_revised_queries(**kwargs):
+        return []
+    monkeypatch.setattr(dream_location_lookup, "plan_location_queries", no_revised_queries)
     assert asyncio.run(resolve_location_job(job_id, session_factory=sessions, now=NOW)) == "not_found"
     assert calls == [(("Garden Cafe", "Madrid", "Spain", None, "cafe"), "Garden Cafe (Café Jardín)")]
 

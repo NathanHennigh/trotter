@@ -368,6 +368,12 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
             candidates = result["candidates"] = candidates[:1]
         if result["status"] == "resolved" and len(candidates) != 1:
             raise ValueError("Resolved location requires one candidate")
+        # A failed optional research request is not evidence that the place
+        # cannot be found. Keep the durable retry path instead of stranding
+        # the save after a provider outage or exhausted AI balance.
+        if (result["status"] == "not_found" and result["provider"] == "google_places"
+                and (result.get("_research") or {}).get("outcome") == "unavailable"):
+            retryable = True
     except RetryableDreamPlaceLookupError:
         retryable, result = True, None
     except GooglePlacesBlockedError:
@@ -395,6 +401,11 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
         row.updated_at, row.checked_at = finished, finished
         row.next_attempt_at = None
         if retryable:
+            if result and (result.get("_research") or {}).get("outcome") == "unavailable":
+                row.history = [*(row.history or []), {
+                    "reason": "source_location_research", "at": finished.isoformat(),
+                    "queries": [], "matched": False, "outcome": "unavailable",
+                }]
             if row.attempts < setting("DREAM_LOCATION_MAX_ATTEMPTS", 5, 10):
                 row.status, row.next_attempt_at = "queued", finished + timedelta(seconds=min(3600, 60 * 2 ** (row.attempts - 1)))
                 row.message = "The location service is temporarily unavailable. We will retry."
