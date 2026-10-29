@@ -49,7 +49,10 @@ verify_target() {
   /usr/bin/codesign --verify --deep --strict --verbose=2 "$target"
   /usr/bin/codesign --display --entitlements - --xml "$target" > "$target_work/entitlements.plist" 2> "$target_work/entitlements.log"
   /usr/bin/codesign --display --verbose=4 "$target" 2> "$target_work/signature.txt"
-  /usr/bin/codesign --display --extract-certificates "$target_work/certificate" "$target" 2> "$target_work/certificates.log"
+  /usr/bin/codesign --display --extract-certificates="$target_work/certificate" "$target" 2> "$target_work/certificates.log" || {
+    cat "$target_work/certificates.log" >&2
+    die "$label signing certificate extraction failed."
+  }
   /usr/bin/security cms -D -i "$target/embedded.mobileprovision" > "$target_work/profile.plist"
   [[ -s "$target_work/certificate0" && -s "$target_work/certificate1" ]] || die "$label has no complete Apple signing chain."
   grep -Eq '^Authority=(Apple Distribution|iPhone Distribution):' "$target_work/signature.txt" || die "$label is not signed for Apple distribution."

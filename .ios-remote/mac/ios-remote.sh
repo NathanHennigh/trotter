@@ -884,6 +884,7 @@ validate_repo() {
 
   say "Logic tests"
   npm run test:iphone
+  node --test scripts/testEasArchive.cjs
 
   say "iOS native project generation"
   npm run ios:verify-prebuild

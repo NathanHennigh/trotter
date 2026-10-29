@@ -69,15 +69,47 @@ stored outside Git with restricted file permissions. The deployment backup,
 build, migration and rollback records are on the server under
 `.cache/ios-apple/bf1849722d49/`.
 
-No TestFlight upload exists yet. The Mac is currently unreachable over SSH;
-its latest UI snapshot result, signed build, iPhone Maps display, real Apple
-sign-in/linking and Instagram sharing still need verification on the Mac/device.
-The private Mac `build.env` and dedicated upload key are prepared in the ignored,
-restricted `.ios-remote/artifacts/apple-signing/` folder on Windows. Transfer the
-build configuration to `~/.trotter-ios-remote/build.env` with mode 600 when the Mac
-is reachable, and use `configure-direct-submit` with key `W2NUU24KD5` and issuer
-`fd6657b2-8414-4c6c-a8f1-bf6833380f7c` after the Mac release checkout has the new
-`eas.json` app ID. Do not substitute an Etch key.
+The Mac reconnected on October 29, 2026. The newer welcome-screen snapshot
+`a909ecd5c389357c732e156cea4884ba71ec735524caa8b3c7ebacc95bc401be` passed a clean
+simulator launch with zero JavaScript errors. Google is first and the short Gmail
+note is visible. Private build configuration is installed with mode 600, and the
+separate Trotter upload key has verified access to app `6828049706`.
+
+The isolated release branch is `codex/iphone-testflight-20261029`; source commit
+`cf08cf66480587f053f52bba13919cbad1c7410d` includes the current mobile app and its
+invitation-page validation dependency. The original working checkout was preserved.
+Mac TypeScript, iPhone logic, generated native project, release configuration and
+all 17 Expo Doctor checks passed. The EAS archive was inspected and contains the
+mobile package, plugin and native sources. The directory inclusion rule must be
+`!/mobile-v2` without a trailing slash because EAS checks directory paths before
+traversing them. Remote build numbering keeps the exact source checkout clean.
+
+The distribution certificate's original PKCS12 encoding was rejected by macOS
+Keychain. It was re-encoded with macOS-compatible PKCS12 encryption using the same
+private key, certificate and password. An isolated temporary Keychain confirmed a
+valid code-signing identity before both Expo target credentials were updated.
+Use `trotter-distribution-macos.p12`, not the original bundle, for local imports.
+No trust checks or EAS tooling were bypassed or patched.
+
+The signed archive succeeded and Apple accepted version **0.1.2 (2)** with no
+validation or delivery errors on October 29, 2026. Delivery UUID:
+`1536fd8a-78e3-4b32-b22f-b80062607c0e`. Apple processing finished successfully (`VALID`). No beta testers have been added yet.
+The IPA is 70,976,938 bytes; SHA256:
+`cea29558ae42eeecc352aa4acfaf68380590b2090e662d308b7d5a4d0b085855`.
+The app and share extension passed strict signature, certificate trust, profile,
+entitlement, version and production API checks. The compiled Google Maps key
+matches the configured iOS key; 13 privacy manifests are present, including the
+main app and Google Maps. Evidence and the signed IPA are preserved under
+`.ios-remote/artifacts/iphone-beta-20261029/` in the original project.
+
+The certificate extractor uses `--extract-certificates=prefix`: with a separate
+argument, macOS treated the prefix as another code path and failed. This was a
+verification-script fix; the verified IPA bytes did not change.
+
+Physical-iPhone checks remain pending. Real Apple sign-in/linking, Google Maps
+display and Instagram sharing require device verification; Apple login remains
+disabled by default. No friends have been invited and no App Store release was
+submitted.
 
 Verified source snapshot: `cf331dd7e19739c86dc791e88f386684f331a1b708892f68d2d867ee2ffbbc63`.
 Final simulator artifact SHA256: `d577820197bd669e991972218b37d75f2b69764583b5aa81eccf477f39154fcc`.
