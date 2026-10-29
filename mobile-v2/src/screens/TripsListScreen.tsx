@@ -17,6 +17,7 @@ import {
   WWIcon,
 } from "../components/world-window/WorldWindowUI";
 import { PressFeedback } from "../components/world-window/motion";
+import { ProfileAvatar } from "../components/world-window/profile/ProfileAvatar";
 import { WalletCover, type WalletOrigin } from "../components/world-window/trips/WalletCover";
 import { matchesTrip } from "../components/world-window/trips/tripPresentation";
 import type { BottomNavTab, TripSummary } from "../data/trotterMock";
@@ -37,7 +38,7 @@ export function TripsListScreen({
   liftedTripId?: string;
 }) {
   const insets = useSafeAreaInsets(),
-    { trips, status, error, refresh } = useTravelTrips();
+    { trips, status, error, refresh, gmailConnected, gmailConnecting, gmailConnectionError, connectGmail } = useTravelTrips();
   const { width, fontScale } = useWindowDimensions();
   const stackCount = width <= 360 && fontScale >= 1.35;
   const [query, setQuery] = React.useState("");
@@ -74,7 +75,7 @@ export function TripsListScreen({
           <>
             <WWHeader
               title="Trips"
-              action={!stackCount ? <Text style={s.headerCount}>{query ? `${visible.length} / ${trips.length}` : trips.length}</Text> : undefined}
+              action={<ProfileAvatar onPress={() => onChange("profile")} />}
             />
             {stackCount ? <Text style={s.stackedCount}>{visible.length}{query ? ` of ${trips.length}` : ""} {(query ? trips.length : visible.length) === 1 ? "trip" : "trips"}</Text> : null}
             <View style={s.searchRow}>
@@ -102,6 +103,7 @@ export function TripsListScreen({
                 <Text style={s.errorText}>{error} · Tap to retry</Text>
               </PressFeedback>
             )}
+            {gmailConnectionError ? <Text style={[s.errorText, { marginHorizontal: 24 }]} accessibilityRole="alert">{gmailConnectionError}</Text> : null}
           </>
         }
         renderItem={({ item, index }) => (
@@ -136,9 +138,9 @@ export function TripsListScreen({
                 ? undefined
                 : query
                   ? "Try another search or view all trips."
-                  : "Import your flight confirmations from Profile."
+                  : gmailConnected ? "Import your flight confirmations from Profile." : "Connect Gmail to automatically import flights. Dreams and Planner work without email access."
             }
-            action={!loading ? <WWButton label={error ? "Retry" : query ? "Show all trips" : "Open Profile"} onPress={() => { if (error) void refresh(); else if (query) setQuery(""); else onChange("profile"); }} secondary /> : undefined}
+            action={!loading ? <WWButton label={error ? "Retry" : query ? "Show all trips" : gmailConnected ? "Open Profile" : gmailConnecting ? "Connecting…" : "Connect Gmail"} disabled={!error && !query && gmailConnecting} onPress={() => { if (error) void refresh(); else if (query) setQuery(""); else if (gmailConnected) onChange("profile"); else if (!gmailConnecting) void connectGmail(); }} secondary /> : undefined}
           />
         }
       />

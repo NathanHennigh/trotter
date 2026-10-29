@@ -1,6 +1,18 @@
 import type { DreamItem } from "../../../services/dreams";
 import { exactMapPoint } from "./dreamPresentation";
 
+/** A text search opens Maps, but it is not evidence of a chosen place or pin. */
+export function isMapsSearchUrl(value?: string) {
+  try {
+    const url = new URL(value || "");
+    if (!/^https?:$/.test(url.protocol) || !/(^|\.)google\.(?:com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$/i.test(url.hostname)) return false;
+    if (url.searchParams.get("query_place_id") || url.searchParams.get("place_id") || /!3d-?\d+(?:\.\d+)?!4d-?\d+(?:\.\d+)?/.test(url.href)) return false;
+    const query = url.searchParams.get("query") || url.searchParams.get("q") || "";
+    if (/^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$/.test(query) || /^place_id:/i.test(query)) return false;
+    return /^\/maps\/search(?:\/|$)/.test(url.pathname) || Boolean(query && (url.pathname.startsWith("/maps") || url.hostname.startsWith("maps.")));
+  } catch { return false; }
+}
+
 const scheduled = (value?: string) => Boolean(value && Number.isFinite(Date.parse(value)));
 export const hasAutomaticLocationRetry = (item: DreamItem) =>
   scheduled(item.locationRetryAt) || scheduled(item.processingRetryAt);
@@ -27,6 +39,7 @@ export function locationNote(item: DreamItem) {
   if (isSavedInspiration(item)) return item.locationReason === "broad_guide" ? "Saved inspiration" : "Location not shared";
   if (hasAutomaticLocationRetry(item)) return "Will retry automatically";
   if (isFindingLocation(item)) return "Finding location…";
+  if (isMapsSearchUrl(item.googleMapsUrl) && (item.locationState === "unresolved" || item.locationStatus === "not_found" || item.locationStatus === "needs_review")) return "No confirmed pin";
   if (item.locationReason === "processing_failed") return "Not on map yet";
   if (item.locationState === "unavailable" || item.locationStatus === "failed" || item.locationStatus === "blocked") return "Location temporarily unavailable";
   if (item.locationState === "unresolved" || item.locationStatus === "needs_review" || item.locationStatus === "not_found") return "Not on map yet";
@@ -47,6 +60,11 @@ export function locationExplanation(item: DreamItem) {
   if (hasAutomaticLocationRetry(item)) return "Your reel is saved. We’ll retry automatically when location lookup is available.";
   if (item.coordinatePrecision === "area" && isFindingLocation(item)) return "Finding this area on the map. You can leave this page while it finishes.";
   if (isFindingLocation(item)) return "Looking for the address. You can leave this page; the pin will appear when it’s ready.";
+  if (isMapsSearchUrl(item.googleMapsUrl) && (item.locationState === "unresolved" || item.locationStatus === "not_found" || item.locationStatus === "needs_review")) {
+    return item.locationReason === "ambiguous_match" || item.locationStatus === "needs_review"
+      ? "The Maps link searches by name. Several places may match; no pin has been chosen."
+      : "The Maps link searches by name. Its exact location hasn’t been confirmed yet.";
+  }
   if (item.locationHint?.trim()) return item.locationHint;
   if (item.locationReason === "ambiguous_match" || item.locationStatus === "needs_review") return "There are several possible matches. Your save is kept here without choosing an uncertain pin.";
   if (item.locationState === "unresolved" || item.locationStatus === "not_found") return "This place isn’t on the map yet. You can open the reel or add more details if you have them.";

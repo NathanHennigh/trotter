@@ -19,6 +19,12 @@ export function writeHomeAirport(owner: string, code?: string): Promise<void> {
   return pending;
 }
 
+export function clearTravelerIdentity(owner: string): Promise<void> {
+  const pending = writes.catch(() => undefined).then(() => AsyncStorage.removeItem(keyFor(owner)));
+  writes = pending;
+  return pending;
+}
+
 /** Personal display preferences are isolated by server and signed-in account. */
 export function useTravelerIdentity(owner?: string) {
   const [snapshot, setSnapshot] = React.useState<{ owner?: string; code?: string; ready: boolean; error?: string }>({ ready: false });

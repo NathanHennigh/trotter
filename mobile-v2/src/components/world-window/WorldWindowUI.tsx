@@ -1,11 +1,12 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
 import Svg, { Path, Circle, Ellipse, Rect } from "react-native-svg";
 import paths from "./emblem-paths.json";
 import { fitDisplayFont } from "./displayTextFit";
 import { getMobileVisualWidth } from "../../utils/mobileLayout";
 import { colors, fonts } from "../../theme/trotterTheme";
 import { PressFeedback } from "./motion";
+import { HEADER_GEOMETRY, headerActionStyle, headerRowStyle } from "./headerGeometry";
 
 export function WWEmblem({
   size = 32,
@@ -76,6 +77,12 @@ export function WWIcon({
       </>
     ),
     dreams: <Path d="M6 3h12v18l-6-4-6 4Z" />,
+    planner: (
+      <>
+        <Rect x="4" y="5" width="16" height="16" rx="2" />
+        <Path d="M8 3v4m8-4v4M4 10h16" />
+      </>
+    ),
     profile: (
       <>
         <Circle cx="12" cy="8" r="3.5" />
@@ -118,6 +125,7 @@ export function WWIcon({
         <Path d="m3 6 9 7 9-7" />
       </>
     ),
+    filter: <><Path d="M4 7h16M4 17h16" /><Circle cx="8" cy="7" r="2.5" fill={colors.paperSoft} /><Circle cx="16" cy="17" r="2.5" fill={colors.paperSoft} /></>,
     settings: (
       <>
         <Circle cx="12" cy="12" r="3" />
@@ -147,11 +155,13 @@ export function WWButton({
   onPress,
   disabled = false,
   secondary = false,
+  style,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   secondary?: boolean;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
     <PressFeedback
@@ -163,6 +173,7 @@ export function WWButton({
         s.button,
         secondary && s.secondary,
         disabled && s.disabled,
+        style,
       ]}
     >
       <Text style={[s.buttonText, secondary && { color: colors.ink }]}>
@@ -181,7 +192,7 @@ export function WWHeader({
   action?: React.ReactNode;
 }) {
   const { width, fontScale } = useWindowDimensions();
-  const available = getMobileVisualWidth(width) - 48 - (onBack ? 46 : 0) - (action ? 58 : 0);
+  const available = getMobileVisualWidth(width) - HEADER_GEOMETRY.horizontalInset * 2 - (onBack ? 46 : 0) - (action ? 58 : 0);
   const titleSize = fitDisplayFont(title, 38, available, fontScale);
   return (
     <View style={s.header}>
@@ -199,7 +210,7 @@ export function WWHeader({
       <Text accessibilityRole="header" style={[s.title, { fontSize: titleSize, lineHeight: titleSize * 42 / 38 }]}>
         {title}
       </Text>
-      {action && <View style={{ flexShrink: 0 }}>{action}</View>}
+      {action && <View style={headerActionStyle}>{action}</View>}
     </View>
   );
 }
@@ -237,17 +248,11 @@ const s = StyleSheet.create({
   },
   disabled: { opacity: 0.45 },
   buttonText: { fontFamily: fonts.sansSemi, fontSize: 15, color: colors.paper },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    paddingHorizontal: 24,
-    paddingTop: 14,
-    paddingBottom: 19,
-  },
+  header: headerRowStyle,
   back: { width: 32, minHeight: 44, justifyContent: "center" },
   title: {
     flex: 1,
+    alignSelf: "center",
     minWidth: 0,
     fontFamily: fonts.display,
     fontSize: 38,

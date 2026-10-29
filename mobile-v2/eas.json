@@ -15,6 +15,24 @@
     },
     "production": {
       "autoIncrement": true
+    },
+    "iphone-simulator": {
+      "extends": "development",
+      "environment": "development",
+      "ios": { "simulator": true }
+    },
+    "iphone-development": {
+      "extends": "development",
+      "environment": "development",
+      "ios": { "simulator": false }
+    },
+    "iphone-testflight": {
+      "distribution": "store",
+      "environment": "production",
+      "ios": { "autoIncrement": "buildNumber" }
     }
+  },
+  "submit": {
+    "iphone-testflight": { "ios": { "ascAppId": "6828049706", "appleTeamId": "BVA33376DZ" } }
   }
 }

@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -19,7 +20,7 @@ import { fitDisplayFont } from "../displayTextFit";
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 import { DreamPlacesMap } from "./DreamPlacesMap";
 import type { MapPoint } from "../trips/tripPresentation";
-import { categoryLabel, dreamLocationType, exactMapPoint, safeWebUrl } from "./dreamPresentation";
+import { categoryLabel, dreamLocationType, exactMapPoint, hasDreamPlaceName, safeWebUrl } from "./dreamPresentation";
 import { dreamCardTitle } from "./dreamCardPresentation";
 import { DreamPhoto } from "./DreamPhoto";
 import { canFindLocation, hasAutomaticLocationRetry, isSavedInspiration, locationExplanation, locationNote } from "./locationPresentation";
@@ -67,14 +68,33 @@ export function DreamEditor({
   onLocate?: (id: string) => Promise<void>;
   sourceCount?: number;
   onShowSource?: () => void;
-  initialMode?: "view" | "edit";
+  initialMode?: "view" | "edit" | "location";
   visible?: boolean;
   onCloseRequestChange?: (handler: (() => void) | null) => void;
 }) {
   const insets = useSafeAreaInsets();
   const { width, height = 800, fontScale } = useWindowDimensions();
+  const formScroll = React.useRef<ScrollView>(null);
+  const formScrollY = React.useRef(0);
+  const revealFocusedInput = () => {
+    if (!visible || Platform.OS === "web" || !Keyboard.isVisible()) return;
+    const focused = TextInput.State.currentlyFocusedInput(), scroll = formScroll.current;
+    const viewport = scroll?.getNativeScrollRef();
+    if (!focused || !scroll || !viewport) return;
+    // A native modal has its own window origin; measure the field and the
+    // resized viewport in that same window instead of assuming screen zero.
+    viewport.measureInWindow((_x, top, _width, viewportHeight) => {
+      focused.measureInWindow((_fieldX, fieldTop, _fieldWidth, fieldHeight) => {
+        if (focused !== TextInput.State.currentlyFocusedInput() || !Keyboard.isVisible()) return;
+        const bottomOverflow = fieldTop + fieldHeight + 24 - (top + viewportHeight);
+        const topOverflow = fieldTop - top - 12;
+        if (bottomOverflow > 0) scroll.scrollTo({ y: formScrollY.current + bottomOverflow, animated: false });
+        else if (topOverflow < 0) scroll.scrollTo({ y: Math.max(0, formScrollY.current + topOverflow), animated: false });
+      });
+    });
+  };
   const displayName = dreamCardTitle(item);
-  const sourceTitle = !item.placeName?.trim() && item.coordinatePrecision !== "area";
+  const sourceTitle = !hasDreamPlaceName(item) && item.coordinatePrecision !== "area";
   const titleSize = fitDisplayFont(displayName, sourceTitle ? 28 : 34, Math.min(getMobileVisualWidth(width) - 64, 512), fontScale);
   const mounted = React.useRef(true), closed = React.useRef(false), running = React.useRef(false);
   React.useEffect(() => {
@@ -87,7 +107,8 @@ export function DreamEditor({
     onClose();
   };
   const reducedMotion = useReducedMotion();
-  const [editing, setEditing] = React.useState(initialMode === "edit"),
+  const [editing, setEditing] = React.useState(initialMode !== "view"),
+    [locationOnly, setLocationOnly] = React.useState(initialMode === "location"),
     [discarding, setDiscarding] = React.useState(false),
     [success, setSuccess] = React.useState<string>(),
     [confirmDelete, setConfirmDelete] = React.useState(false),
@@ -95,18 +116,26 @@ export function DreamEditor({
     [error, setError] = React.useState<string>(),
     [placing, setPlacing] = React.useState(false),
     [menuOpen, setMenuOpen] = React.useState(false),
-    [expandedSummary, setExpandedSummary] = React.useState(false);
+    [expandedSummary, setExpandedSummary] = React.useState(false),
+    [moreDetails, setMoreDetails] = React.useState(false),
+    [typeExpanded, setTypeExpanded] = React.useState(false),
+    [hasPhoto, setHasPhoto] = React.useState(Boolean(item.thumbnailUrl)),
+    [locationSearch, setLocationSearch] = React.useState([...new Set([
+      hasDreamPlaceName(item) ? item.placeName : undefined,
+      item.city, item.regionOrNeighborhood, item.country,
+    ].filter(Boolean))].join(", "));
   const [name, setName] = React.useState(item.placeName || ""),
     [city, setCity] = React.useState(item.city || ""),
     [country, setCountry] = React.useState(item.country || ""),
     [region, setRegion] = React.useState(item.regionOrNeighborhood || ""),
-    [summary, setSummary] = React.useState(item.summary),
+    [note, setNote] = React.useState(item.personalNote || ""),
     [tags, setTags] = React.useState(item.tags.join(", ")),
     [maps, setMaps] = React.useState(item.googleMapsUrl || ""),
     [category, setCategory] = React.useState(item.category);
   const mapsBaseline = React.useRef(item.googleMapsUrl || "");
+  const itemBaseline = React.useRef(item);
   const draftBaseline = React.useRef(draftFingerprint(draftFromItem(item)));
-  const currentDraft = draftFingerprint({ name, city, country, region, summary, tags, maps, category });
+  const currentDraft = draftFingerprint({ name, city, country, region, personalNote: note, tags, maps, category });
   const requestClose = () => {
     // The request is already submitted; closing cannot cancel or discard it.
     if (running.current) { close(); return; }
@@ -192,21 +221,45 @@ export function DreamEditor({
   const sourceDescription = item.summary.trim() || item.caption?.trim() || "";
   const cleanedDescription = sourceDescription.replace(/https?:\/\/\S+/gi, "").replace(/(^|\s)#[\p{L}\p{N}_]+/gu, " ").replace(/\s+/g, " ").trim();
   const description = sourceTitle && cleanedDescription === displayName ? "" : sourceDescription;
-  const beginEditing = () => {
+  const beginEditing = (mode: "edit" | "location" = "edit") => {
+    itemBaseline.current = item;
     setMenuOpen(false);
     setName(item.placeName || ""); setCity(item.city || "");
     setCountry(item.country || ""); setRegion(item.regionOrNeighborhood || "");
-    setSummary(item.summary); setTags(item.tags.join(", ")); setCategory(item.category);
+    setNote(item.personalNote || ""); setTags(item.tags.join(", ")); setCategory(item.category);
     mapsBaseline.current = item.googleMapsUrl || "";
     draftBaseline.current = draftFingerprint(draftFromItem(item));
     setMaps(mapsBaseline.current);
     setSuccess(undefined);
+    setLocationOnly(mode === "location");
+    setMoreDetails(false);
     setEditing(true);
   };
   const savedFeedback = (message: string) => {
     setSuccess(message);
     void selectionHaptic("confirmation");
   };
+  const locationTools = <>
+    <Field disabled={busy} label="Maps link" value={maps} onChange={setMaps} url placeholder="Paste the place’s shared link" />
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={placing ? "Finish placing pin" : point ? "Adjust pin on map" : "Place a pin on the map"}
+      accessibilityState={{ expanded: placing, disabled: busy }}
+      disabled={busy}
+      onPress={() => setPlacing(!placing)}
+      style={s.pinAction}
+    >
+      <WWIcon name="pin" size={19} />
+      <Text style={s.pinText}>{placing ? "Finish placing pin" : point ? "Adjust pin on map" : "Place a pin on the map"}</Text>
+    </Pressable>
+    {placing && <>
+      <Text style={s.mapHint}>Move the map to the place, then tap its location. Save to keep the pin.</Text>
+      <DreamPlacesMap points={mapPoints} overview={overview} fitKey={`edit-${item.id}`} selectedId={point?.id}
+        placing onPlace={(lat, lon) => !busy && setMaps(
+          `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`,
+        )} height={245} />
+    </>}
+  </>;
   return (
     <Modal
       visible={visible}
@@ -217,12 +270,12 @@ export function DreamEditor({
     >
       <KeyboardAvoidingView
         style={[s.overlay, { paddingTop: Math.max(insets.top + 12, 24), paddingBottom: Math.max(insets.bottom, 12) }]}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : Platform.OS === "android" ? "height" : undefined}
       >
         <Pressable accessibilityLabel="Dismiss place details" accessibilityRole="button" onPress={requestClose} style={s.backdrop} />
         <View style={[s.screen, { maxHeight: height * .91 }]} accessibilityViewIsModal>
           <View style={s.toolbar}>
-            <Text style={s.sheetLabel}>{editing ? "Edit place" : isSavedInspiration(item) ? "Saved inspiration" : "Saved place"}</Text>
+            <Text style={s.sheetLabel}>{editing ? locationOnly ? "Add a location" : "Edit place" : isSavedInspiration(item) ? "Saved inspiration" : "Saved place"}</Text>
             {!editing && !discarding && !confirmDelete && !processing && <Pressable
               accessibilityLabel="More place options"
               accessibilityRole="button"
@@ -255,7 +308,13 @@ export function DreamEditor({
           </View>
           {error && <Text accessibilityRole="alert" style={s.error}>{error}</Text>}
         </View> : <ScrollView
+          ref={formScroll}
+          onLayout={revealFocusedInput}
+          onFocus={revealFocusedInput}
+          onScroll={event => { formScrollY.current = event.nativeEvent.contentOffset.y; }}
+          scrollEventThrottle={16}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           importantForAccessibility={menuOpen ? "no-hide-descendants" : "auto"}
           contentContainerStyle={{
             paddingHorizontal: 20,
@@ -266,14 +325,20 @@ export function DreamEditor({
           {success && <Text accessibilityLiveRegion="polite" style={s.success}>{success}</Text>}
           {!editing ? (
             <>
-              <View style={s.photo}>
-                <DreamPhoto item={item} />
+              <View style={hasPhoto ? s.photo : s.photoCompact}>
+                <DreamPhoto item={item} compact={!hasPhoto} onImageAvailableChange={setHasPhoto} />
               </View>
               <Text accessibilityRole="header" numberOfLines={sourceTitle ? 3 : undefined} style={[s.title, { fontSize: titleSize, lineHeight: titleSize * 39 / 34 }]}>
                 {displayName}
               </Text>
               <Text style={s.location}>{dreamLocationType(locationItem)}{locationLine ? ` · ${locationLine}` : ""}</Text>
+              <View style={[s.primaryActions, fontScale > 1.3 && s.actionsStack]}>
+                {safeWebUrl(mapsUrl) ? <WWButton style={fontScale > 1.3 ? undefined : s.primaryAction} label="Open in Maps" onPress={() => void open(mapsUrl)} />
+                  : saved && !processing && !isSavedInspiration(item) ? <WWButton style={fontScale > 1.3 ? undefined : s.primaryAction} label="Add location" onPress={() => beginEditing("location")} /> : null}
+                <WWButton style={fontScale > 1.3 ? undefined : s.primaryAction} label="View post" secondary onPress={() => void open(item.sourceUrl)} />
+              </View>
               {description ? <>
+                <Text style={s.sectionTitle}>From this post</Text>
                 <Text style={s.summary}>{!expandedSummary && description.length > 220 ? `${description.slice(0, 220).replace(/\s+\S*$/, "")}…` : description}</Text>
                 {description.length > 220 && <Pressable
                   accessibilityRole="button" accessibilityState={{ expanded: expandedSummary }}
@@ -282,10 +347,11 @@ export function DreamEditor({
               </> : null}
               {sourceCount > 1 && onShowSource && <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`View ${sourceCount} places from this reel`}
+                accessibilityLabel={`View ${sourceCount} places from this post`}
                 onPress={() => { if (closed.current) return; close(); onShowSource(); }}
                 style={s.sourceLink}
-              ><Text style={s.sourceText}>{sourceCount} places from this reel</Text><WWIcon name="chevron" size={14} color={colors.blue} /></Pressable>}
+              ><Text style={s.sourceText}>{sourceCount} places from this post</Text><WWIcon name="chevron" size={14} color={colors.blue} /></Pressable>}
+              {saved && <View style={s.noteSection}><Text style={s.sectionTitle}>Your note</Text><Text style={s.noteText}>{item.personalNote || "Anything you want to remember?"}</Text><Pressable accessibilityRole="button" accessibilityLabel={item.personalNote ? "Edit note" : "Add a note"} onPress={() => beginEditing()} style={s.readMore}><Text style={s.sourceText}>{item.personalNote ? "Edit note" : "Add a note"}</Text></Pressable></View>}
               {processingState && !processing && processingState.kind !== "deferred" && (
                 <Text style={s.review}>
                   {processingState.detail}
@@ -310,11 +376,15 @@ export function DreamEditor({
                   </View>}
                   {locationItem.coordinatePrecision === "area" && shownPoint && <Text style={s.locationHint}>The marker shows the general area.</Text>}
                   {locationItem.coordinatePrecision !== "area" && locationItem.locationAddress && <Text selectable style={s.locationAddress}>{locationItem.locationAddress}</Text>}
-                  {shownPoint ? <DreamPlacesMap points={[shownPoint]} fitKey={`location-${item.id}`} height={248} /> : !liveLocation.loading && !liveLocation.error ? (
+                  {shownPoint ? <DreamPlacesMap points={[shownPoint]} fitKey={`location-${item.id}`} height={150} /> : !liveLocation.loading && !liveLocation.error ? (
                     <>
                       <Text accessibilityLiveRegion="polite" style={s.locationHint}>{locationExplanation(locationItem)}</Text>
                     </>
                   ) : null}
+                  {isSavedInspiration(item) && <Pressable accessibilityRole="button" accessibilityLabel="Add a location you know" onPress={() => beginEditing("location")} style={s.pinAction}>
+                    <Text style={s.sourceText}>Know the location? Add it</Text>
+                  </Pressable>}
+                  {!shownPoint && onLocate && canFindLocation(locationItem) && <WWButton label={busy ? "Finding location…" : "Retry location"} secondary disabled={busy} onPress={() => void run(() => onLocate(item.id), false)} />}
                   {locationItem.locationProvider === "google_places" && Boolean(locationItem.locationAddress || liveLocation.details?.locationAttributions.length) &&
                     <GoogleAttribution values={liveLocation.details?.locationAttributions ?? []} onOpen={open} />}
                   {item.locationProvider === "geoapify" && !point && (item.locationCandidates?.length ?? 0) > 0 &&
@@ -328,26 +398,21 @@ export function DreamEditor({
                     </View>}
                 </View>
               )}
-              <View style={[s.primaryActions, fontScale > 1.3 && s.actionsStack]}>
-                <View style={s.primaryAction}>
-                <WWButton
-                  label="View reel"
-                  secondary
-                  onPress={() => void open(item.sourceUrl)}
-                />
-                </View>
-                {safeWebUrl(mapsUrl) && (
-                  <View style={s.primaryAction}>
-                  <WWButton
-                    label="Open in Maps"
-                    onPress={() => void open(mapsUrl)}
-                  />
-                  </View>
-                )}
-              </View>
+
             </>
           ) : (
             <>
+              {locationOnly && <>
+                <Text accessibilityRole="header" style={s.locationEditTitle}>Find this place</Text>
+                <Text style={s.locationIntro}>Search Maps, then paste the place’s shared link here. You can also place a pin yourself.</Text>
+                <Field disabled={busy} label="Search for a place or destination" value={locationSearch} onChange={setLocationSearch} placeholder="Place name, island, or address" />
+                <View style={s.searchMapsAction}><WWButton label="Search Google Maps" secondary disabled={busy || !locationSearch.trim()}
+                  onPress={() => void open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationSearch.trim())}`)} /></View>
+                {locationTools}
+                <Pressable accessibilityRole="button" accessibilityLabel="Location details" accessibilityState={{ expanded: moreDetails, disabled: busy }} disabled={busy}
+                  onPress={() => setMoreDetails(!moreDetails)} style={s.detailsToggle}><Text style={s.sourceText}>Location details</Text><WWIcon name={moreDetails ? "close" : "plus"} size={17} /></Pressable>
+              </>}
+              {(!locationOnly || moreDetails) && <>
               <Field disabled={busy} label="Place name" value={name} onChange={setName} />
               <View style={[s.fields, fontScale > 1.25 && s.actionsStack]}>
                 <View style={s.fieldColumn}>
@@ -362,21 +427,18 @@ export function DreamEditor({
                   />
                 </View>
               </View>
-              <Field
-                disabled={busy}
-                label="Neighborhood / region"
-                value={region}
-                onChange={setRegion}
-              />
-              <Text style={s.label}>Category</Text>
-              <View style={s.categories}>
+              {locationOnly && <Field disabled={busy} label="Island / region / neighborhood" value={region} onChange={setRegion} />}
+              </>}
+              {!locationOnly && <>
+              <Text style={s.label}>Type</Text><Pressable accessibilityRole="button" accessibilityLabel="Choose place type" accessibilityState={{ expanded: typeExpanded, disabled: busy }} disabled={busy} onPress={() => setTypeExpanded(!typeExpanded)} style={s.typeChoice}><Text style={s.noteText}>{categoryLabel(category)}</Text><WWIcon name="down" size={17} /></Pressable>
+              {typeExpanded && <View style={s.categories}>
                 {categories.map((value) => (
                   <Pressable
                     accessibilityRole="radio"
                     disabled={busy}
                     accessibilityState={{ checked: category === value, disabled: busy }}
                     key={value}
-                    onPress={() => setCategory(value)}
+                    onPress={() => { setCategory(value); setTypeExpanded(false); }}
                     style={[
                       s.categoryPill,
                       category === value && s.categorySelected,
@@ -392,13 +454,21 @@ export function DreamEditor({
                     </Text>
                   </Pressable>
                 ))}
-              </View>
+              </View>}
               <Field
                 disabled={busy}
-                label="Notes"
-                value={summary}
-                onChange={setSummary}
+                label="Your note"
+                value={note}
+                onChange={setNote}
                 multiline
+              />
+              <Pressable accessibilityRole="button" accessibilityLabel="More details" accessibilityState={{ expanded: moreDetails }} onPress={() => setMoreDetails(!moreDetails)} style={s.detailsToggle}><Text style={s.sourceText}>More details</Text><WWIcon name={moreDetails ? "close" : "plus"} size={17} /></Pressable>
+              {moreDetails && <>
+              <Field
+                disabled={busy}
+                label="Neighborhood / region"
+                value={region}
+                onChange={setRegion}
               />
               <Field
                 disabled={busy}
@@ -406,69 +476,36 @@ export function DreamEditor({
                 value={tags}
                 onChange={setTags}
               />
-              <Field disabled={busy} label="Maps link" value={maps} onChange={setMaps} url />
-              <Pressable
-                disabled={busy}
-                onPress={() => setPlacing(!placing)}
-                style={s.pinAction}
-              >
-                <WWIcon name="pin" size={19} />
-                <Text style={s.pinText}>
-                  {placing
-                    ? "Finish placing pin"
-                    : point
-                      ? "Adjust pin on map"
-                      : "Place a pin on the map"}
-                </Text>
-              </Pressable>
-              {placing && (
-                <>
-                  <Text style={s.mapHint}>
-                    Move the map to the place, then tap its location. Save
-                    changes to keep the pin.
-                  </Text>
-                  <DreamPlacesMap
-                    points={mapPoints}
-                    overview={overview}
-                    fitKey={`edit-${item.id}`}
-                    selectedId={point?.id}
-                    placing
-                    onPlace={(lat, lon) =>
-                      !busy && setMaps(
-                        `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`,
-                      )
-                    }
-                    height={245}
-                  />
-                </>
-              )}
+              {locationTools}
+              </>}
+              </>}
               <View style={s.save}>
                 <WWButton
-                  label={busy ? "Saving…" : "Save changes"}
-                  disabled={busy || !name.trim() || !country.trim()}
+                  label={busy ? "Saving…" : locationOnly ? "Save location" : "Save changes"}
+                  disabled={busy || currentDraft === draftBaseline.current}
                   onPress={() => {
                     if (maps.trim() && !safeWebUrl(maps)) {
                       setError("Use a complete https:// Maps link.");
                       return;
                     }
-                    void run(() =>
-                      onSave(item.id, {
-                        placeName: name.trim(),
+                    const proposed: Partial<DreamItem> = {
+                        placeName: name.trim() || undefined,
                         city: city.trim() || undefined,
-                        country: country.trim(),
+                        country: country.trim() || undefined,
                         regionOrNeighborhood: region.trim() || undefined,
-                        summary: summary.trim(),
+                        personalNote: note.trim(),
                         tags: tags
                           .split(",")
                           .map((t) => t.trim())
                           .filter(Boolean),
                         category,
                         ...(maps.trim() !== mapsBaseline.current.trim() ? { googleMapsUrl: maps.trim() || undefined } : {}),
-                        needsReview: false,
-                      }), false, () => {
+                      };
+                    const patch = Object.fromEntries(Object.entries(proposed).filter(([key, value]) => JSON.stringify(value ?? "") !== JSON.stringify(itemBaseline.current[key as keyof DreamItem] ?? ""))) as Partial<DreamItem>;
+                    void run(() => onSave(item.id, patch), false, () => {
                         draftBaseline.current = currentDraft;
                         setEditing(false); setPlacing(false);
-                        savedFeedback("Changes saved.");
+                        savedFeedback(locationOnly ? "Location saved." : "Changes saved.");
                       },
                     );
                   }}
@@ -485,7 +522,7 @@ export function DreamEditor({
         {menuOpen && !editing && <View style={s.menuLayer} accessibilityViewIsModal>
           <Pressable accessibilityLabel="Dismiss place options" accessibilityRole="button" onPress={() => setMenuOpen(false)} style={StyleSheet.absoluteFill} />
           <View style={s.menu}>
-            {saved && <MenuAction label="Edit details" disabled={busy} onPress={beginEditing} />}
+            {saved && <MenuAction label="Edit details" disabled={busy} onPress={() => beginEditing()} />}
             {liveLocation.error && <MenuAction label="Retry details" disabled={busy} onPress={() => { setMenuOpen(false); liveLocation.retry(); }} />}
             {onLocate && canFindLocation(locationItem) && <MenuAction label="Retry location" disabled={busy} onPress={() => {
               setMenuOpen(false); void run(() => onLocate(item.id), false);
@@ -528,6 +565,7 @@ function Field({
   multiline = false,
   url = false,
   disabled = false,
+  placeholder,
 }: {
   label: string;
   value: string;
@@ -535,6 +573,7 @@ function Field({
   multiline?: boolean;
   url?: boolean;
   disabled?: boolean;
+  placeholder?: string;
 }) {
   return (
     <View style={s.field}>
@@ -542,6 +581,8 @@ function Field({
       <TextInput
         accessibilityLabel={label}
         value={value}
+        placeholder={placeholder}
+        placeholderTextColor={colors.mutedInk}
         editable={!disabled}
         onChangeText={onChange}
         multiline={multiline}
@@ -554,6 +595,15 @@ function Field({
   );
 }
 const s = StyleSheet.create({
+  locationEditTitle: { fontFamily: fonts.display, fontSize: 30, lineHeight: 35, color: colors.blue, marginTop: 4 },
+  locationIntro: { fontFamily: fonts.sansRegular, fontSize: 13, lineHeight: 20, color: colors.mutedInk, marginTop: 8, marginBottom: 20 },
+  searchMapsAction: { marginTop: -6, marginBottom: 24, alignItems: "flex-start" },
+  photoCompact: { width: 56, height: 64, borderRadius: 5, overflow: "hidden", marginTop: 6 },
+  sectionTitle: { fontFamily: fonts.sansSemi, fontSize: 14, color: colors.ink, marginTop: 24, marginBottom: 8 },
+  noteSection: { borderTopWidth: 1, borderTopColor: colors.paperBorderSoft, marginTop: 18 },
+  noteText: { fontFamily: fonts.sansRegular, color: colors.mutedInk, fontSize: 15, lineHeight: 22 },
+  detailsToggle: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: colors.paperBorderSoft, marginBottom: 14 },
+  typeChoice: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, borderColor: colors.paperBorder, borderRadius: 4, paddingHorizontal: 12, marginBottom: 18 },
   discardPanel: { padding: 24, gap: 12 },
   success: { paddingVertical: 12, marginBottom: 12, fontFamily: fonts.sansSemi, fontSize: 13, lineHeight: 20, color: colors.blue },
   googleAttribution: { paddingTop: 10, paddingBottom: 5, gap: 4, alignItems: "flex-start" },
@@ -617,7 +667,7 @@ const s = StyleSheet.create({
     fontSize: 15,
     lineHeight: 23,
     color: colors.ink,
-    marginTop: 16,
+    marginTop: 0,
   },
   sourceLink: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: 44, paddingVertical: 8, marginTop: 4 },
   readMore: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center" },

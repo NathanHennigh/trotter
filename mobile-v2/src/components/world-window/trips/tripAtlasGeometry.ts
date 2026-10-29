@@ -5,6 +5,7 @@ export type MapLand = {
   features: { geometry: { type: string; coordinates: unknown } | null }[];
 };
 type Vector = [number, number, number];
+type MapPoint = [number, number];
 type AtlasLabel = { x: number; y: number; width: number; height: number };
 type AtlasPort = { code: string; x: number; y: number; radius: number; label?: AtlasLabel };
 // These are the painted backgrounds used by TripAtlas, not just text bounds.
@@ -51,6 +52,29 @@ function arc(a: Vector, b: Vector) {
   });
 }
 
+/** A wrapped longitude is a break in the drawing, not a flight across the map. */
+function splitRouteAtSeam(points: MapPoint[], left: number, right: number): MapPoint[][] {
+  const period = right - left;
+  const pieces: MapPoint[][] = [];
+  let piece = [points[0]];
+  for (let i = 1; i < points.length; i += 1) {
+    const previous = points[i - 1], current = points[i];
+    const jump = current[0] - previous[0];
+    if (Math.abs(jump) > period / 2) {
+      const edge = jump > 0 ? left : right;
+      const unwrappedX = current[0] + (jump > 0 ? -period : period);
+      const fraction = (edge - previous[0]) / (unwrappedX - previous[0]);
+      const y = previous[1] + (current[1] - previous[1]) * fraction;
+      piece.push([edge, y]);
+      pieces.push(piece);
+      piece = [[jump > 0 ? right : left, y]];
+    }
+    piece.push(current);
+  }
+  pieces.push(piece);
+  return pieces;
+}
+
 /** Same fitted regional atlas and collision-free labels as the approved web wallet. */
 export function tripAtlasGeometry(
   segments: TripSegmentSummary[],
@@ -89,21 +113,28 @@ export function tripAtlasGeometry(
   };
   const latCenter =
     [...airports.values()].reduce((sum, p) => sum + p.lat, 0) / airports.size;
-  const cosine = Math.max(0.4, Math.cos((latCenter * Math.PI) / 180));
-  const coordinates = segments
+  const longitudeRoutes = segments
     .filter((f) => validPoint(f.depPoint) && validPoint(f.arrPoint))
     .map((f) =>
       arc(
         endpoint(f.depPoint!.lon, f.depPoint!.lat),
         endpoint(f.arrPoint!.lon, f.arrPoint!.lat),
-      ).map((p) => [
-        normalize((Math.atan2(p[0], p[2]) * 180) / Math.PI) * cosine,
+      ).map((p): MapPoint => [
+        normalize((Math.atan2(p[0], p[2]) * 180) / Math.PI),
         (-Math.atan2(p[1], Math.hypot(p[0], p[2])) * 180) / Math.PI,
       ]),
     );
+  const wrapsWorld = longitudeRoutes.some((route) => route.some((point, i) => i > 0 && Math.abs(point[0] - route[i - 1][0]) > 180));
+  // Regional atlases retain their fitted projection. A route crossing the seam
+  // needs one complete world width, so the two sides are the same longitude
+  // and the continuation is flush with the visible left/right map edges.
+  const cosine = wrapsWorld ? 1 : Math.max(0.4, Math.cos((latCenter * Math.PI) / 180));
+  const coordinates = longitudeRoutes.map((route) => route.map(([x, y]): MapPoint => [x * cosine, y]));
+  const routePieces = coordinates.map((route) => splitRouteAtSeam(route, (center - 180) * cosine, (center + 180) * cosine));
+  // Exact seam intersections keep the same fit for a route in either direction.
   // Include known endpoints even when the other end of their route has no pin.
   const points = [
-    ...coordinates.flat(),
+    ...routePieces.flat(2),
     ...[...airports.values()].map((p) => [normalize(p.lon) * cosine, -p.lat]),
   ];
   const xs = points.map((p) => p[0]),
@@ -112,11 +143,11 @@ export function tripAtlasGeometry(
     maxX = Math.max(...xs),
     minY = Math.min(...ys),
     maxY = Math.max(...ys);
-  const scale = Math.min(
+  const scale = wrapsWorld ? 400 / 360 : Math.min(
       330 / Math.max(20, maxX - minX),
       165 / Math.max(12, maxY - minY),
     ),
-    midX = (minX + maxX) / 2,
+    midX = wrapsWorld ? center : (minX + maxX) / 2,
     midY = (minY + maxY) / 2;
   const project = ([x, y]: number[]) => [
     200 + (x - midX) * scale,
@@ -214,7 +245,7 @@ export function tripAtlasGeometry(
     if (label) labels.push(label);
     return { ...port, label };
   });
-  return { landPath, paths: coordinates.map(path), ports };
+  return { landPath, paths: routePieces.map((pieces) => pieces.map(path).join('')), ports };
 }
 
 /** Reopening a wallet should reuse its coastline projection, including across

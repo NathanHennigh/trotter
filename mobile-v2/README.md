@@ -28,6 +28,10 @@ Trotter uses Metro port `8083` by default so it does not collide with other Expo
 
 Local iPhone builds require macOS and Xcode. From Windows, use an EAS iOS development build and an Apple Developer account instead.
 
+The iPhone implementation and build profiles are now in the project. See
+[iPhone setup and device checks](docs/iphone-setup.md) for Apple/Expo provisioning,
+Instagram sharing, account configuration, local Mac builds and TestFlight.
+
 ## Build Android Artifacts In WSL
 
 ### Instagram share receipts

@@ -3,7 +3,7 @@ import { destinationPhotoAssets } from '../assets/generated/destinationPhotoMani
 import type { CountryIconKey, StampShapeKey } from '../components/trotter/stamps/PngStamp';
 import { TrotterAccent, colors } from '../theme/trotterTheme';
 
-export type BottomNavTab = 'globe' | 'trips' | 'passport' | 'dreams' | 'profile';
+export type BottomNavTab = 'globe' | 'trips' | 'passport' | 'dreams' | 'planner' | 'profile';
 
 export type StampType = 'arched' | 'rounded-immigration' | 'circle' | 'shield' | 'horizontal-airport';
 

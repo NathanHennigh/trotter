@@ -64,6 +64,44 @@ test('Pacific and date-line routes have deterministic collision-free labels inde
   assert.deepEqual(first.ports.map(port => [port.code, port.label]), reverse.ports.map(port => [port.code, port.label]));
 });
 
+const pathPieces = path => (path.match(/M[^M]*/g) ?? []).map(piece => [...piece.matchAll(/[ML](-?[\d.]+),(-?[\d.]+)/g)].map(match => [Number(match[1]), Number(match[2])]));
+const near = (a, b, message) => assert(Math.hypot(a[0] - b[0], a[1] - b[1]) <= .02, message);
+
+test('a global archive splits the trans-Pacific route at both visible edges without a world-spanning line', () => {
+  const ports = [point('JFK', 40.64, -73.78), point('LHR', 51.47, -.45), point('DEL', 28.56, 77.10), point('NRT', 35.77, 140.39), point('SFO', 37.62, -122.38)];
+  const flights = ports.map((port, i) => flight(port, ports[(i + 1) % ports.length]));
+  const map = geometry.tripAtlasGeometry(flights, null, undefined, { maxLabels: 7, prioritizeByFrequency: true });
+  assertClear(map);
+  const crossing = pathPieces(map.paths[3]);
+  assert.equal(crossing.length, 2, 'NRT–SFO crosses the archive’s Pacific seam');
+  const exit = crossing[0].at(-1), entry = crossing[1][0];
+  assert.deepEqual(new Set([exit[0], entry[0]]), new Set([0, 400]), 'Route continues flush with the actual map edges');
+  assert.equal(exit[1], entry[1], 'Both sides share the same interpolated crossing latitude');
+  for (let i = 0; i < map.paths.length; i += 1) {
+    const pieces = pathPieces(map.paths[i]);
+    const dep = map.ports.find(port => port.code === flights[i].depAirport), arr = map.ports.find(port => port.code === flights[i].arrAirport);
+    near(pieces[0][0], [dep.x, dep.y], 'Route still starts at its departure marker');
+    near(pieces.at(-1).at(-1), [arr.x, arr.y], 'Route still finishes at its arrival marker');
+    for (const piece of pieces) for (let j = 1; j < piece.length; j += 1) {
+      assert(Math.abs(piece[j][0] - piece[j - 1][0]) < 30, 'No seam-spanning SVG line');
+    }
+  }
+  const reverse = geometry.tripAtlasGeometry(flights.map(f => flight(f.arrPoint, f.depPoint)), null);
+  const reversedCrossing = pathPieces(reverse.paths[3]);
+  near(reversedCrossing[0].at(-1), entry, 'Reversing direction retains the seam intersection');
+  near(reversedCrossing[1][0], exit, 'Reversing direction retains the opposite continuation');
+  assert.deepEqual(reverse.ports.map(({ code, x, y }) => ({ code, x, y })), map.ports.map(({ code, x, y }) => ({ code, x, y })).sort((a, b) => a.code.localeCompare(b.code)));
+});
+
+test('a Pacific-only trip keeps its compact regional fit across the geographic date line', () => {
+  const dep = point('NRT', 35.77, 140.39), arr = point('SFO', 37.62, -122.38);
+  const map = geometry.tripAtlasGeometry([flight(dep, arr)], null);
+  assert.equal(pathPieces(map.paths[0]).length, 1, 'Its fitted regional seam is outside the flight, even across ±180°');
+  const positions = map.ports.map(port => port.x).sort((a, b) => a - b);
+  assert(Math.abs(positions[0] - 35) < .001 && Math.abs(positions[1] - 365) < .001, 'Existing regional padding and fit are retained');
+  assertClear(map);
+});
+
 test('an endpoint without a complete route still receives an in-frame marker', () => {
   const flights = [flight(point('LHR', 51.47, -.45), point('CDG', 49.01, 2.55)), { id: 'partial', depAirport: 'SIN', arrAirport: 'XXX', depPoint: point('SIN', 1.36, 103.99), arrPoint: undefined }];
   const map = geometry.tripAtlasGeometry(flights, null);

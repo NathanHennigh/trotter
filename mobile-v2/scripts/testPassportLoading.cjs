@@ -50,7 +50,46 @@ const cover = tree => nodes(tree).find(n => n.props?.testID === 'passport-loadin
 const style = node => Object.assign({}, ...[node.props.style].flat().filter(Boolean));
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 const message = (webview, type, values = {}) => webview.props.onMessage({ nativeEvent: { data: JSON.stringify({ source: 'trotter-passport', type, ...values }) } });
+function runtimeVisibility() {
+  const source = fs.readFileSync(path.join(root, 'src/components/world-window/passport/passport-runtime.ts'), 'utf8');
+  const ast = ts.createSourceFile('passport-runtime.ts', source, ts.ScriptTarget.Latest, true);
+  const declarations = ['setVisible', 'update'].map(name => ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name).getText(ast)).join('\n');
+  const body = ts.transpileModule(declarations, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return new Function(`
+    const calls = { wake: 0, cancel: 0, released: [], textures: 0, flushed: [], posts: [] };
+    let payload = { visible: true, fonts: { Font: 'cached' }, stamps: ['same-stamp'] }, pendingUpdate = null;
+    let presentationVisible = true, generation = 0, disposed = false, pointer = { id: 7 }, feedbackOrigin = 'original';
+    let frame = 31, lastTime = 90, finishTextures;
+    const model = { spread: 3, cancel() { calls.cancel++; } };
+    const cover = { settled: 1, snap(value) { this.settled = value; } };
+    const host = { hasPointerCapture: () => true, releasePointerCapture: id => calls.released.push(id) };
+    const document = { fonts: { check: () => true } }, textures = ['same-texture'];
+    const cancelAnimationFrame = () => {}, post = (...args) => calls.posts.push(args);
+    const wake = () => calls.wake++, pagesFor = () => ['prepared-page'];
+    const flushUpdate = () => { calls.flushed.push(pendingUpdate); pendingUpdate = null; };
+    const makeTextures = () => { calls.textures++; return new Promise(resolve => finishTextures = resolve); };
+    ${body}
+    return { setVisible, update, calls, model, cover, finish() { finishTextures(['new-texture']); },
+      get payload() { return payload; }, get frame() { return frame; } };
+  `)();
+}
 (async () => {
+  {
+    const runtime = runtimeVisibility(), stamps = runtime.payload.stamps;
+    runtime.setVisible(false);
+    assert.equal(runtime.frame, 0);
+    assert.deepEqual(runtime.calls.released, [7]);
+    assert.equal(runtime.model.spread, 3);
+    assert.equal(runtime.cover.settled, 1);
+    runtime.setVisible(true);
+    assert.equal(runtime.calls.wake, 1);
+    assert.equal(runtime.calls.textures, 0, 'Visibility does not rebuild any canvas textures');
+    assert.equal(runtime.payload.stamps, stamps);
+    const updating = runtime.update({ visible: true, fonts: { Font: 'cached' }, stamps: ['fresh-stamp'] });
+    runtime.setVisible(false); runtime.finish(); await updating;
+    assert.equal(runtime.calls.flushed[0].payload.visible, false, 'An in-flight archive refresh cannot resume a hidden passport');
+    assert.equal(runtime.calls.wake, 1, 'Background hydration keeps rendering paused');
+  }
   for (const width of [320, 410, 600]) {
     const host = load(); const props = { width, archive: { arrivals: [] }, onCountry() {} };
     let tree = host.render(props); const initial = style(cover(tree)), initialHeight = style(tree).height;
@@ -73,7 +112,7 @@ const message = (webview, type, values = {}) => webview.props.onMessage({ native
     assert(cover(tree), 'WebView document-loaded event is not first-paint readiness');
     message(webview, 'size', { height: 123 }); tree = host.render();
     assert.equal(style(tree).height, initialHeight, 'Early size bridge message cannot shift the placeholder');
-    cover(tree).props.onPress(); assert.equal(host.injected.length, 0, 'Early tap is queued while page assets load');
+    cover(tree).props.onPress(); assert.equal(host.injected.filter(code => code.includes('openPassport')).length, 0, 'Early tap is queued while page assets load');
     message(webview, 'ready'); tree = host.render(); webview = find(tree, 'WebView');
     assert(!cover(tree)); assert.equal(style(webview).opacity, 1); assert.equal(style(tree).height, 123);
     assert.equal(host.injected.filter(code => code.includes('openPassport')).length, 1, 'Early tap opens the real cover exactly once after first paint');
@@ -89,6 +128,29 @@ const message = (webview, type, values = {}) => webview.props.onMessage({ native
     assert(cover(tree), 'Retry restores the stable cover while replacing the failed WebView');
     host.pending.at(-1).resolve({ name: 'Retry traveler', fonts: {}, stamps: [] }); await flush();
     tree = host.render(); assert(cover(tree)); assert.equal(style(find(tree, 'WebView')).opacity, 0);
+    host.unmount();
+  }
+  {
+    const host = load(), props = { width: 410, archive: { arrivals: [] }, onCountry() {}, visible: true };
+    host.render(props);
+    // Switching away while assets are in flight must not restart preparation.
+    host.render({ ...props, visible: false });
+    assert.equal(host.pending.length, 1);
+    host.pending.shift().resolve({ name: 'Traveler', fonts: { DMSans: 'large-font-data' }, stamps: [] }); await flush();
+    let tree = host.render(), webview = find(tree, 'WebView');
+    assert.equal(JSON.parse(webview.props.source.html).visible, false, 'Delayed payload uses the current tab visibility');
+    const source = webview.props.source;
+    webview.props.ref.current = { injectJavaScript: code => host.injected.push(code) };
+    webview.props.onLoad(); message(webview, 'ready'); host.render();
+    host.injected.length = 0;
+    for (const visible of [true, false, true, false, true]) {
+      tree = host.render({ ...props, visible });
+      assert.equal(find(tree, 'WebView').props.source, source, 'Tab switches retain the same native WebView document');
+    }
+    assert.equal(host.pending.length, 0, 'Tab visibility never reloads assets or prepares a full payload');
+    assert.equal(host.injected.length, 5);
+    assert(host.injected.every(code => code.includes('setPassportVisible') && code.length < 100), 'Only a tiny lifecycle message crosses the WebView bridge');
+    assert(!host.injected.some(code => code.includes('updatePassport') || code.includes('large-font-data')));
     host.unmount();
   }
   console.log('Passport loading passed at 320/410/600: continuous cover, delayed paint reveal, queued tap, stable refresh and retry.');

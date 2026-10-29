@@ -1,23 +1,55 @@
 import type { DreamItem } from "../../../services/dreams";
-import { dreamLocationType, dreamPlaceLabel } from "./dreamPresentation";
+import { dreamDestination, dreamLocationType, dreamPlaceLabel, dreamSourceKey, hasDreamPlaceName, isPromotionalText, normalizeName } from "./dreamPresentation";
 import { dreamProcessingState } from "./dreamProcessing";
 
 /** Source words help distinguish unidentified reels without inventing a place. */
 export function dreamCardTitle(item: DreamItem): string {
-  if (item.placeName?.trim() || item.coordinatePrecision === "area") return dreamPlaceLabel(item);
+  if (hasDreamPlaceName(item) || item.coordinatePrecision === "area") return dreamPlaceLabel(item);
   const excerpt = (item.caption || item.summary || "")
     .replace(/https?:\/\/\S+/gi, "")
     .replace(/(^|\s)#[\p{L}\p{N}_]+/gu, " ")
+    .split(/\n+|(?<=[.!?])\s+/)
+    .filter(line => !isPromotionalText(line))
+    .join(" ")
     .replace(/\s+/g, " ")
     .trim();
-  if (excerpt) return excerpt.length > 92 ? `${excerpt.slice(0, 89).trimEnd()}…` : excerpt;
-  return item.city?.trim() || "Saved reel";
+  // Iterate Unicode code points so truncation cannot leave half an emoji's
+  // surrogate pair and render a replacement character in the native title.
+  const characters = Array.from(excerpt);
+  if (/[\p{L}\p{N}]/u.test(excerpt)) return characters.length > 92 ? `${characters.slice(0, 89).join("").trimEnd()}…` : excerpt;
+  const destination = dreamDestination(item) || item.country?.trim();
+  return destination ? `Inspiration in ${destination}` : item.locationState === "source_details" ? "Saved inspiration" : "Saved reel";
 }
 
 export function dreamCardMeta(item: DreamItem): string {
-  const location = item.city || item.regionOrNeighborhood || item.country;
-  const kind = item.category === "unknown" && item.coordinatePrecision !== "area" ? "Saved reel" : dreamLocationType(item);
+  const location = dreamDestination(item) || item.country;
+  const kind = item.locationState === "source_details" ? "Inspiration" : item.category === "unknown" && item.coordinatePrecision !== "area" ? "Saved reel" : dreamLocationType(item);
   return [kind, location].filter(Boolean).join(" · ");
+}
+
+/** Existing source descriptions distinguish similarly named saves; never infer
+ * that records from different posts are duplicate places to remove or merge. */
+export function dreamCardExcerpt(item: DreamItem): string {
+  for (const source of [item.summary, item.caption]) {
+    const excerpt = (source || "").replace(/https?:\/\/\S+/gi, "")
+      .replace(/(^|\s)#[\p{L}\p{N}_]+/gu, " ")
+      .split(/\n+|(?<=[.!?])\s+/).filter(line => !isPromotionalText(line))
+      .join(" ").replace(/\s+/g, " ").trim();
+    if (!/[\p{L}\p{N}]/u.test(excerpt) || /^(?:saved from instagram|saved (?:reel|post|place))\.?$/i.test(excerpt) || normalizeName(excerpt) === normalizeName(dreamCardTitle(item))) continue;
+    const characters = Array.from(excerpt);
+    return characters.length > 120 ? `${characters.slice(0, 117).join("").trimEnd()}…` : excerpt;
+  }
+  return "";
+}
+
+export function repeatedDreamTitleIds(items: DreamItem[]): Set<string> {
+  const titles = new Map<string, { sources: Set<string>; ids: string[] }>();
+  for (const item of items) {
+    const title = normalizeName(dreamCardTitle(item));
+    const group = titles.get(title) || { sources: new Set<string>(), ids: [] };
+    group.sources.add(dreamSourceKey(item.sourceUrl)); group.ids.push(item.id); titles.set(title, group);
+  }
+  return new Set([...titles.values()].filter(group => group.sources.size > 1).flatMap(group => group.ids));
 }
 
 export function dreamInboxSummary(items: DreamItem[]): string {

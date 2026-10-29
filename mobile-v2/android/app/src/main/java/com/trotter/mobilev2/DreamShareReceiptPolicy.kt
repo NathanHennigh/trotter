@@ -2,11 +2,12 @@ package com.trotter.mobilev2
 
 /** Receipt timing follows durable capture, not uploads or polling. No Android clock is needed in tests. */
 class DreamShareReceiptPolicy(snapshot: Snapshot = Snapshot()) {
+  companion object { const val READING_MS = 4000L }
   data class Snapshot(
     val captured: Boolean = false,
     val storageFailed: Boolean = false,
     val status: String = "",
-    val remainingMs: Long = 2200L,
+    val remainingMs: Long = READING_MS,
   )
 
   private var state = snapshot
@@ -40,7 +41,7 @@ class DreamShareReceiptPolicy(snapshot: Snapshot = Snapshot()) {
   fun interaction(active: Boolean, now: Long) {
     advance(now)
     // Deliberate interaction buys another full reading interval, but a 450 ms network poll does not.
-    if (!active && interacting) state = state.copy(remainingMs = 2200L)
+    if (!active && interacting) state = state.copy(remainingMs = READING_MS)
     interacting = active
     resume(now)
   }

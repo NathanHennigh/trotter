@@ -14,7 +14,10 @@ output="$(mktemp -d /tmp/trotter-native-share-tests.XXXXXX)"
 java -cp "$compiler_cp" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect -classpath "$stdlib:$json:$annotations" -d "$output/tests.jar" \
   "$root/android/app/src/main/java/com/trotter/mobilev2/DreamShareInbox.kt" \
   "$root/android/app/src/main/java/com/trotter/mobilev2/DreamShareReceiptPolicy.kt" \
+  "$root/android/app/src/main/java/com/trotter/mobilev2/DreamShareReceiptCopy.kt" \
   "$root/scripts/native-share-tests/DreamShareInboxTest.kt" \
-  "$root/scripts/native-share-tests/DreamShareReceiptPolicyTest.kt"
+  "$root/scripts/native-share-tests/DreamShareReceiptPolicyTest.kt" \
+  "$root/scripts/native-share-tests/DreamShareReceiptCopyTest.kt"
 java -cp "$output/tests.jar:$stdlib:$json" com.trotter.mobilev2.DreamShareInboxTestKt
 java -cp "$output/tests.jar:$stdlib:$json" com.trotter.mobilev2.DreamShareReceiptPolicyTestKt
+java -cp "$output/tests.jar:$stdlib:$json" com.trotter.mobilev2.DreamShareReceiptCopyTestKt

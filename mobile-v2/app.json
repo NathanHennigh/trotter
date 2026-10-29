@@ -2,7 +2,7 @@
   "expo": {
     "name": "Trotter",
     "slug": "trotter-v2",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "orientation": "portrait",
     "scheme": "trotterv2",
     "userInterfaceStyle": "light",
@@ -11,14 +11,40 @@
     "plugins": [
       "expo-font",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-apple-authentication",
+      "./plugins/withTrotterShareExtension"
     ],
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.trotter.mobilev2"
+      "supportsTablet": false,
+      "bundleIdentifier": "com.trotter.mobilev2",
+      "appleTeamId": "BVA33376DZ",
+      "buildNumber": "1",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "privacyManifests": {
+        "NSPrivacyTracking": false,
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "C617.1"
+            ]
+          }
+        ]
+      }
     },
     "android": {
       "package": "com.trotter.mobilev2",
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/world-window/app-icon.png",
         "backgroundColor": "#FAF8F2"
@@ -26,8 +52,9 @@
     },
     "extra": {
       "eas": {
-        "projectId": "local-v2-placeholder"
+        "projectId": "99fd8582-8058-41da-b72f-bd09e78ac528"
       }
-    }
+    },
+    "owner": "nathanhennigh"
   }
 }

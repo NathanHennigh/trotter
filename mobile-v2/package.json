@@ -12,10 +12,19 @@
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
     "typecheck": "tsc --noEmit",
+    "test:planner": "node --test scripts/testPlannerEditing.cjs scripts/testItineraryNavigation.cjs scripts/testPlannerSheet.cjs scripts/testPlannerLinks.cjs scripts/testPlannerInvitationLanding.cjs scripts/testPlannerReact.cjs",
+    "test:flight-sharing": "node --test scripts/testFlightSharing.cjs scripts/testFlightShareLinks.cjs scripts/testIncomingShares.cjs",
     "test:dream-share": "node --test scripts/testDreamShareOutbox.cjs scripts/testWorldWindowTravel.js scripts/testDreamGoogleMaps.cjs",
-    "test:world-window": "node scripts/buildPassportRuntime.js --check && node scripts/testNativeAuth.js && node scripts/testIncomingShares.cjs && node scripts/testNativeDreamShare.cjs && node scripts/testHomeNavigation.cjs && node scripts/testWorldWindowPassport.js && node --test scripts/testWorldWindowTravel.js scripts/testDreamShareOutbox.cjs && node scripts/testDreamCountryArtwork.cjs --assets && node scripts/testCountryPostcard.cjs && node scripts/testWorldWindowGlobe.cjs && node scripts/testGlobeLoading.cjs && node scripts/testStampSystem.js && node scripts/testNativeQa.cjs && node scripts/testRecoveryScreens.cjs && node scripts/testPassportLoading.cjs && node scripts/testPassportNavigation.cjs && node scripts/testCollectionCatalogs.cjs && node scripts/testTransportCollections.cjs && node scripts/testCountryCollection.cjs && node scripts/testCollectionSearch.cjs && node scripts/testProfileExperience.cjs && node scripts/testAirlineLogos.cjs && node scripts/testWorldWindowGlobeInteractions.cjs && node scripts/testWorldWindowRefinements.cjs && node scripts/testTripAtlasLabels.cjs && node scripts/testDisplayTextFit.cjs && node scripts/testDreamGoogleMaps.cjs && node scripts/testGoogleMapsConfig.cjs && node scripts/testTripsExperience.cjs && node scripts/testDreamsExperience.cjs && node scripts/testDreamCards.cjs && node scripts/testDreamDetail.cjs && node scripts/testExperiencePreferences.cjs && node scripts/testExperienceMotion.cjs",
+    "test:world-window": "node scripts/buildPassportRuntime.js --check && node scripts/testNativeAuth.js && node scripts/testIncomingShares.cjs && node scripts/testNativeDreamShare.cjs && node scripts/testHomeNavigation.cjs && node scripts/testWorldWindowPassport.js && node --test scripts/testWorldWindowTravel.js scripts/testDreamShareOutbox.cjs && node scripts/testDreamCountryArtwork.cjs --assets && node scripts/testCountryPostcard.cjs && node scripts/testWorldWindowGlobe.cjs && node scripts/testGlobeLoading.cjs && node scripts/testStampSystem.js && node scripts/testNativeQa.cjs && node scripts/testRecoveryScreens.cjs && node scripts/testPassportLoading.cjs && node scripts/testPassportNavigation.cjs && node scripts/testCollectionCatalogs.cjs && node scripts/testTransportCollections.cjs && node scripts/testCountryCollection.cjs && node scripts/testCountryJourneyContext.cjs && node scripts/testCollectionSearch.cjs && node scripts/testProfileExperience.cjs && node scripts/testAirlineLogos.cjs && node scripts/testWorldWindowGlobeInteractions.cjs && node scripts/testWorldWindowRefinements.cjs && node scripts/testTripAtlasLabels.cjs && node scripts/testDisplayTextFit.cjs && node scripts/testDreamGoogleMaps.cjs && node scripts/testGoogleMapsConfig.cjs && node scripts/testTripsExperience.cjs && node scripts/testDreamBrowse.cjs && node scripts/testDreamsExperience.cjs && node scripts/testDreamCards.cjs && node scripts/testDreamDetail.cjs && node scripts/testExperiencePreferences.cjs && node scripts/testExperienceMotion.cjs",
     "stamp-editor": "node tools/stamp-editor/server.js",
-    "stamp-audit": "node scripts/auditStampLayout.js"
+    "stamp-audit": "node scripts/auditStampLayout.js",
+    "test:dreams-design": "node --test scripts/testDreamBrowse.cjs scripts/testDreamsExperience.cjs scripts/testDreamCards.cjs scripts/testDreamDetail.cjs scripts/testDreamCountryArtwork.cjs scripts/testDreamGoogleMaps.cjs scripts/testDreamShareOutbox.cjs scripts/testNativeDreamShare.cjs scripts/testHomeNavigation.cjs",
+    "ios:check": "node scripts/checkIosReadiness.cjs",
+    "ios:check:simulator": "node scripts/checkIosReadiness.cjs --local --simulator",
+    "test:ios-config": "node --test scripts/testIosConfiguration.cjs",
+    "eas-build-post-install": "node scripts/checkIosReadiness.cjs --eas",
+    "ios:verify-prebuild": "node scripts/verifyIosPrebuild.cjs",
+    "test:iphone": "node --test scripts/testIosConfiguration.cjs scripts/testIosShareExtension.cjs scripts/testNativeDreamShare.cjs scripts/testPlannerLinks.cjs scripts/testPlannerInvitationLanding.cjs scripts/testAppleAccounts.cjs scripts/testAccountControls.cjs scripts/testDeletedAccountCleanup.cjs && node scripts/testNativeAuth.js && node scripts/testProfileExperience.cjs && node scripts/testRecoveryScreens.cjs"
   },
   "expo": {
     "doctor": {
@@ -28,7 +37,8 @@
     "@expo-google-fonts/outfit": "^0.2.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~54.0.37",
-    "expo-asset": "~12.0.12",
+    "expo-apple-authentication": "~8.0.8",
+    "expo-asset": "~12.0.14",
     "expo-constants": "~18.0.14",
     "expo-crypto": "~15.0.9",
     "expo-dev-client": "~6.0.21",
@@ -57,6 +67,7 @@
     "@types/react": "~19.1.10",
     "@types/three": "^0.166.0",
     "babel-preset-expo": "~54.0.10",
+    "react-test-renderer": "19.1.0",
     "sharp": "^0.34.5",
     "typescript": "^5.3.0"
   }

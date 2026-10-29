@@ -22,7 +22,7 @@ import {
 } from "./passport-model";
 import { getMobileVisualWidth } from "../../../utils/mobileLayout";
 import { AirportRouteFan } from "./AirportRouteFan";
-import { tripsForCountry } from "./passport-collection-model";
+import { countryTripContext, tripsForCountry } from "./passport-collection-model";
 import { countryCatalog, airportCatalog, airlineCatalog } from "../../../data/collections/catalogs";
 import { collectionProgress } from "../collections/catalogProgress";
 import { TransportCollectionIndex } from "../collections/TransportCollectionIndex";
@@ -315,7 +315,7 @@ export function CountryArrivalDetail({
           </Text>
         </View>
         {relevant.length ? (
-          <TripRows trips={relevant} onOpenTrip={onOpenTrip} />
+          <TripRows trips={relevant} country={arrival} onOpenTrip={onOpenTrip} />
         ) : (
           <Text style={styles.empty}>
             {year
@@ -329,40 +329,46 @@ export function CountryArrivalDetail({
 }
 function TripRows({
   trips,
+  country,
   onOpenTrip,
 }: {
   trips: TripSummary[];
+  country?: CountryArrival;
   onOpenTrip?: (trip: TripSummary) => void;
 }) {
   const largeText = useWindowDimensions().fontScale >= 1.35;
   return (
     <View style={styles.inset}>
-      {trips.map((trip) => (
-        <Pressable
-          key={trip.id}
-          accessibilityRole={onOpenTrip ? "button" : undefined}
-          disabled={!onOpenTrip}
-          onPress={() => onOpenTrip?.(trip)}
-          style={styles.listRow}
-        >
-          <View style={styles.listCopy}>
-            <Text style={styles.tripTitle}>{trip.city || trip.title}</Text>
-            <Text style={styles.meta}>
-              {readableDate(trip.startDate)} – {readableDate(trip.endDate)}
-            </Text>
-            {largeText && (
-              <Text style={styles.meta}>{trip.flightCount} flights</Text>
-            )}
-          </View>
-          {!largeText && (
-            <View style={styles.countCopy}>
-              <Text style={styles.flightCount}>{trip.flightCount}</Text>
-              <Text style={styles.meta}>flights</Text>
+      {trips.map((trip) => {
+        const context = country ? countryTripContext(trip, country) : undefined;
+        return (
+          <Pressable
+            key={trip.id}
+            accessibilityRole={onOpenTrip ? "button" : undefined}
+            disabled={!onOpenTrip}
+            onPress={() => onOpenTrip?.(trip)}
+            style={styles.listRow}
+          >
+            <View style={styles.listCopy}>
+              <Text style={styles.tripTitle}>{trip.city || trip.title}</Text>
+              {context && <Text style={styles.meta}>{context}</Text>}
+              <Text style={styles.meta}>
+                {readableDate(trip.startDate)} – {readableDate(trip.endDate)}
+              </Text>
+              {largeText && (
+                <Text style={styles.meta}>{trip.flightCount} flights</Text>
+              )}
             </View>
-          )}
-          {onOpenTrip && <WWIcon name="arrow" size={16} />}
-        </Pressable>
-      ))}
+            {!largeText && (
+              <View style={styles.countCopy}>
+                <Text style={styles.flightCount}>{trip.flightCount}</Text>
+                <Text style={styles.meta}>flights</Text>
+              </View>
+            )}
+            {onOpenTrip && <WWIcon name="arrow" size={16} />}
+          </Pressable>
+        );
+      })}
     </View>
   );
 }

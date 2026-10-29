@@ -18,8 +18,9 @@ type NativeShareBridge = {
   flush(): Promise<void>;
   retry(id: string): Promise<void>;
   acknowledge(id: string): Promise<void>;
+  forgetAccount?(apiBaseUrl: string, ownerId: number): Promise<void>;
 };
-const nativeBridge = (): NativeShareBridge | undefined => Platform.OS === 'android' ? NativeModules.TrotterDreamShare : undefined;
+const nativeBridge = (): NativeShareBridge | undefined => Platform.OS === 'android' || Platform.OS === 'ios' ? NativeModules.TrotterDreamShare : undefined;
 
 /** Pass the same auth revision to invalidation and the subsequent verified /auth/me identity. */
 export async function invalidateNativeDreamShareSession(revision: number): Promise<void> {
@@ -35,3 +36,7 @@ export async function flushNativeDreamShares(): Promise<void> { await nativeBrid
 export async function retryNativeDreamShare(id: string): Promise<void> { await nativeBridge()?.retry(id); }
 /** Call only after a successful authoritative Dreams refresh. Pending captures are never removed. */
 export async function acknowledgeNativeDreamShare(id: string): Promise<void> { await nativeBridge()?.acknowledge(id); }
+/** Call only after server-confirmed account deletion. Older native builds may not implement local erasure. */
+export async function forgetNativeDreamShareAccount(apiBaseUrl: string, ownerId: number): Promise<void> {
+  await nativeBridge()?.forgetAccount?.(apiBaseUrl, ownerId);
+}

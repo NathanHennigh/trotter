@@ -55,8 +55,8 @@ export function PassportBook({
   const state = useRef<BookState>({ spread: 0, closed: true }),
     initial = useRef<string | null>(null),
     mounted = useRef(true);
-  const latest = useRef({ onCountry, onInteractionChange, archive });
-  latest.current = { onCountry, onInteractionChange, archive };
+  const latest = useRef({ onCountry, onInteractionChange, archive, visible });
+  latest.current = { onCountry, onInteractionChange, archive, visible };
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -82,6 +82,20 @@ export function PassportBook({
       );
     sentPayload.current = payload.current;
   }, []);
+  const sendVisibility = useCallback(() => {
+    if (!loaded.current) return;
+    const showing = latest.current.visible;
+    if (Platform.OS === "web")
+      iframe.current?.contentWindow?.postMessage({ type: "passport-visibility", visible: showing }, "*");
+    else webview.current?.injectJavaScript(`window.setPassportVisible&&window.setPassportVisible(${showing});true;`);
+  }, []);
+  useEffect(() => {
+    // Visibility is a tiny lifecycle message, never a second transfer of the
+    // font/stamp data or a rebuild of every passport page texture.
+    if (payload.current) payload.current.visible = visible;
+    sendVisibility();
+    if (!visible) latest.current.onInteractionChange?.(false);
+  }, [visible, sendVisibility]);
   const openCover = useCallback(() => {
     if (Platform.OS === "web")
       iframe.current?.contentWindow?.postMessage({ type: "passport-open" }, "*");
@@ -97,7 +111,7 @@ export function PassportBook({
     preparePassportPayload(archive)
       .then((next) => {
         if (cancelled) return;
-        payload.current = { ...next, state: state.current, earned, visible };
+        payload.current = { ...next, state: state.current, earned, visible: latest.current.visible };
         setError(false);
         if (!initial.current) {
           const document = passportDocument(payload.current);
@@ -112,7 +126,7 @@ export function PassportBook({
     return () => {
       cancelled = true;
     };
-  }, [archive, attempt, sendPayload, earned, visible]);
+  }, [archive, attempt, sendPayload, earned]);
   const message = useCallback((data: unknown) => {
     if (!mounted.current || !data || typeof data !== "object") return;
     const value = data as Record<string, unknown>;
@@ -165,6 +179,7 @@ export function PassportBook({
   const onLoad = () => {
     loaded.current = true;
     sendPayload();
+    sendVisibility();
   };
   const retry = () => {
     loaded.current = false;

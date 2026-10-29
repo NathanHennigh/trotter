@@ -6,6 +6,7 @@ import { WWHeader, WWIcon } from '../components/world-window/WorldWindowUI';
 import { PressFeedback } from '../components/world-window/motion';
 import { TravelerCard } from '../components/world-window/profile/TravelerCard';
 import { HomeAirportPicker } from '../components/world-window/profile/HomeAirportPicker';
+import { AccountControls } from '../components/world-window/profile/AccountControls';
 import type { BottomNavTab } from '../data/trotterMock';
 import airports from '../data/collections/airports.json';
 import { getApiBaseUrl, useTravelTrips } from '../services/travelTrips';
@@ -14,15 +15,15 @@ import { useTravelerIdentity } from '../utils/travelerIdentity';
 import { getMobileVisualWidth } from '../utils/mobileLayout';
 import { colors, fonts, layout } from '../theme/trotterTheme';
 
-export function ProfileScreen({ active, onChange, onOpenAirport }: {
-  active: BottomNavTab; onChange: (tab: BottomNavTab) => void; onOpenStamps?: () => void; onOpenAirport?: (code: string) => void;
+export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInbox, onBack }: {
+  active: BottomNavTab; onChange: (tab: BottomNavTab) => void; onOpenStamps?: () => void; onOpenAirport?: (code: string) => void; onOpenFlightInbox?: () => void; onBack?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const { width, fontScale } = useWindowDimensions();
   const visualWidth = getMobileVisualWidth(width);
   const large = fontScale >= 1.35 || visualWidth < 350;
   const preferences = useExperiencePreferences();
-  const { profile, trips, status, error, accountId, accountEmail, lastSyncedAt, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt, refresh, syncFromGmail, signOut } = useTravelTrips();
+  const { profile, trips, status, error, accountId, accountEmail, lastSyncedAt, gmailConnected, gmailConnectionStatus, gmailConnecting, gmailConnectionError, connectGmail, cancelGmailConnection, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt, refresh, syncFromGmail, signOut } = useTravelTrips();
   const identity = useTravelerIdentity(accountId ? `${getApiBaseUrl()}/${accountId}` : undefined);
   const [choosingHome, setChoosingHome] = React.useState(false);
   const busy = ['loading', 'refreshing', 'syncing'].includes(status);
@@ -32,11 +33,14 @@ export function ProfileScreen({ active, onChange, onOpenAirport }: {
     .filter(segment => Number.isFinite(Date.parse(segment.depTime)) && Date.parse(segment.depTime) <= Date.now())
     .map(segment => [segment.id, segment])).values()], [trips]);
   const firstYear = profile.firstFlightDate?.match(/^\d{4}/)?.[0];
-  const syncCopy = scanning ? 'Finding flight confirmations…' : gmailSyncStatus === 'error' ? 'Scan needs attention' : lastGmailSyncedAt ? `Last scan · ${formatUpdated(lastGmailSyncedAt)}` : 'Ready to scan for flights';
+  const reconnect = gmailConnectionStatus === 'needs_reconnect';
+  const syncCopy = gmailConnecting ? 'Waiting for your permission…' : !gmailConnected ? reconnect ? 'Reconnect to import flights' : 'Optional · Import flight confirmations' : scanning ? 'Finding flight confirmations…' : gmailSyncStatus === 'error' ? 'Scan needs attention' : lastGmailSyncedAt ? `Last scan · ${formatUpdated(lastGmailSyncedAt)}` : 'Ready to scan for flights';
+  const gmailBusy = gmailConnecting || (gmailConnected && busy);
+  const gmailAction = gmailConnecting ? 'Connecting…' : gmailConnected ? scanning ? 'Scanning…' : 'Scan for flights' : reconnect ? 'Reconnect Gmail' : 'Connect Gmail';
   return <View style={[s.screen, { paddingTop: insets.top }]}>
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 22 }}
       refreshControl={<RefreshControl refreshing={status === 'refreshing'} onRefresh={() => void refresh()} tintColor={colors.blue} />}>
-      <WWHeader title="Profile" />
+      <WWHeader title="Profile" onBack={onBack} />
       <View style={[s.content, { width: Math.min(visualWidth - 48, 592) }]}>
         <TravelerCard name={profile.name} firstYear={firstYear} homeAirport={identity.homeAirport} homeCity={home?.city || home?.name} segments={segments} ready={identity.ready}
           onChooseHome={() => setChoosingHome(true)} onOpenAirport={onOpenAirport} />
@@ -47,14 +51,21 @@ export function ProfileScreen({ active, onChange, onOpenAirport }: {
           </View>
           <View style={[s.provider, large && s.providerLarge]}>
             <View style={s.providerCopy}><Text style={s.providerName}>Gmail</Text><Text style={s.secondary} accessibilityLiveRegion="polite">{syncCopy}</Text></View>
-            <PressFeedback accessibilityRole="button" accessibilityLabel="Scan Gmail for flights" accessibilityState={{ disabled: busy, busy: scanning }} disabled={busy} onPress={() => void syncFromGmail()} style={[s.scan, large && s.scanLarge, busy && s.disabled]}>
-              {scanning ? <ActivityIndicator color={colors.blue} size="small" /> : <WWIcon name="sync" size={17} color={colors.blue} />}
-              <Text style={s.scanText}>{scanning ? 'Scanning…' : 'Scan for flights'}</Text>
+            <PressFeedback accessibilityRole="button" accessibilityLabel={gmailConnected ? 'Scan Gmail for flights' : reconnect ? 'Reconnect Gmail' : 'Connect Gmail'} accessibilityState={{ disabled: gmailBusy, busy: scanning || gmailConnecting }} disabled={gmailBusy} onPress={() => void (gmailConnected ? syncFromGmail() : connectGmail())} style={[s.scan, large && s.scanLarge, gmailBusy && s.disabled]}>
+              {scanning || gmailConnecting ? <ActivityIndicator color={colors.blue} size="small" /> : gmailConnected ? <WWIcon name="sync" size={17} color={colors.blue} /> : null}
+              <Text style={s.scanText}>{gmailAction}</Text>
             </PressFeedback>
           </View>
           {scanning ? <Text style={s.note}>Your scan continues if you leave the app.</Text> : null}
+          {!gmailConnected ? <Text style={s.note}>Connect Gmail to automatically import flights. Read-only access; Dreams and Planner work without it.</Text> : null}
+          {gmailConnecting ? <PressFeedback accessibilityRole="button" accessibilityLabel="Cancel Gmail connection" onPress={cancelGmailConnection} style={s.signOut}><Text style={s.signOutText}>Cancel</Text></PressFeedback> : null}
+          {gmailConnectionError ? <Text style={s.error} accessibilityRole="alert">{gmailConnectionError}</Text> : null}
           {gmailSyncError ? <Text style={s.error} accessibilityRole="alert">{gmailSyncError}</Text> : null}
         </View>
+        {onOpenFlightInbox ? <PressFeedback onPress={onOpenFlightInbox} accessibilityRole="button" accessibilityLabel="Flights for others. Send and receive flight bookings." style={s.flightInbox}>
+          <View style={s.flightInboxCopy}><Text style={s.providerName}>Flights for others</Text><Text style={s.secondary}>Bookings to send · Flights shared with you</Text></View>
+          <WWIcon name="chevron" size={20} color={colors.blue} />
+        </PressFeedback> : null}
         <View style={s.preferences}>
           <Text style={s.overline}>PREFERENCES</Text>
           <Text style={s.preferenceTitle}>Globe appearance</Text>
@@ -72,13 +83,8 @@ export function ProfileScreen({ active, onChange, onOpenAirport }: {
             <Switch accessibilityLabel="Tactile feedback" value={preferences.haptics} onValueChange={preferences.setHaptics} trackColor={{ false: colors.paperBorder, true: colors.blue }} thumbColor={colors.paperSoft} hitSlop={10} />
           </View>
         </View>
-        <View style={s.account}>
-          <Text style={s.overline}>GOOGLE ACCOUNT</Text><Text selectable style={s.email}>{accountEmail}</Text>
-          <View style={s.accountBottom}><Text style={s.note}>{lastSyncedAt ? `Updated ${formatUpdated(lastSyncedAt)}` : 'Connected with Google'}</Text>
-            <PressFeedback accessibilityRole="button" onPress={() => void signOut()} style={s.signOut}><Text style={s.signOutText}>Sign out</Text><WWIcon name="logout" size={16} color={colors.mutedInk} /></PressFeedback>
-          </View>
-          {error && error !== gmailSyncError ? <Text style={s.error} accessibilityRole="alert">{error}</Text> : null}
-        </View>
+        <AccountControls key={accountId} />
+        {error && error !== gmailSyncError ? <Text style={s.error} accessibilityRole="alert">{error}</Text> : null}
       </View>
     </ScrollView>
     <BottomNav active={active} onChange={onChange} />
@@ -91,6 +97,7 @@ function formatUpdated(value: string) {
 }
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.paperSoft }, content: { alignSelf: 'center' },
+  flightInbox: { paddingVertical: 21, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: colors.paperBorder, minHeight: 74 }, flightInboxCopy: { flex: 1, gap: 4 },
   connection: { marginTop: 25, paddingBottom: 22, borderBottomWidth: 1, borderBottomColor: colors.paperBorder },
   sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, overline: { fontFamily: fonts.mono, fontSize: 10, lineHeight: 16, letterSpacing: .7, color: colors.mutedInk },
   success: { fontFamily: fonts.sans, fontSize: 16, color: colors.green }, provider: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 10 }, providerLarge: { flexWrap: 'wrap' },

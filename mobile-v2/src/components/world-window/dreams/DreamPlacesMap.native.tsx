@@ -5,6 +5,7 @@ import MapView, { Marker, PROVIDER_GOOGLE, type MapPressEvent } from "react-nati
 import { colors, fonts } from "../../../theme/trotterTheme";
 import { WWIcon } from "../WorldWindowUI";
 import { PlaceSymbol } from "./DreamPhoto";
+import { dreamMarkerImage } from "./dreamMarkerImages";
 import { cleanMapPoints, clusterPlaces, focusPlaceRegion, googleMapUrl, placesMapStyle, placesRegion, validMapCoordinate, type DreamPlacesMapProps, type PlaceCluster, type PlacesRegion } from "./dreamMapModel";
 
 export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, onSelect, onPlace, height = 240, overview }: DreamPlacesMapProps) {
@@ -52,13 +53,13 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     if (!cameraReady || placing) return;
     const point = clean.find(p => p.id === selectedId);
     if (!point) return;
-    const key = `${point.id}:${point.lat}:${point.lon}:${Boolean(point.area)}`;
+    const key = `${fitKey}:${attempt}:${width}:${height}:${point.id}:${Boolean(point.area)}`;
     if (focusedPoint.current === key) return;
     focusedPoint.current = key;
     userFramed.current = true;
     if (selectedFromMap.current === selectedId) { selectedFromMap.current = undefined; return; }
     move(focusPlaceRegion(point, currentRegion.current, width, height), true);
-  }, [selectedId, cameraReady, placing, clean, move, width, height]);
+  }, [selectedId, cameraReady, placing, clean, move, width, height, fitKey, attempt]);
   const clusters = React.useMemo(() => placing ? clean.map(point => ({ id: point.id, points: [point], latitude: point.lat, longitude: point.lon })) : clusterPlaces(clean, region, width, height, selectedId), [clean, region, width, height, selectedId, placing]);
   const open = async () => {
     const url = googleMapUrl(clean.filter(p => !selectedId || p.id === selectedId), overview);
@@ -73,6 +74,7 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
       if (placing) onPlace?.(point.lat, point.lon); else onSelect?.(point.id);
       return;
     }
+    if (cluster.selectedPoint) { setChoices(cluster.points.map(p => p.id)); return; }
     const next = placesRegion(cluster.points, undefined, width, height);
     const collocated = cluster.points.every(point => Math.abs(point.lat - cluster.points[0].lat) < 0.0001 && Math.abs(point.lon - cluster.points[0].lon) < 0.0001);
     if (collocated || next.longitudeDelta >= currentRegion.current.longitudeDelta * .9) setChoices(cluster.points.map(p => p.id));
@@ -88,7 +90,7 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
   return <View style={s.frame}>
     <View style={s.toolbar}>
       <Pressable accessibilityRole="button" accessibilityLabel={clean.length ? "Fit saved places on map" : "Show country on map"} disabled={!configured || !cameraReady} style={s.action}
-        onPress={() => { userFramed.current = false; setChoices([]); move(placesRegion(clean, overview, width, height), true); }}>
+        onPress={() => { userFramed.current = false; selectedFromMap.current = undefined; focusedPoint.current = undefined; setChoices([]); if (!placing) onSelect?.(undefined); move(placesRegion(clean, overview, width, height), true); }}>
         <WWIcon name="globe" size={15} /><Text style={s.actionText}>{clean.length ? "Fit places" : "Country view"}</Text>
       </Pressable>
       {googleMapUrl(clean, overview) && <Pressable accessibilityRole="link" accessibilityLabel="Open in Google Maps" style={s.action} onPress={() => void open()}><WWIcon name="arrow" size={17} /></Pressable>}
@@ -120,7 +122,7 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     {!clean.length && <Text style={s.empty}>{placing ? "Tap the exact location to place your pin." : "Saved places will appear here when their locations are ready."}</Text>}
     {!placing && clean.some(point => point.area) && <Text style={s.empty}>Area markers show a general location.</Text>}
     {choices.length > 0 && <ScrollView style={s.choices} nestedScrollEnabled>
-      {choices.map(id => clean.find(p => p.id === id)).filter(Boolean).map(point => point && <Pressable key={point.id} accessibilityRole="button" style={s.choice} onPress={() => { selectedFromMap.current = point.id; onSelect?.(point.id); setChoices([]); }}>
+      {choices.map(id => clean.find(p => p.id === id)).filter(Boolean).map(point => point && <Pressable key={point.id} accessibilityRole="button" accessibilityState={{ selected: point.id === selectedId }} style={s.choice} onPress={() => { selectedFromMap.current = point.id; onSelect?.(point.id); setChoices([]); }}>
         {point.area ? <WWIcon name="globe" size={18} /> : <PlaceSymbol category={point.category ?? "unknown"} size={18} />}<Text style={s.choiceText}>{point.area ? `${point.label} · Area` : point.label}</Text>
       </Pressable>)}
     </ScrollView>}
@@ -132,7 +134,28 @@ export function DreamPlacesMap({ points, fitKey, selectedId, placing = false, on
     </View>}
   </View>;
 }
+function markerLabel(cluster: PlaceCluster) {
+  const point = cluster.selectedPoint ?? cluster.points[0], count = cluster.points.length;
+  const place = `${point.label}${point.area ? ", approximate area" : ""}`;
+  return count > 1 ? cluster.selectedPoint
+    ? `${place}, selected. ${count} saved places here, choose a place`
+    : `${count} saved places, zoom or choose a place` : place;
+}
 function PlaceMarker({ cluster, selected, mapReady, mapLoaded, onPress }: { cluster: PlaceCluster; selected: boolean; mapReady: boolean; mapLoaded: boolean; onPress: () => void }) {
+  const count = cluster.points.length;
+  // Fabric does not reliably update this library version's legacy marker
+  // shadow-node dimensions. Its custom-view bitmap then stays 100 physical px
+  // wide even when our 36 dp circle is 108+ px. A native image descriptor uses
+  // its density-aware intrinsic dimensions and never enters that snapshot path.
+  if (Platform.OS === 'android') return <Marker
+    image={dreamMarkerImage(cluster, selected)}
+    coordinate={{ latitude: cluster.latitude, longitude: cluster.longitude }} identifier={cluster.id}
+    anchor={{ x: .5, y: .5 }} stopPropagation tracksViewChanges={false} zIndex={selected ? 3 : count > 1 ? 2 : 1}
+    accessibilityLabel={markerLabel(cluster)} accessibilityRole="button"
+    onPress={event => { event.stopPropagation(); onPress(); }} />;
+  return <SnapshotPlaceMarker cluster={cluster} selected={selected} mapReady={mapReady} mapLoaded={mapLoaded} onPress={onPress} />;
+}
+function SnapshotPlaceMarker({ cluster, selected, mapReady, mapLoaded, onPress }: { cluster: PlaceCluster; selected: boolean; mapReady: boolean; mapLoaded: boolean; onPress: () => void }) {
   const marker = React.useRef<React.ElementRef<typeof Marker>>(null);
   const [laidOut, setLaidOut] = React.useState(false);
   const [tracking, setTracking] = React.useState(true);
@@ -147,7 +170,7 @@ function PlaceMarker({ cluster, selected, mapReady, mapLoaded, onPress }: { clus
   const point = cluster.points[0], count = cluster.points.length;
   return <Marker ref={marker} coordinate={{ latitude: cluster.latitude, longitude: cluster.longitude }} identifier={cluster.id}
     anchor={{ x: .5, y: .5 }} stopPropagation tracksViewChanges={tracking} zIndex={selected ? 3 : count > 1 ? 2 : 1}
-    accessibilityLabel={count > 1 ? `${count} saved places, zoom or choose a place` : `${point.label}${point.area ? ", approximate area" : ""}`}
+    accessibilityLabel={markerLabel(cluster)}
     accessibilityRole="button" onPress={event => { event.stopPropagation(); onPress(); }}>
     <View collapsable={false} onLayout={() => setLaidOut(true)} style={[s.marker, selected && s.selectedMarker, point.area && count === 1 && s.areaMarker]}>
       {count > 1 ? <Text allowFontScaling={false} style={s.count}>{count}</Text> : point.area

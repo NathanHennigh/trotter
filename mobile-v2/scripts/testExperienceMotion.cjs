@@ -9,7 +9,7 @@ const src = path.join(__dirname, '../src');
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 const flatten = value => Array.isArray(value) ? Object.assign({}, ...value.map(flatten)) : value || {};
 function environment({ reduced = false, os = 'android', version = 35, nativeBlur = true, width = 410, height = 880, visualWidth = 410 } = {}) {
-  let current, nextTimer = 1;
+  let current, nextTimer = 1, motionQueries = 0;
   const frames = new Map(), timers = new Map(), animations = [], reducedListeners = new Set();
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => v === b[i]);
   const React = {
@@ -17,7 +17,7 @@ function environment({ reduced = false, os = 'android', version = 35, nativeBlur
     isValidElement: value => Boolean(value && typeof value === 'object' && value.type && value.props),
     cloneElement: (element, extra) => ({ ...element, props: { ...element.props, ...extra } }),
     useRef(value) { const c = current, i = c.cursor++; return c.slots[i] ?? (c.slots[i] = { current: value }); },
-    useState(initial) { const c = current, i = c.cursor++; if (!(i in c.slots)) c.slots[i] = typeof initial === 'function' ? initial() : initial; return [c.slots[i], value => { c.slots[i] = typeof value === 'function' ? value(c.slots[i]) : value; }]; },
+    useState(initial) { const c = current, i = c.cursor++; if (!(i in c.slots)) c.slots[i] = typeof initial === 'function' ? initial() : initial; return [c.slots[i], value => { c.stateUpdates++; c.slots[i] = typeof value === 'function' ? value(c.slots[i]) : value; }]; },
     useReducer(reducer, initial) { const [value, setValue] = React.useState(initial); return [value, action => setValue(previous => reducer(previous, action))]; },
     useMemo(fn, deps) { const c = current, i = c.cursor++; if (!c.slots[i] || !same(c.slots[i].deps, deps)) c.slots[i] = { value: fn(), deps }; return c.slots[i].value; },
     useEffect(fn, deps) { const c = current, i = c.cursor++; if (!c.slots[i] || !same(c.slots[i].deps, deps)) { c.slots[i]?.cleanup?.(); c.slots[i] = { deps }; c.effects.push(() => { c.slots[i].cleanup = fn(); }); } },
@@ -37,7 +37,7 @@ function environment({ reduced = false, os = 'android', version = 35, nativeBlur
     StyleSheet: { create: x => x, flatten, absoluteFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } },
     useWindowDimensions: () => ({ width, height }), Easing: { bezier: () => 'paperEase', linear: x => x },
     AccessibilityInfo: {
-      isReduceMotionEnabled: async () => reduced,
+      isReduceMotionEnabled: async () => { motionQueries++; return reduced; },
       addEventListener: (_, callback) => { reducedListeners.add(callback); return { remove: () => reducedListeners.delete(callback) }; },
     },
     Animated: {
@@ -94,14 +94,16 @@ function environment({ reduced = false, os = 'android', version = 35, nativeBlur
     cache.set(file, module.exports); return module.exports;
   }
   function mount(Component, initialProps) {
-    const c = { slots: [], cursor: 0, effects: [], props: initialProps };
+    const c = { slots: [], cursor: 0, effects: [], props: initialProps, stateUpdates: 0 };
     return {
       render(props = c.props) { c.props = props; c.cursor = 0; current = c; const tree = Component(props); const pending = c.effects; c.effects = []; pending.forEach(fn => fn()); current = undefined; return tree; },
       dispose() { c.slots.forEach(slot => slot?.cleanup?.()); },
+      get stateUpdates() { return c.stateUpdates; },
     };
   }
   const motion = load('components/world-window/motion.tsx');
   return { motion, load, mount, Value, get animations() { return animations.filter(animation => !animation.value.gesture); },
+    get motionQueries() { return motionQueries; }, get motionListenerCount() { return reducedListeners.size; },
     get gestureAnimations() { return animations.filter(animation => animation.value.gesture); }, timers, frames,
     async ready() { const probe = mount(motion.useReducedMotion); probe.render(); await flush(); probe.render(); probe.dispose(); },
     advanceFrame() { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); },
@@ -146,6 +148,31 @@ test('disabled opacity and base transforms survive concrete Animated Pressable s
   const style = flatten(tree.props.style);
   assert.deepEqual(style.opacity.outputRange, [.45, .45 * .72]);
   assert.deepEqual(style.transform, [{ rotate: '-2deg' }]); h.dispose();
+});
+
+test('retained controls share one native motion preference subscription and keep live changes', async () => {
+  const env = environment({ reduced: false });
+  const controls = Array.from({ length: 40 }, () => env.mount(env.motion.useReducedMotion));
+  controls.forEach(control => control.render());
+  assert.equal(env.motionQueries, 1, 'Mounting forty controls makes one native preference read');
+  assert.equal(env.motionListenerCount, 1);
+  // A system event arriving before the initial read wins over that stale read.
+  env.reduce(true); await flush();
+  assert(controls.every(control => control.render() === true));
+  env.reduce(false);
+  assert(controls.every(control => control.render() === false));
+  controls.forEach(control => control.dispose());
+  assert.equal(env.motionListenerCount, 0, 'The shared subscription is released after its final consumer');
+});
+
+test('ordinary controls animate press feedback without scheduling React state updates', async () => {
+  const env = environment(), h = env.mount(env.motion.PressFeedback);
+  const tree = h.render({ style: { opacity: 1 } }); await flush();
+  const before = h.stateUpdates;
+  tree.props.onPressIn({}); tree.props.onPressOut({});
+  assert.equal(h.stateUpdates, before, 'Static styles do not need pressed-state renders');
+  assert.equal(env.animations.length, 2, 'Native press and release feedback remain intact');
+  h.dispose();
 });
 
 test('paper feedback composes the caller style and interrupts a press with its release', async () => {

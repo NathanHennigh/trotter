@@ -65,29 +65,78 @@ export function placesRegion(points: MapPoint[], overview?: CountryRegion, width
   };
 }
 export function focusPlaceRegion(point: MapPoint, current: PlacesRegion, width = 320, height = 240): PlacesRegion {
-  if (!point.area) return { ...current, latitude: point.lat, longitude: point.lon };
-  const area = placesRegion([point], undefined, width, height);
+  const local = placesRegion([point], undefined, width, height);
+  // A list selection should reveal its surroundings, rather than merely move
+  // a country-wide camera. Keep a closer view the user has already chosen.
+  if (!point.area) return { ...current, latitude: point.lat, longitude: point.lon,
+    latitudeDelta: Math.min(current.latitudeDelta, local.latitudeDelta),
+    longitudeDelta: Math.min(current.longitudeDelta, local.longitudeDelta) };
   return { ...current, latitude: point.lat, longitude: point.lon,
-    latitudeDelta: Math.max(current.latitudeDelta, area.latitudeDelta),
-    longitudeDelta: Math.max(current.longitudeDelta, area.longitudeDelta) };
+    latitudeDelta: Math.max(current.latitudeDelta, local.latitudeDelta),
+    longitudeDelta: Math.max(current.longitudeDelta, local.longitudeDelta) };
 }
-export type PlaceCluster = { id: string; points: MapPoint[]; latitude: number; longitude: number };
-/** Spatial buckets keep dozens of saved places legible without changing their coordinates. */
+export type PlaceCluster = { id: string; points: MapPoint[]; latitude: number; longitude: number; selectedPoint?: MapPoint };
+/** Cluster in screen space without changing the saved coordinates or hiding a selected pin. */
 export function clusterPlaces(points: MapPoint[], region: PlacesRegion, width: number, height: number, selectedId?: string): PlaceCluster[] {
   const bins = new Map<string, MapPoint[]>();
+  const spacing = 44; // The 36px circles need a little room between their borders.
   const yCenter = mercator(region.latitude);
   const ySpan = Math.max(0.000001, mercator(region.latitude + region.latitudeDelta / 2) - mercator(region.latitude - region.latitudeDelta / 2));
-  for (const point of cleanMapPoints(points)) {
-    const x = normalizeLongitude(point.lon - region.longitude) / Math.max(0.000001, region.longitudeDelta) * width;
-    const y = (mercator(point.lat) - yCenter) / ySpan * height;
-    const key = point.id === selectedId ? `selected:${point.id}` : `${Math.floor((x + width / 2) / 44)}:${Math.floor((y + height / 2) / 44)}`;
+  const project = (latitude: number, longitude: number) => ({
+    x: normalizeLongitude(longitude - region.longitude) / Math.max(0.000001, region.longitudeDelta) * width,
+    y: (mercator(latitude) - yCenter) / ySpan * height,
+  });
+  for (const point of cleanMapPoints(points).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
+    const { x, y } = project(point.lat, point.lon);
+    const key = point.id === selectedId ? `selected:${point.id}` : `${Math.floor((x + width / 2) / spacing)}:${Math.floor((y + height / 2) / spacing)}`;
     const bucket = bins.get(key) ?? []; bucket.push(point); bins.set(key, bucket);
   }
-  return [...bins.values()].map(members => ({
-    id: members.map(p => p.id).sort().join("|"), points: members,
-    latitude: members.reduce((total, p) => total + p.lat, 0) / members.length,
-    longitude: normalizeLongitude(members[0].lon + members.reduce((total, p) => total + normalizeLongitude(p.lon - members[0].lon), 0) / members.length),
-  }));
+  const cluster = (members: MapPoint[]): PlaceCluster => {
+    const selectedPoint = members.find(point => point.id === selectedId);
+    return {
+      id: members.map(p => p.id).sort().join("|"), points: members,
+      // One highlighted count marker represents nearby places without moving
+      // the selected place away from its real coordinate or hiding its neighbors.
+      latitude: selectedPoint?.lat ?? members.reduce((total, p) => total + p.lat, 0) / members.length,
+      longitude: selectedPoint?.lon ?? normalizeLongitude(members[0].lon + members.reduce((total, p) => total + normalizeLongitude(p.lon - members[0].lon), 0) / members.length),
+      ...(selectedPoint ? { selectedPoint } : {}),
+    };
+  };
+  let clusters = [...bins.values()].map(cluster);
+  // Neighboring cells can put two count circles almost on top of one another.
+  // Merge all connected collisions, then check again: their new center can
+  // overlap another cluster that was clear of both original centers.
+  while (true) {
+    const parents = clusters.map((_, index) => index);
+    const root = (index: number): number => {
+      while (parents[index] !== index) { parents[index] = parents[parents[index]]; index = parents[index]; }
+      return index;
+    };
+    const centers = clusters.map(group => project(group.latitude, group.longitude));
+    const neighbors = new Map<string, number[]>();
+    let merged = false;
+    for (let i = 0; i < clusters.length; i++) {
+      const { x, y } = centers[i], column = Math.floor(x / spacing), row = Math.floor(y / spacing);
+      // Only neighboring screen cells can collide. Distant/off-screen saves
+      // should not turn a pan into an all-pairs scan of a large collection.
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        for (const j of neighbors.get(`${column + dx}:${row + dy}`) ?? []) {
+          if (Math.hypot(x - centers[j].x, y - centers[j].y) >= spacing) continue;
+          const a = root(i), b = root(j);
+          if (a !== b) { parents[b] = a; merged = true; }
+        }
+      }
+      const key = `${column}:${row}`, members = neighbors.get(key) ?? [];
+      members.push(i); neighbors.set(key, members);
+    }
+    if (!merged) return clusters;
+    const joined = new Map<number, MapPoint[]>();
+    clusters.forEach((group, index) => {
+      const key = root(index), members = joined.get(key) ?? [];
+      members.push(...group.points); joined.set(key, members);
+    });
+    clusters = [...joined.values()].map(cluster);
+  }
 }
 export function googleMapUrl(points: MapPoint[], overview?: CountryRegion) {
   const valid = cleanMapPoints(points);

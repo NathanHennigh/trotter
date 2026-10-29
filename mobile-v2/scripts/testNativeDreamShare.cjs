@@ -27,11 +27,13 @@ test('web and older native builds retain their existing share flow without requi
 });
 
 test('verified identity and exact revision are forwarded together to the secure native bridge', async () => {
+ for (const platform of ['android', 'ios']) {
   const calls = [];
-  const api = load('android', { invalidateSession: async (...args) => calls.push(['clear', ...args]), configureSession: async (...args) => calls.push(['configure', ...args]) });
+  const api = load(platform, { invalidateSession: async (...args) => calls.push(['clear', ...args]), configureSession: async (...args) => calls.push(['configure', ...args]) });
   await api.invalidateNativeDreamShareSession(7);
   await api.syncNativeDreamShareSession({ apiBaseUrl: 'https://example.test', ownerId: 41, token: 'synthetic-session' }, 7);
   assert.deepEqual(calls, [['clear', 7], ['configure', 'https://example.test', 41, 'synthetic-session', 7]]);
+ }
 });
 
 test('native credential clearing errors propagate so sign-out cannot claim success while background sharing remains enabled', async () => {
@@ -61,10 +63,28 @@ test('acknowledgement and explicit retry target only their receipt and propagate
   await assert.rejects(errorApi.acknowledgeNativeDreamShare('saved-id'), /retained/);
 });
 
-test('a non-Android target never forwards credentials to an accidentally present Android module', async () => {
+test('web never forwards credentials to an accidentally present native module', async () => {
   let calls = 0;
   const api = load('web', { configureSession: async () => { calls++; }, invalidateSession: async () => { calls++; } });
   await api.syncNativeDreamShareSession({ apiBaseUrl: 'https://example.test', ownerId: 1, token: 'fixture' }, 1);
   await api.invalidateNativeDreamShareSession(2);
   assert.equal(calls, 0);
+});
+
+test('server-confirmed account deletion forwards only the specified server and owner to iOS cleanup', async () => {
+  const calls = [];
+  const api = load('ios', { forgetAccount: async (...args) => calls.push(args) });
+  await api.forgetNativeDreamShareAccount('https://api.example.test', 41);
+  assert.deepEqual(calls, [['https://api.example.test', 41]]);
+  const failure = new Error('payload storage unavailable');
+  const failed = load('ios', { forgetAccount: async () => { throw failure; } });
+  await assert.rejects(failed.forgetNativeDreamShareAccount('https://api.example.test', 41), error => error === failure);
+});
+
+test('local account cleanup is optional on older native builds and never runs a native method on web', async () => {
+  await load('android', {}).forgetNativeDreamShareAccount('https://api.example.test', 41);
+  await load('ios', undefined).forgetNativeDreamShareAccount('https://api.example.test', 41);
+  let called = false;
+  await load('web', { forgetAccount: async () => { called = true; } }).forgetNativeDreamShareAccount('https://api.example.test', 41);
+  assert.equal(called, false);
 });

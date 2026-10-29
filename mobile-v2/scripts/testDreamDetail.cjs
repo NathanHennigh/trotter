@@ -22,6 +22,7 @@ function host(overrides = {}) {
   const mocks = {
     react,
     'react-native': { ...Object.fromEntries('View Text Modal TextInput ScrollView KeyboardAvoidingView'.split(' ').map(t => [t, t])),
+      TextInput: overrides.inputType || 'TextInput', Keyboard: { isVisible: () => !!overrides.keyboardVisible },
       Platform: { OS: 'android' }, StyleSheet: { create: x => x, absoluteFill: {}, absoluteFillObject: {} },
       Linking: { openURL: async url => { urls.push(url); } }, useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }) },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) },
@@ -66,13 +67,32 @@ const byType = (tree, type) => nodes(tree).find(node => node.type === type);
 const text = tree => nodes(tree).filter(node => node.type === 'Text').map(node => node.props.children.flat(Infinity).join(''));
 const props = changes => ({ item, points: [], onClose: noop, onSave: async () => {}, onDelete: async () => {}, onRetry: noop, ...changes });
 
+test('Android location entry shrinks above the keyboard and reveals the focused field after layout', () => {
+  const focused = { measureInWindow: callback => callback(33, 643, 354, 47) }, calls = [];
+  const h = host({ keyboardVisible: true, inputType: { State: { currentlyFocusedInput: () => focused } } });
+  let tree = h.render(props({ initialMode: 'location' }));
+  assert.equal(byType(tree, 'KeyboardAvoidingView').props.behavior, 'height');
+  const scroll = byType(tree, 'ScrollView');
+  scroll.props.ref.current = {
+    getNativeScrollRef: () => ({ measureInWindow: callback => callback(12, 127, 396, 433) }),
+    scrollTo: args => calls.push(args),
+  };
+  scroll.props.onScroll({ nativeEvent: { contentOffset: { y: 136 } } });
+  scroll.props.onLayout(); scroll.props.onFocus();
+  assert.deepEqual(calls, [{ y: 290, animated: false }, { y: 290, animated: false }]);
+  tree = h.render(props({ initialMode: 'location', visible: false }));
+  byType(tree, 'ScrollView').props.onLayout();
+  assert.equal(calls.length, 2, 'hidden editors cannot scroll a different screen’s focused input');
+  h.dispose();
+});
+
 test('browsing presents the reel and map actions without an approval step or editing clutter', async () => {
   const h = host(); const tree = h.render(props());
   assert.equal(byType(tree, 'Modal').props.transparent, true);
-  assert(action(tree, 'View reel')); assert(action(tree, 'Open in Maps'));
+  assert(action(tree, 'View post')); assert(action(tree, 'Open in Maps'));
   assert(!action(tree, 'Save place details')); assert(!action(tree, 'Edit details')); assert(!action(tree, 'Remove saved place'));
   assert(text(tree).includes('Café · Lisbon · Portugal'));
-  action(tree, 'View reel').props.onPress(); action(tree, 'Open in Maps').props.onPress(); await flush();
+  action(tree, 'View post').props.onPress(); action(tree, 'Open in Maps').props.onPress(); await flush();
   assert.deepEqual(h.urls, [item.sourceUrl, item.googleMapsUrl]); h.dispose();
 });
 
@@ -88,10 +108,10 @@ test('overflow contains edit and retry, and the first hardware Back closes only 
 test('editing from overflow retains unsaved notes behind the existing discard guard', () => {
   let closes = 0; const h = host(); let tree = h.render(props({ onClose: () => closes++ }));
   action(tree, 'More place options').props.onPress(); tree = h.render(); action(tree, 'Edit details').props.onPress(); tree = h.render();
-  action(tree, 'Notes').props.onChange('My personal notes'); tree = h.render();
+  action(tree, 'Your note').props.onChange('My personal notes'); tree = h.render();
   action(tree, 'Close place').props.onPress(); tree = h.render();
   assert(action(tree, 'Keep editing')); assert.equal(closes, 0);
-  action(tree, 'Keep editing').props.onPress(); tree = h.render(); assert.equal(action(tree, 'Notes').props.value, 'My personal notes'); h.dispose();
+  action(tree, 'Keep editing').props.onPress(); tree = h.render(); assert.equal(action(tree, 'Your note').props.value, 'My personal notes'); h.dispose();
 });
 
 test('remove is a deliberate second action and only deletes the selected saved place', async () => {
@@ -103,7 +123,7 @@ test('remove is a deliberate second action and only deletes the selected saved p
 
 test('a multi-place reel dismisses its detail before source navigation and ignores duplicate taps', () => {
   const events = []; const h = host(); const tree = h.render(props({ sourceCount: 5, onClose: () => events.push('close'), onShowSource: () => events.push('source') }));
-  const press = action(tree, 'View 5 places from this reel').props.onPress; press(); press();
+  const press = action(tree, 'View 5 places from this post').props.onPress; press(); press();
   assert.deepEqual(events, ['close', 'source']); h.dispose();
 });
 
@@ -111,7 +131,7 @@ test('failed local receipts expose Retry save while active sorting does not expo
   const h = host(); let tree = h.render(props({ item: { ...item, id: 'pending-8', uploadStatus: 'failed' } }));
   action(tree, 'More place options').props.onPress(); tree = h.render(); assert(action(tree, 'Retry save')); h.dispose();
   const active = host(); tree = active.render(props({ item: { ...item, sortingState: 'running', status: 'processing' } }));
-  assert(!action(tree, 'More place options')); assert(action(tree, 'View reel')); active.dispose();
+  assert(!action(tree, 'More place options')); assert(action(tree, 'View post')); active.dispose();
 });
 
 test('live Google addresses retain attribution and only the selected verified candidate is plotted', () => {
@@ -131,9 +151,9 @@ test('closing an in-flight edit does not offer to discard an already submitted r
   let finish, closes = 0, received;
   const h = host(); let tree = h.render(props({ initialMode: 'edit', onClose: () => closes++,
     onSave: async (_id, patch) => { received = patch; await new Promise(resolve => { finish = resolve; }); } }));
-  action(tree, 'Notes').props.onChange('An intentional edit'); tree = h.render();
+  action(tree, 'Your note').props.onChange('An intentional edit'); tree = h.render();
   action(tree, 'Save changes').props.onPress(); tree = h.render();
-  assert.equal(received.summary, 'An intentional edit');
+  assert.equal(received.personalNote, 'An intentional edit');
   byType(tree, 'Modal').props.onRequestClose(); tree = h.render();
   assert.equal(closes, 1); assert(!action(tree, 'Discard changes'));
   h.dispose(); finish(); await flush(); assert.equal(closes, 1);
@@ -165,8 +185,8 @@ test('a creator-gated location is quiet inspiration with the original reel and o
     locationStatus: 'not_found', sortingState: 'needs_details', needsReview: true };
   const h = host(); let tree = h.render(props({ item: saved, onLocate: async () => {} }));
   assert(text(tree).includes('Saved inspiration')); assert(text(tree).includes('Location not shared')); assert(text(tree).includes(hint));
-  assert(!byType(tree, 'DreamPlacesMap')); assert(!action(tree, 'Open in Maps')); assert(action(tree, 'View reel'));
-  action(tree, 'View reel').props.onPress(); await flush(); assert.deepEqual(h.urls, [saved.sourceUrl]);
+  assert(!byType(tree, 'DreamPlacesMap')); assert(!action(tree, 'Open in Maps')); assert(action(tree, 'View post'));
+  action(tree, 'View post').props.onPress(); await flush(); assert.deepEqual(h.urls, [saved.sourceUrl]);
   action(tree, 'More place options').props.onPress(); tree = h.render();
   assert(action(tree, 'Edit details')); assert(action(tree, 'Remove saved place'));
   assert(!action(tree, 'Retry location')); assert(!action(tree, 'Retry reading post'));
@@ -206,4 +226,60 @@ test('fresh detail data restores an expired Google pin without leaving its unava
     locationStatus: 'resolved', locationPlaceId: 'verified', locationExpiresAt: '2020-01-01' } }));
   assert(byType(tree, 'DreamPlacesMap')); assert(text(tree).includes('A current address'));
   assert(!text(tree).some(value => /unavailable|Not on map/.test(value))); h.dispose();
+});
+
+test('Add location opens search, link and pin tools without unrelated edit fields', async () => {
+  const h = host(); let tree = h.render(props({ item: { ...item, latitude: undefined, longitude: undefined, googleMapsUrl: undefined } }));
+  action(tree, 'Add location').props.onPress(); tree = h.render();
+  assert(action(tree, 'Search for a place or destination')); assert(action(tree, 'Search Google Maps'));
+  assert(action(tree, 'Maps link')); assert(action(tree, 'Place a pin on the map'));
+  assert(!action(tree, 'Your note')); assert(!action(tree, 'Choose place type')); assert(!action(tree, 'Place name'));
+  assert(action(tree, 'Save location').props.disabled);
+  action(tree, 'Search for a place or destination').props.onChange('Milos, Greece'); tree = h.render();
+  action(tree, 'Search Google Maps').props.onPress(); await flush();
+  assert.equal(h.urls[0], 'https://www.google.com/maps/search/?api=1&query=Milos%2C%20Greece');
+  assert(action(tree, 'Save location').props.disabled, 'A search query never turns into a guessed place or pin');
+  h.dispose();
+});
+
+test('focused location editing places a pin, protects the draft and saves only the selected location', async () => {
+  let patch, closes=0;
+  const h = host(); let tree = h.render(props({ initialMode: 'location',
+    item: { ...item, latitude: undefined, longitude: undefined, googleMapsUrl: undefined, personalNote: 'Keep this note' },
+    onClose: () => closes++, onSave: async (_id, value) => { patch=value; } }));
+  action(tree, 'Place a pin on the map').props.onPress(); tree=h.render();
+  byType(tree, 'DreamPlacesMap').props.onPlace(36.7442,24.4199); tree=h.render();
+  action(tree, 'Close place').props.onPress(); tree=h.render();
+  assert(action(tree,'Keep editing')); assert.equal(closes,0);
+  action(tree,'Keep editing').props.onPress(); tree=h.render();
+  action(tree,'Save location').props.onPress(); await flush(); tree=h.render();
+  assert.deepEqual(patch,{googleMapsUrl:'https://www.google.com/maps/search/?api=1&query=36.744200,24.419900'});
+  assert(text(tree).includes('Location saved.')); h.dispose();
+});
+
+test('note editing never overwrites a place resolved in the background', async () => {
+  let patch; const h=host(); const original={...item,placeName:undefined,city:undefined,googleMapsUrl:undefined,latitude:undefined,longitude:undefined};
+  const initial=props({item:original,initialMode:'edit',onSave:async(_id,value)=>{patch=value;}});
+  let tree=h.render(initial); action(tree,'Your note').props.onChange('Take Sam');
+  tree=h.render({...initial,item:{...original,placeName:'Café Sol',city:'Lisbon',googleMapsUrl:item.googleMapsUrl}});
+  action(tree,'Save changes').props.onPress(); await flush();
+  assert.deepEqual(patch,{personalNote:'Take Sam'}); h.dispose();
+});
+
+test('opening a saved Maps URL keeps its compact action without inventing an app pin',async()=>{
+ const searchUrl='https://www.google.com/maps/search/?api=1&query=Serenya+Marrakech+Morocco';
+ const saved={...item,placeName:'Serenya',city:'Marrakech',country:'Morocco',latitude:undefined,longitude:undefined,
+  googleMapsUrl:searchUrl,locationState:'unresolved',locationReason:'named_unresolved',locationStatus:'not_found',
+  locationHint:'Place saved. Its map location has not been verified yet.'};
+ const h=host();const tree=h.render(props({item:saved}));
+ assert(action(tree,'Open in Maps'));assert(!action(tree,'Search Google Maps'));assert(!byType(tree,'DreamPlacesMap'));
+ assert(text(tree).includes('No confirmed pin'));assert(text(tree).includes('The Maps link searches by name. Its exact location hasn’t been confirmed yet.'));
+ action(tree,'Open in Maps').props.onPress();await flush();assert.deepEqual(h.urls,[searchUrl]);h.dispose();
+});
+
+test('a chosen Google place ID remains a direct Maps action even without a locally available coordinate',()=>{
+ const h=host();const tree=h.render(props({item:{...item,latitude:undefined,longitude:undefined,
+  googleMapsUrl:'https://www.google.com/maps/search/?api=1&query=Serenya&query_place_id=selected-place',
+  locationState:'unavailable',locationReason:'location_unavailable'}}));
+ assert(action(tree,'Open in Maps'));assert(!action(tree,'Search Google Maps'));assert(!byType(tree,'DreamPlacesMap'));h.dispose();
 });

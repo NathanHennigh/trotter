@@ -85,6 +85,7 @@ type ApiDreamItem = {
   country?: string | null;
   region_or_neighborhood?: string | null;
   summary: string;
+  personal_note?: string | null;
   tags_json?: string[] | null;
   confidence?: number | null;
   needs_review: boolean;
@@ -130,6 +131,7 @@ export type DreamItem = {
   country?: string;
   regionOrNeighborhood?: string;
   summary: string;
+  personalNote?: string;
   tags: string[];
   confidence?: number;
   needsReview: boolean;
@@ -169,6 +171,7 @@ export type IncomingDreamShare = {
   /** Native receipt already owns upload; this link only opens its saved places. */
   viewOnly?: boolean;
   receiptId?: string;
+  addToTrip?: boolean;
 };
 
 const emptyItems: DreamItem[] = [];
@@ -197,7 +200,8 @@ export function parseIncomingDreamShare(url: string): IncomingDreamShare | undef
     return {
       sourceUrl: sourceUrl || extractInstagramUrl(sharedText) || 'https://www.instagram.com/',
       sharedText,
-      ...(isDreamDestination ? { viewOnly: true, receiptId: parsed.searchParams.get('receipt_id') || undefined } : {}),
+      ...(isDreamDestination ? { viewOnly: true, receiptId: parsed.searchParams.get('receipt_id') || undefined,
+        ...(parsed.searchParams.get('add_to_trip') === '1' ? { addToTrip: true } : {}) } : {}),
     };
   } catch {
     return undefined;
@@ -433,11 +437,13 @@ function useDreamsState() {
     if (!owner || !currentOwner()) throw new Error('Sign in to save this place.');
     const existing = itemsRef.current.find(item => normalizeSourceUrl(item.sourceUrl) === normalizedUrl);
     if (existing && mutationIds.current.has(existing.id)) throw new Error('This place is still saving. Wait for it to finish before retrying.');
-    if (existing && /^\d+$/.test(existing.id) && !existing.uploadStatus && !['failed', 'needs_review'].includes(existing.status)) return;
+    const retryReading = existing && (['failed', 'needs_review'].includes(existing.status)
+      || ['failed', 'unavailable', 'needs_details'].includes(existing.sortingState || ''));
+    if (existing && /^\d+$/.test(existing.id) && !existing.uploadStatus && !retryReading) return;
     persistingUrls.current.add(normalizedUrl);
     try {
       const entry = await dreamShareOutbox.enqueue(owner, { sourceUrl: normalizedUrl, sharedText: caption,
-        retryItemId: existing && /^\d+$/.test(existing.id) && ['failed', 'needs_review'].includes(existing.status) ? existing.id : undefined });
+        retryItemId: existing && /^\d+$/.test(existing.id) && retryReading ? existing.id : undefined });
       if (!currentOwner()) throw new Error('Your account changed.');
       showPending([...pendingReceipts.current.filter(value => value.sourceUrl !== normalizedUrl), entry]);
       setError(undefined); setStatus('idle');
@@ -474,7 +480,7 @@ function useDreamsState() {
     mutationIds.current.add(id);
     refreshSequence.current += 1;
     try {
-      const fields: Partial<Record<keyof DreamItem, string>> = { placeName: 'place_name', city: 'city', country: 'country', regionOrNeighborhood: 'region_or_neighborhood', summary: 'summary', category: 'category', tags: 'tags_json', googleMapsUrl: 'google_maps_url' };
+      const fields: Partial<Record<keyof DreamItem, string>> = { placeName: 'place_name', city: 'city', country: 'country', regionOrNeighborhood: 'region_or_neighborhood', summary: 'summary', personalNote: 'personal_note', category: 'category', tags: 'tags_json', googleMapsUrl: 'google_maps_url' };
       const edits = Object.fromEntries(Object.entries(patch).filter(([key]) => fields[key as keyof DreamItem]).map(([key, value]) => [fields[key as keyof DreamItem], value ?? null]));
       const response = await dreamsAuthenticatedFetch(`/dream-items/${id}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: patch.needsReview ? 'needs_review' : 'confirm', edits }) });
       const data = await readJson(response);
@@ -813,6 +819,7 @@ function mapApiDreamItem(item: ApiDreamItem): DreamItem {
     country: item.country ?? undefined,
     regionOrNeighborhood: item.region_or_neighborhood ?? undefined,
     summary: item.summary,
+    personalNote: item.personal_note || undefined,
     tags: item.tags_json ?? [],
     confidence: item.confidence ?? undefined,
     needsReview: item.needs_review,

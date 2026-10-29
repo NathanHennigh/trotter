@@ -44,16 +44,22 @@ export type CountryBoard = {
   items: DreamItem[];
   cities: string[];
 };
-export function cityNames(items: DreamItem[]) {
+/** Keep browsing labels aligned with the destination shown on a saved place. */
+export const dreamDestination = (item: DreamItem) => item.city?.trim() || item.regionOrNeighborhood?.trim() || "";
+export function destinationNames(items: DreamItem[]) {
   const cities = new Map<string, string>();
-  for (const item of items)
-    if (item.city?.trim())
+  for (const item of items) {
+    const destination = dreamDestination(item);
+    if (destination)
       cities.set(
-        normalizeName(item.city),
-        cities.get(normalizeName(item.city)) ?? item.city.trim(),
+        normalizeName(destination),
+        cities.get(normalizeName(destination)) ?? destination,
       );
+  }
   return [...cities.values()].sort((a, b) => a.localeCompare(b));
 }
+// Kept for older callers; destinations also include islands and regions.
+export const cityNames = destinationNames;
 export function countryBoards(items: DreamItem[]): CountryBoard[] {
   const groups = new Map<string, CountryBoard>();
   for (const item of items) {
@@ -86,7 +92,9 @@ export const categoryLabel = (category: string) =>
     : category === "unknown"
       ? "Place"
       : category.charAt(0).toUpperCase() + category.slice(1);
-export const dreamPlaceLabel = (item: DreamItem) => item.placeName || item.city ||
+export const isPromotionalText = (value: string) => /\b(?:comment|dm|message|reply)\s+(?:(?:me|us|below|with)\s+)?["'“”‘’]?(?:link|guide|map|details|info|stay|travel|yes|send)\b|\blink\s+in\s+(?:my\s+|our\s+|the\s+)?bio\b|\bfollow\s+(?:@[\p{L}\p{N}_.]+|(?:me|us|for)\b)|\b(?:comment|dm|message|reply)\b.{0,55}\b(?:send|receive|get|location|free|guide|details|link)\b/iu.test(value);
+export const hasDreamPlaceName = (item: DreamItem) => Boolean(item.placeName?.trim() && !isPromotionalText(item.placeName));
+export const dreamPlaceLabel = (item: DreamItem) => (hasDreamPlaceName(item) ? item.placeName : undefined) || item.city ||
   (item.coordinatePrecision === "area" ? item.regionOrNeighborhood || item.country : undefined) || "Saved place";
 export const dreamLocationType = (item: DreamItem) => item.coordinatePrecision === "area" ? "Area" : categoryLabel(item.category);
 export const categoryGroup = (category: string): DreamFilter =>
@@ -106,13 +114,16 @@ export function filterDreams(
   const terms = normalizeName(query).split(/\s+/).filter(Boolean);
   return items.filter(
     (item) =>
-      (!city || normalizeName(item.city ?? "") === normalizeName(city)) &&
+      (!city || normalizeName(dreamDestination(item)) === normalizeName(city)) &&
       (category === "All" || categoryGroup(item.category) === category) &&
       terms.every((term) =>
         normalizeName(
           [
             item.placeName,
             item.city,
+            item.country,
+            item.caption,
+            item.personalNote,
             item.summary,
             item.regionOrNeighborhood,
             ...item.tags,

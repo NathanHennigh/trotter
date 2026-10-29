@@ -69,6 +69,15 @@ test('receive synchronizes owner before adding a receipt, regardless of effect o
   assert.equal(queue.items[0].sharedText, 'new-B');
 });
 
+test('opening the same receipt in Dreams cannot swallow an explicit Add to trip action', () => {
+  const share = { sourceUrl: 'https://www.instagram.com/reel/shared/', receiptId: 'receipt', viewOnly: true };
+  let queue = reduce(empty(), { type: 'receive', ownerId: 11, share, now: 10000 });
+  queue = reduce(queue, { type: 'receive', ownerId: 11, share: { ...share, addToTrip: true }, now: 10001 });
+  assert.equal(queue.items.length, 2);
+  assert.equal(queue.items[1].addToTrip, true);
+  assert.equal(owner(queue, 22).items.length, 0);
+});
+
 function gateHost(initialAccount) {
   const slots = []; let cursor = 0, effects = [], dirty = false, account = initialAccount, receive;
   let resolveInitial;
@@ -96,6 +105,8 @@ function gateHost(initialAccount) {
   const output = ts.transpileModule(`export ${gate.getText(ast)}`, { compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
   const module = { exports: {} };
   const globals = { React: react, useTravelTrips: () => account, reduceIncomingShareQueue: reduce,
+    useFlightInvitation: () => ({ ready: true, consume() {} }),
+    usePlannerInvitation: () => ({ ready: true, consume() {} }),
     Linking: { addEventListener: (_name, callback) => { receive = callback; return { remove() {} }; }, getInitialURL: () => initial },
     parseIncomingDreamShare: sourceUrl => ({ sourceUrl }), AuthScreen: 'AuthScreen', SessionRestoringScreen: 'SessionRestoringScreen', DreamsProvider: 'DreamsProvider', AppShell: 'AppShell' };
   new Function('module', 'exports', ...Object.keys(globals), output)(module, module.exports, ...Object.values(globals));

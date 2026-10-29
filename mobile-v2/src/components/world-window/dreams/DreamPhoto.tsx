@@ -14,6 +14,10 @@ import { placeSymbol, symbolPaths } from "./placeSymbols";
 import { findCountryArtwork } from "./countryArtwork";
 import { resolveDreamThumbnail } from "./dreamImageSource";
 
+// Native image caches are URI keyed. Keep one URI for a post's sibling rows,
+// while ensuring it is never reused across an account change or app session.
+const imageSession = Date.now().toString(36);
+
 export function PlaceSymbol({
   category,
   size = 26,
@@ -47,12 +51,14 @@ export function DreamPhoto({
   compact = false,
   fallbackCountry,
   artworkForCountry,
+  onImageAvailableChange,
 }: {
   item?: DreamItem;
   compact?: boolean;
   fallbackCountry?: string;
   /** Opt in only for country postcard covers, never individual saved places. */
   artworkForCountry?: string;
+  onImageAvailableChange?: (available: boolean) => void;
 }) {
   const [failedThumbnail, setFailedThumbnail] = React.useState<string>(),
     [failedArtwork, setFailedArtwork] = React.useState<string>(),
@@ -62,7 +68,11 @@ export function DreamPhoto({
     token = getStoredToken();
   const candidate = findCountryArtwork(artworkForCountry);
   const artwork = candidate && candidate.code !== failedArtwork ? candidate : undefined;
-  const thumbnail = resolveDreamThumbnail(item?.thumbnailUrl, base);
+  const thumbnail = resolveDreamThumbnail(item?.thumbnailUrl, base, {
+    width: compact ? 240 : 960,
+    sourcePostId: item?.sourcePostId,
+    authScope: `${imageSession}-${revision}`,
+  });
   const uri = thumbnail?.uri, privateImage = thumbnail?.privateImage ?? false;
   const imageKey = uri ? `${revision}:${uri}` : undefined;
   React.useEffect(() => {
@@ -99,8 +109,36 @@ export function DreamPhoto({
       ? (webImage && webImage.key === imageKey ? webImage.uri : undefined)
       : uri;
   const renderedKey = imageUri ? `${imageKey}:${imageUri}` : imageKey;
+  const imageAvailable = Boolean(artwork || (imageUri && failedThumbnail !== renderedKey));
+  React.useEffect(() => { onImageAvailableChange?.(imageAvailable); }, [imageAvailable, onImageAvailableChange]);
   return (
     <View style={s.surface}>
+      {/* Paper and category art are present on the first frame, underneath the
+          photograph while it loads. A slow image must never leave a blank box. */}
+      {artworkForCountry ? (
+        <View style={s.countryPaper} />
+      ) : (
+        <View style={s.fallback}>
+          {fallbackCountry ? (
+            <>
+              <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+                {Array.from({ length: 8 }, (_, i) => (
+                  <View
+                    key={i}
+                    style={{ position: "absolute", left: 0, right: 0, top: 35 + i * 36, height: 1, backgroundColor: "#c9d4c93d" }}
+                  />
+                ))}
+              </View>
+              <WWIcon name="globe" size={48} color={colors.blue} />
+              <Text style={s.countryFallback}>{fallbackCountry}</Text>
+            </>
+          ) : (
+            <View style={compact ? s.smallFrame : s.frame}>
+              <PlaceSymbol category={item?.category || "unknown"} size={compact ? 24 : 48} />
+            </View>
+          )}
+        </View>
+      )}
       {artwork ? (
         <Image
           key={`country:${artwork.code}`}
@@ -108,6 +146,8 @@ export function DreamPhoto({
           source={artwork.source}
           style={s.image}
           resizeMode="cover"
+          resizeMethod="resize"
+          fadeDuration={0}
           onError={() => setFailedArtwork(artwork.code)}
         />
       ) : imageUri && failedThumbnail !== renderedKey ? (
@@ -122,42 +162,11 @@ export function DreamPhoto({
           }}
           style={s.image}
           resizeMode="cover"
+          resizeMethod="resize"
+          fadeDuration={120}
           onError={() => setFailedThumbnail(renderedKey)}
         />
-      ) : artworkForCountry ? (
-        <View style={s.countryPaper} />
-      ) : (
-        <View style={s.fallback}>
-          {fallbackCountry ? (
-            <>
-              <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-                {Array.from({ length: 8 }, (_, i) => (
-                  <View
-                    key={i}
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      right: 0,
-                      top: 35 + i * 36,
-                      height: 1,
-                      backgroundColor: "#c9d4c93d",
-                    }}
-                  />
-                ))}
-              </View>
-              <WWIcon name="globe" size={48} color={colors.blue} />
-              <Text style={s.countryFallback}>{fallbackCountry}</Text>
-            </>
-          ) : (
-            <View style={compact ? s.smallFrame : s.frame}>
-              <PlaceSymbol
-                category={item?.category || "unknown"}
-                size={compact ? 29 : 48}
-              />
-            </View>
-          )}
-        </View>
-      )}
+      ) : null}
     </View>
   );
 }
@@ -195,8 +204,8 @@ const s = StyleSheet.create({
     transform: [{ rotate: "-4deg" }],
   },
   smallFrame: {
-    width: 42,
-    height: 51,
+    width: 36,
+    height: 44,
     borderWidth: 1,
     borderColor: "#b4c1ad",
     alignItems: "center",

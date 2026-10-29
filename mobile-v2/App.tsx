@@ -45,12 +45,19 @@ import { normalizeTravelYear } from "./src/utils/travelScope";
 import type { TripOpenOrigin } from "./src/components/world-window/trips/tripTransition";
 import { TripNavigationSurface } from "./src/components/world-window/trips/TripNavigationSurface";
 import { TripBackground } from "./src/components/world-window/trips/TripBackground";
+import { RetainedScene } from "./src/components/world-window/RetainedScene";
+import { FlightSharingScreen } from "./src/screens/FlightSharingScreen";
+import { FlightInvitationProvider, useFlightInvitation } from "./src/services/flightShareLinks";
+import { PlannerInvitationProvider, usePlannerInvitation } from "./src/services/plannerLinks";
+import { DreamTripPicker } from "./src/components/world-window/planner/DreamTripPicker";
+import { PlannerScreen } from "./src/screens/PlannerScreen";
 
 const tabs: BottomNavTab[] = [
   "globe",
   "trips",
   "passport",
   "dreams",
+  "planner",
   "profile",
 ];
 function getInitialTab(): BottomNavTab {
@@ -84,7 +91,11 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="dark" />
         <TravelTripsProvider>
+          <FlightInvitationProvider>
+          <PlannerInvitationProvider>
           <AccountGate />
+          </PlannerInvitationProvider>
+          </FlightInvitationProvider>
         </TravelTripsProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
@@ -141,6 +152,7 @@ export function reduceIncomingShareQueue(
     action.share.sharedText ?? "",
     action.share.viewOnly ?? false,
     action.share.receiptId ?? "",
+    action.share.addToTrip ?? false,
   ]);
   const recent = next.recent.filter(
     (receipt) => action.now - receipt.at < 2000,
@@ -164,6 +176,8 @@ export function reduceIncomingShareQueue(
 // Capture signed-out shares without carrying account-owned content across login.
 function AccountGate() {
   const { authStatus, accountId, accountRevision } = useTravelTrips();
+  const flightInvitation = useFlightInvitation();
+  const plannerInvitation = usePlannerInvitation();
   const ownerId = authStatus === "signed-in" ? accountId : undefined;
   const owner = React.useRef(ownerId);
   owner.current = ownerId;
@@ -187,6 +201,7 @@ function AccountGate() {
         incoming.sharedText ?? "",
         incoming.viewOnly ?? false,
         incoming.receiptId ?? "",
+        incoming.addToTrip ?? false,
       ]);
       if (initial && delivered.current.has(key)) return;
       delivered.current.add(key);
@@ -215,10 +230,11 @@ function AccountGate() {
     [],
   );
   const pendingShare = shares.items.find((item) => item.ownerId === undefined || item.ownerId === ownerId);
-  if (authStatus === "loading" || !initialUrlResolved || (authStatus === "signed-in" && shares.ownerId !== ownerId)) {
+  if (authStatus === "loading" || !initialUrlResolved || !flightInvitation.ready || !plannerInvitation.ready || (authStatus === "signed-in" && shares.ownerId !== ownerId)) {
     return <SessionRestoringScreen sourceUrl={pendingShare?.sourceUrl} />;
   }
-  if (authStatus !== "signed-in") return <AuthScreen />;
+  if (authStatus !== "signed-in") return <AuthScreen flightInvitation={Boolean(flightInvitation.token)} plannerInvitationToken={plannerInvitation.token}
+    onDismissPlannerInvitation={() => { if (plannerInvitation.token) plannerInvitation.consume(plannerInvitation.token); }} />;
   // Filter during render too: the owner-transition effect runs after render.
   const incomingShare = shares.items.find((item) => item.ownerId === accountId);
   return (
@@ -235,6 +251,12 @@ function AppShell({
   incomingShare?: QueuedShare;
   consumeShare: (queueId: number) => void;
 }) {
+  const flightInvitation = useFlightInvitation();
+  const plannerInvitation = usePlannerInvitation();
+  const profileOrigin = React.useRef<BottomNavTab>("globe");
+  const [plannerEntry, setPlannerEntry] = React.useState<{ tripId?: string; dreamItemIds?: string[]; destination?: string; sourceUrl?: string; key: number }>();
+  const [sharedTripSource, setSharedTripSource] = React.useState<string>();
+  const [flightInboxOpen, setFlightInboxOpen] = React.useState(Boolean(flightInvitation.token));
   const [activeTab, setActiveTab] = React.useState<BottomNavTab>(() => incomingShare ? "dreams" : getInitialTab());
   const currentTab = React.useRef(activeTab);
   currentTab.current = activeTab;
@@ -277,6 +299,9 @@ function AppShell({
   const registerGlobeBack = React.useCallback((handler: (() => boolean) | null) => {
     handlers.current.globe = handler;
   }, []);
+  const registerPlannerBack = React.useCallback((handler: (() => boolean) | null) => {
+    handlers.current.planner = handler;
+  }, []);
   const { trips } = useTravelTrips();
   const { shareInstagramLinkDurable, refresh: refreshDreams } = useDreams();
   const insets = useSafeAreaInsets();
@@ -287,10 +312,15 @@ function AppShell({
   const [dreamSource, setDreamSource] = React.useState<{ url: string; requestId: number; receiptId?: string }>();
   const selectedTrip = trips.find((trip) => trip.id === selectedTripId);
   const visit = (tab: BottomNavTab) => {
+    currentTab.current = tab;
     setVisitedTabs((visited) => visited.includes(tab) ? visited : [...visited, tab]);
     setActiveTab(tab);
   };
   const changeTab = (tab: BottomNavTab) => {
+    if (tab === currentTab.current && !selectedTripId && !countries && !passportCollection && !flightInboxOpen) return;
+    if (tab === "profile" && currentTab.current !== "profile") profileOrigin.current = currentTab.current;
+    if (tab !== "dreams") setSharedTripSource(undefined);
+    setFlightInboxOpen(false);
     tripProgress.stopAnimation(); tripProgress.setValue(0);
     tripDragOffset.stopAnimation(); tripDragOffset.setValue(0);
     setPassportReset((value) => value + 1);
@@ -302,6 +332,23 @@ function AppShell({
     setPassportCollection(null);
     visit(tab);
   };
+  const openPlanner = (entry: { tripId?: string; dreamItemIds?: string[]; destination?: string; sourceUrl?: string } = {}) => {
+    setPlannerEntry({ ...entry, key: ++scopeSequence.current });
+    changeTab("planner");
+  };
+  React.useEffect(() => {
+    if (plannerInvitation.token) changeTab("planner");
+  }, [plannerInvitation.token]);
+  const closeFlightInbox = () => {
+    if (flightInvitation.token) flightInvitation.consume(flightInvitation.token);
+    setFlightInboxOpen(false);
+    visit("profile");
+  };
+  React.useEffect(() => {
+    if (!flightInvitation.token) return;
+    changeTab("profile");
+    setFlightInboxOpen(true);
+  }, [flightInvitation.token]);
   const openTrip = (trip: TripSummary, flightId?: string, paperOrigin?: TripOpenOrigin) => {
     if (currentTab.current !== activeTab) return;
     tripOrigin.current = activeTab;
@@ -366,6 +413,7 @@ function AppShell({
     setShareCaptureError(undefined);
     changeTab("dreams");
     setDreamSource({ url: sourceUrl, requestId: queueId, receiptId: incomingShare.receiptId });
+    if (incomingShare.addToTrip) setSharedTripSource(sourceUrl);
     if (incomingShare.viewOnly) {
       void refreshDreams("quiet");
       handledShare.current = { queueId, status: "retained" };
@@ -398,6 +446,8 @@ function AppShell({
   }, [selectedTripId, selectedTrip]);
   React.useEffect(() => {
     const listener = BackHandler.addEventListener("hardwareBackPress", () => {
+      // The inbox owns Back while a flight preview or composer is open.
+      if (flightInboxOpen) return false;
       if (selectedTripId) { closeTrip(); return true; }
       if (activeTab === "passport") {
         if (countries) {
@@ -408,15 +458,19 @@ function AppShell({
         if (passportCollection) { closePassportCollection(); return true; }
       }
       if (activeTab === "dreams" && handlers.current.dreams?.()) return true;
+      if (activeTab === "planner" && handlers.current.planner?.()) return true;
+      if (activeTab === "profile") { changeTab(profileOrigin.current); return true; }
       if (activeTab === "globe" && handlers.current.globe?.()) return true;
       if (activeTab !== "globe") { changeTab("globe"); return true; }
       return false;
     });
     return () => listener.remove();
-  }, [selectedTripId, countries, passportCollection, activeTab]);
+  }, [selectedTripId, countries, passportCollection, activeTab, flightInboxOpen]);
 
   // Retain navigation state without exposing or accepting input on hidden screens.
-  const layer = (key: string, visible: boolean, content: React.ReactNode) => (
+  const layer = (key: string, visible: boolean, content: React.ReactNode) => {
+    visible = visible && !flightInboxOpen;
+    return (
     // Keep Fabric's native boundary stable as opacity and pointer events
     // change; flattening/reparenting this layer would detach the globe TextureView.
     <View key={key} testID={`screen-layer-${key}`} collapsable={false} style={[styles.overlay, !visible && styles.inactive]}
@@ -424,10 +478,11 @@ function AppShell({
       accessibilityElementsHidden={!visible || Boolean(selectedTrip)}
       aria-hidden={!visible || Boolean(selectedTrip)}
       importantForAccessibility={visible && !selectedTrip ? "auto" : "no-hide-descendants"}>
-      {content}
+      <RetainedScene active={visible && !selectedTrip}>{content}</RetainedScene>
     </View>
   );
-  const mainVisible = !selectedTrip;
+  };
+  const mainVisible = !selectedTrip && !flightInboxOpen;
   const baseTab = selectedTrip ? tripOrigin.current : activeTab;
   const passportVisible = baseTab === "passport" && !countries;
   const countryVisible = baseTab === "passport" && Boolean(countries);
@@ -464,12 +519,26 @@ function AppShell({
           onBack={closeCountries} onOpenTrip={openTrip} />)}
       {visitedTabs.includes("dreams") && layer("dreams", baseTab === "dreams",
         <DreamsScreen active={activeTab} onChange={changeTab}
+          onOpenPlanner={openPlanner}
           openSource={dreamSource}
           visible={mainVisible && activeTab === "dreams"} onBackHandlerChange={registerDreamsBack} />)}
+      {visitedTabs.includes("planner") && layer("planner", baseTab === "planner",
+        <PlannerScreen key={plannerEntry?.key ?? "planner-home"} onTabChange={changeTab} onOpenProfile={() => changeTab("profile")}
+          visible={mainVisible && activeTab === "planner"} onBackHandlerChange={registerPlannerBack}
+          initialTripId={plannerEntry?.tripId} initialDreamItemIds={plannerEntry?.dreamItemIds} initialDestination={plannerEntry?.destination}
+          initialSourceUrl={plannerEntry?.sourceUrl}
+          inviteToken={plannerInvitation.token}
+          onInviteConsumed={() => { if (plannerInvitation.token) plannerInvitation.consume(plannerInvitation.token); }} />)}
       {visitedTabs.includes("profile") && layer("profile", baseTab === "profile",
         <ProfileScreen active={activeTab} onChange={changeTab} onOpenStamps={() => openCountries()}
+          onBack={() => changeTab(profileOrigin.current)}
+          onOpenFlightInbox={() => setFlightInboxOpen(true)}
           onOpenAirport={code => openPassportCollection("airports", undefined, code)} />)}
       </TripBackground>
+      {flightInboxOpen && <View style={styles.overlay}>
+        <FlightSharingScreen onBack={closeFlightInbox} invitationToken={flightInvitation.token}
+          onInvitationConsumed={() => { if (flightInvitation.token) flightInvitation.consume(flightInvitation.token); }} />
+      </View>}
       {selectedTrip && <TripNavigationSurface key={selectedTrip.id} trip={selectedTrip} flightId={selectedFlightId}
         origin={tripPaperOrigin} closing={tripClosing} onClosed={finishCloseTrip} onRequestClose={closeTrip}
         onEntered={() => setTripSettled(true)}
@@ -480,6 +549,7 @@ function AppShell({
           deferUpdates={!tripSettled || tripClosing}
           backLabel={tripOrigin.current === "passport" ? "Back to collection" : `Back to ${label(tripOrigin.current).toLowerCase()}`} />
       </TripNavigationSurface>}
+      {sharedTripSource ? <DreamTripPicker key={sharedTripSource} items={[]} sourceUrl={sharedTripSource} onClose={() => setSharedTripSource(undefined)} onOpenPlanner={openPlanner} /> : null}
       {shareCaptureError && shareCaptureError.queueId === incomingShare?.queueId && (
         <View accessibilityRole="alert" accessibilityLiveRegion="polite" style={[styles.shareError, { bottom: insets.bottom + 72 }]}>
           <Text style={styles.shareErrorTitle}>Couldn’t keep this post</Text>

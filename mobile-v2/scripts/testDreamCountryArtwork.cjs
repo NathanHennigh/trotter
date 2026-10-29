@@ -44,12 +44,51 @@ test('16 reusable country covers match exact country names, ISO2/3 codes and nor
 test('thumbnail authentication is restricted to the exact API origin and thumbnail path', () => {
   assert.deepEqual(sources.resolveDreamThumbnail('/dream-items/41/thumbnail', base), { uri: base + '/dream-items/41/thumbnail', privateImage: true });
   assert.equal(sources.resolveDreamThumbnail('https://api.trotter.test/dream-items/41/thumbnail', base).privateImage, true);
+  assert.equal(sources.resolveDreamThumbnail('/dream-source-posts/12/thumbnail', base).privateImage, true);
+  assert.equal(sources.resolveDreamThumbnail('/dream-source-posts/12/thumbnail', base + '/v1').privateImage, true);
+  assert.equal(sources.resolveDreamThumbnail('/dream-items/41/unrelated', base).privateImage, false);
   assert.equal(sources.resolveDreamThumbnail('/dream-items/41/thumbnail', base + '/v1/').uri, base + '/v1/dream-items/41/thumbnail');
   for (const raw of ['https://cdn.instagram.test/cover.jpg', 'https://api.trotter.test.evil/dream-items/41/thumbnail', 'http://api.trotter.test/dream-items/41/thumbnail', 'https://api.trotter.test/public/cover.jpg']) assert.equal(sources.resolveDreamThumbnail(raw, base).privateImage, false);
   for (const raw of ['javascript:alert(1)', 'file:///private/photo.png', 'data:image/png;base64,abc', '//outside.test/image.png', 'https://api.trotter.test@outside.test/image.png']) assert.equal(sources.resolveDreamThumbnail(raw, base), undefined);
   const items = [item(undefined), item('javascript:no'), item('/dream-items/3/thumbnail'), item('https://cdn.test/good.png')];
   assert.equal(sources.postcardReelCover(items, base), items[2]);
   assert.equal(sources.postcardReelCover([], base), undefined);
+});
+
+test('private images request bounded sizes and isolate native caches across auth revisions', () => {
+  const options = { width: 240, authScope: 'session-4', sourcePostId: '19' };
+  const compact = new URL(sources.resolveDreamThumbnail('/dream-items/41/thumbnail', base, options).uri);
+  assert.equal(compact.pathname, '/dream-source-posts/19/thumbnail');
+  assert.equal(sources.resolveDreamThumbnail('/dream-items/41/thumbnail', base, options).uri, sources.resolveDreamThumbnail('/dream-items/42/thumbnail', base, options).uri, 'Sibling rows share the exact native image request and cache entry');
+  assert.equal(compact.searchParams.get('width'), '240');
+  assert.equal(compact.searchParams.get('session'), 'session-4');
+  assert.equal(sources.resolveDreamThumbnail('https://cdn.test/signed.jpg?signature=keep', base, options).uri, 'https://cdn.test/signed.jpg?signature=keep', 'Never modify signed external image URLs');
+  const env = photoEnvironment('android'), props = { item: item('/dream-items/41/thumbnail'), compact: true };
+  const first = image(env.render(props));
+  assert.equal(new URL(first.props.source.uri).searchParams.get('width'), '240');
+  assert.equal(first.props.resizeMethod, 'resize');
+  env.account('account-b');
+  const second = image(env.render(props));
+  assert.notEqual(first.props.source.uri, second.props.source.uri);
+  assert.equal(second.props.source.headers.Authorization, 'Bearer account-b');
+  const detail = image(env.render({ ...props, compact: false }));
+  assert.equal(new URL(detail.props.source.uri).searchParams.get('width'), '960');
+  env.dispose();
+});
+
+test('loading photos immediately have an illustrated paper placeholder underneath', () => {
+  const env = photoEnvironment('android');
+  const tree = env.render({ item: item('/dream-items/41/thumbnail'), compact: true });
+  const children = tree.props.children;
+  assert.equal(children[0].type, 'View');
+  assert.equal(children[0].props.children.type, 'View');
+  assert.equal(children[0].props.children.props.children.type.name, 'PlaceSymbol');
+  assert.equal(children[1].type, 'Image');
+  children[1].props.onError();
+  const failed = env.render({ item: item('/dream-items/41/thumbnail'), compact: true });
+  assert.equal(failed.props.children[0].type, 'View');
+  assert.equal(image(failed), undefined);
+  env.dispose();
 });
 
 function photoEnvironment(platform = 'web') {
@@ -136,4 +175,14 @@ test('switching to a country cover aborts a private photo and ignores its late r
   assert.equal(env.created.length, 0);
   assert.equal(image(env.render(country)).props.source, artwork.findCountryArtwork('JP').source);
   env.dispose();
+});
+
+test('detail image availability shrinks missing and failed photos and recovers for a new source', () => {
+  const env=photoEnvironment('android'), changes=[];
+  const observe=available=>changes.push(available);
+  env.render({item:item(undefined),onImageAvailableChange:observe}); assert.equal(changes.at(-1),false);
+  const p={item:item('https://cdn.test/photo.jpg'),onImageAvailableChange:observe};
+  const photo=image(env.render(p)); assert.equal(changes.at(-1),true);
+  photo.props.onError();env.render(p);assert.equal(changes.at(-1),false);
+  env.render({item:item('https://cdn.test/another.jpg'),onImageAvailableChange:observe});assert.equal(changes.at(-1),true);env.dispose();
 });

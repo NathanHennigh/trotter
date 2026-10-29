@@ -12,7 +12,10 @@ import { firstCountryEntry } from '../utils/countryArrivals';
 import { buildPassportArrivals } from '../components/world-window/passport/passport-arrivals';
 import { travelCountry, SOMALILAND_ICON_KEY } from '../utils/travelCountry';
 import { groupTripItineraries } from '../utils/tripItineraries';
-import { cancelGoogleAuthSession, consumeWebOAuthCallback, GoogleSignInCanceled, requestGoogleAuthToken } from './googleAuth';
+import { cancelGmailConnection, cancelGoogleAuthSession, consumeWebOAuthCallback, GmailConnectionCanceled, GoogleSignInCanceled, requestGmailConnection, requestGoogleAuthToken } from './googleAuth';
+import { AppleSignInCanceled, cancelAppleAuthSession, requestAppleAuth } from './appleAuth';
+import { reauthenticateAccount } from './accountLifecycle';
+import { finishDeletedAccountCleanup, hasDeletedAccountCleanup, markDeletedAccountForCleanup } from './deletedAccountCleanup';
 
 type ApiSegment = {
   id: number;
@@ -139,7 +142,8 @@ export type TravelTripsSource = 'api';
 export type TravelTripsStatus = 'idle' | 'loading' | 'refreshing' | 'syncing' | 'error';
 export type TravelAuthStatus = 'loading' | 'signed-out' | 'signed-in';
 export type GmailSyncStatus = 'unknown' | 'syncing' | 'synced' | 'error';
-type AccountIdentity = { user_id: number; email: string; name?: string | null };
+type GmailConnectionStatus = 'not_connected' | 'connected' | 'needs_reconnect';
+type AccountIdentity = { user_id: number; email: string; name?: string | null; gmail_connected?: boolean; gmail_connection_status?: GmailConnectionStatus; auth_providers?: ('google' | 'apple')[] };
 type TravelTripsContextValue = {
   trips: TripSummary[];
   profile: TravelerProfile;
@@ -147,6 +151,10 @@ type TravelTripsContextValue = {
   status: TravelTripsStatus;
   authStatus: TravelAuthStatus;
   signOutPending: boolean;
+  gmailConnected: boolean;
+  gmailConnectionStatus: GmailConnectionStatus;
+  gmailConnecting: boolean;
+  gmailConnectionError?: string;
   gmailSyncStatus: GmailSyncStatus;
   gmailSyncError?: string;
   lastGmailSyncedAt?: string;
@@ -154,13 +162,18 @@ type TravelTripsContextValue = {
   accountId?: number;
   accountRevision?: number;
   accountEmail?: string;
+  authProviders: ('google' | 'apple')[];
   lastSyncedAt?: string;
   signIn: () => Promise<void>;
+  signInWithApple: () => Promise<void>;
   retryAuth: () => Promise<void>;
   signOut: () => Promise<void>;
+  finishAccountDeletion: () => Promise<void>;
   refresh: () => Promise<void>;
   loadTripDetail: (backendId: number) => Promise<TripSummary | undefined>;
   syncFromGmail: () => Promise<void>;
+  connectGmail: () => Promise<void>;
+  cancelGmailConnection: () => void;
 };
 
 type ImportJobStatus = {
@@ -194,6 +207,10 @@ function useTravelTripsState(): TravelTripsContextValue {
   const [gmailSyncStatus, setGmailSyncStatus] = React.useState<GmailSyncStatus>('unknown');
   const [gmailSyncError, setGmailSyncError] = React.useState<string>();
   const [lastGmailSyncedAt, setLastGmailSyncedAt] = React.useState<string>();
+  const [gmailConnecting, setGmailConnecting] = React.useState(false);
+  const [gmailConnectionError, setGmailConnectionError] = React.useState<string>();
+  const gmailConnectRunning = React.useRef(false);
+  const gmailConnectAttempt = React.useRef(0);
   const tripsRef = React.useRef(trips);
   tripsRef.current = trips;
   const accountRef = React.useRef<AccountIdentity | undefined>(undefined);
@@ -201,6 +218,8 @@ function useTravelTripsState(): TravelTripsContextValue {
   const requestSequence = React.useRef(0);
   // Order reads by when they began, including independent detail requests.
   const readSequence = React.useRef(0);
+  const identityReadSequence = React.useRef(0);
+  const appliedIdentityRead = React.useRef(0);
   const fullReadApplied = React.useRef(0);
   const tripReads = React.useRef(new Map<number, number>());
   const authAttempt = React.useRef(0);
@@ -220,6 +239,9 @@ function useTravelTripsState(): TravelTripsContextValue {
     setGmailSyncStatus('unknown');
     setGmailSyncError(undefined);
     setLastGmailSyncedAt(undefined);
+    setGmailConnecting(false);
+    setGmailConnectionError(undefined);
+    gmailConnectRunning.current = false;
     recovery.current = undefined;
     recoveryRead.current = undefined;
   }, []);
@@ -229,6 +251,7 @@ function useTravelTripsState(): TravelTripsContextValue {
     const revision = getAuthRevision();
     const sequence = ++requestSequence.current;
     const read = ++readSequence.current;
+    const identityRead = ++identityReadSequence.current;
     const relevant = () => current(revision) && sequence === requestSequence.current;
     if (!token) {
       resetAccount();
@@ -263,9 +286,15 @@ function useTravelTripsState(): TravelTripsContextValue {
         throw new Error('Your account could not be verified. Please try again.');
       }
       // /auth/me is authoritative; no bundled traveler is ever a fallback.
-      if (accountRef.current && accountRef.current.user_id !== me.user_id) setTrips([]);
-      accountRef.current = me;
-      setAccount(me);
+      if (identityRead >= appliedIdentityRead.current) {
+        appliedIdentityRead.current = identityRead;
+        if (accountRef.current && accountRef.current.user_id !== me.user_id) setTrips([]);
+        accountRef.current = me;
+        setAccount(me);
+        if (!me.gmail_connected) {
+          setGmailSyncStatus('unknown'); setGmailSyncError(undefined); setLastGmailSyncedAt(undefined);
+        }
+      }
       setAccountRevision(revision);
       setAuthStatus('signed-in');
       // The compact native share sheet needs a verified account without
@@ -327,9 +356,9 @@ function useTravelTripsState(): TravelTripsContextValue {
         if (!mounted.current) return;
         resetAccount();
         setAuthStatus('signed-out');
-        setStatus('error');
+        setStatus(caught instanceof GoogleSignInCanceled ? 'idle' : 'error');
         setSignOutPending(pendingAuthClear);
-        setError(friendlyError(caught));
+        setError(caught instanceof GoogleSignInCanceled ? undefined : friendlyError(caught));
       }
     })();
     return () => { mounted.current = false; unsubscribe(); };
@@ -357,6 +386,7 @@ function useTravelTripsState(): TravelTripsContextValue {
   const signOut = React.useCallback(async () => {
     authAttempt.current += 1;
     cancelGoogleAuthSession();
+    cancelAppleAuthSession();
     resetAccount();
     setAuthStatus('signed-out');
     setStatus('idle');
@@ -364,6 +394,29 @@ function useTravelTripsState(): TravelTripsContextValue {
     try { await clearAuthToken(); }
     catch { if (mounted.current) { setSignOutPending(true); setStatus('error'); setError(AUTH_CLEAR_ERROR); } }
   }, [resetAccount]);
+
+  const signInWithApple = React.useCallback(async () => {
+    if (pendingAuthClear) { setError(AUTH_CLEAR_ERROR); setSignOutPending(true); return; }
+    const attempt = ++authAttempt.current;
+    setError(undefined); setAuthStatus('loading'); setStatus('loading');
+    try {
+      const result = await requestAppleAuth(getApiBaseUrl(), { isCurrent: () => mounted.current && attempt === authAttempt.current });
+      if (!mounted.current || attempt !== authAttempt.current) return;
+      await storeAuthToken(result.access_token);
+    } catch (caught) {
+      if (!mounted.current || attempt !== authAttempt.current) return;
+      setAuthStatus(accountRef.current ? 'signed-in' : 'signed-out');
+      setStatus(caught instanceof AppleSignInCanceled ? 'idle' : 'error');
+      setError(caught instanceof AppleSignInCanceled ? undefined : friendlyError(caught));
+    }
+  }, []);
+
+  const finishAccountDeletion = React.useCallback(async () => {
+    const owner = accountRef.current;
+    if (!owner) return;
+    markDeletedAccountForCleanup({ apiBaseUrl: getApiBaseUrl(), ownerId: owner.user_id });
+    await signOut();
+  }, [signOut]);
 
   const loadTripDetail = React.useCallback(async (backendId: number) => {
     const token = getStoredToken();
@@ -451,6 +504,7 @@ function useTravelTripsState(): TravelTripsContextValue {
     const revision = getAuthRevision();
     const owner = accountRef.current;
     if (syncRunning.current?.revision === revision || !token || !owner) return;
+    if (!owner.gmail_connected) { setGmailConnectionError('Connect Gmail to import your flights.'); return; }
     // An interrupted observation resumes its exact existing job; it does not
     // create another import merely because the app restarted or lost network.
     const saved = recovery.current ?? await readGmailRecovery(getApiBaseUrl(), owner.user_id);
@@ -463,8 +517,15 @@ function useTravelTripsState(): TravelTripsContextValue {
       const response = await authFetch('/ingest/gmail/import', { method: 'POST' }, token);
       if (!current(revision)) return;
       if (response.status === 401) throw new SessionExpired();
-      const data = await readJson(response) as { job_id?: string; detail?: unknown };
+      const data = await readJson(response) as { job_id?: string; detail?: { code?: string; message?: string } | string };
       if (!current(revision)) return;
+      if (response.status === 409 && typeof data.detail === 'object' && data.detail?.code === 'gmail_connection_required') {
+        const disconnected = { ...owner, gmail_connected: false, gmail_connection_status: 'needs_reconnect' as const };
+        accountRef.current = disconnected; setAccount(disconnected);
+        setGmailSyncStatus('unknown'); setStatus('idle');
+        setGmailConnectionError(data.detail.message || 'Reconnect Gmail to import your flights.');
+        return;
+      }
       if (!response.ok || typeof data.job_id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(data.job_id)) throw new Error(readError(data, 'Gmail sync could not start. Please retry.'));
       if (syncRunning.current === starting) syncRunning.current = undefined;
       await observeGmailJob(data.job_id, token, revision, { version: 1, apiBaseUrl: getApiBaseUrl(), ownerId: owner.user_id,
@@ -484,9 +545,63 @@ function useTravelTripsState(): TravelTripsContextValue {
     } finally { if (syncRunning.current === starting) syncRunning.current = undefined; }
   }, [observeGmailJob]);
 
+  const connectGmail = React.useCallback(async () => {
+    const token = getStoredToken(), revision = getAuthRevision(), owner = accountRef.current;
+    if (!token || !owner || gmailConnectRunning.current || owner.gmail_connected) return;
+    gmailConnectRunning.current = true;
+    const attempt = ++gmailConnectAttempt.current;
+    setGmailConnecting(true); setGmailConnectionError(undefined);
+    const relevant = () => current(revision) && accountRef.current?.user_id === owner.user_id && attempt === gmailConnectAttempt.current;
+    try {
+      // The first Gmail connection also adds Google as a sign-in method. Prove
+      // ownership with the already-linked provider before enrolling a new one.
+      const connectionToken = owner.auth_providers?.includes('apple') && !owner.auth_providers.includes('google')
+        ? await reauthenticateAccount({ base: getApiBaseUrl(), token, ownerId: owner.user_id, isCurrent: relevant }, 'apple')
+        : token;
+      if (!relevant()) return;
+      await requestGmailConnection(async app_redirect_uri => {
+        const response = await authFetch('/auth/google/gmail/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ app_redirect_uri }) }, connectionToken);
+        if (!relevant()) throw new GmailConnectionCanceled();
+        const data = await readJson(response) as { url?: string };
+        if (!response.ok || typeof data.url !== 'string') throw new Error(readError(data, 'Gmail connection could not start. Please try again.'));
+        const url = new URL(data.url);
+        if (url.protocol !== 'https:' || url.hostname !== 'accounts.google.com' || url.username || url.password) throw new Error('Gmail returned an unexpected connection address. Please try again.');
+        return data.url;
+      });
+      if (!relevant()) return;
+      // Re-read connection status with the original session. Never replace the
+      // app token or reset the provider merely to attach Gmail permission.
+      const identityRead = ++identityReadSequence.current;
+      const response = await authFetch('/auth/me', undefined, token);
+      const identity = await readJson(response) as AccountIdentity;
+      if (!relevant()) return;
+      if (!response.ok || identity.user_id !== owner.user_id || !identity.gmail_connected) throw new Error('Gmail connection could not be confirmed. Please try again.');
+      if (identityRead < appliedIdentityRead.current) {
+        if (!accountRef.current?.gmail_connected) throw new Error('Gmail connection changed. Please try again.');
+      } else {
+        appliedIdentityRead.current = identityRead;
+        accountRef.current = identity; setAccount(identity);
+      }
+      setGmailSyncError(undefined); setGmailConnectionError(undefined);
+      setGmailConnecting(false);
+      await syncFromGmail();
+    } catch (caught) {
+      if (relevant() && !(caught instanceof GmailConnectionCanceled) && !(caught instanceof AppleSignInCanceled) && !(caught instanceof GoogleSignInCanceled)) setGmailConnectionError(friendlyError(caught));
+    } finally {
+      if (relevant()) { gmailConnectRunning.current = false; setGmailConnecting(false); }
+    }
+  }, [syncFromGmail]);
+
+  const cancelConnectingGmail = React.useCallback(() => {
+    gmailConnectAttempt.current += 1;
+    cancelGmailConnection(); cancelAppleAuthSession();
+    gmailConnectRunning.current = false;
+    setGmailConnecting(false); setGmailConnectionError(undefined);
+  }, []);
+
   React.useEffect(() => {
     const ownerId = account?.user_id, token = getStoredToken(), revision = getAuthRevision();
-    if (!ownerId || !token || recoveryRead.current === revision) return;
+    if (!ownerId || !token || !account?.gmail_connected || recoveryRead.current === revision) return;
     recoveryRead.current = revision;
     let live = true;
     void readGmailRecovery(getApiBaseUrl(), ownerId).then(saved => {
@@ -501,7 +616,7 @@ function useTravelTripsState(): TravelTripsContextValue {
       }
     });
     return () => { live = false; };
-  }, [account?.user_id, observeGmailJob]);
+  }, [account?.user_id, account?.gmail_connected, observeGmailJob]);
 
   const retryAuth = React.useCallback(async () => {
     if (getStoredToken()) await loadTrips('loading');
@@ -510,8 +625,12 @@ function useTravelTripsState(): TravelTripsContextValue {
 
   return { trips, profile: buildProfile(trips, account), source: 'api', status, authStatus,
     signOutPending, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt,
+    gmailConnected: account?.gmail_connected === true,
+    gmailConnectionStatus: account?.gmail_connection_status ?? (account?.gmail_connected ? 'connected' : 'not_connected'),
+    gmailConnecting, gmailConnectionError,
     error, accountId: account?.user_id, accountRevision, accountEmail: account?.email, lastSyncedAt,
-    signIn, retryAuth, signOut, refresh: () => loadTrips('refreshing'), loadTripDetail, syncFromGmail };
+    authProviders: account?.auth_providers ?? ['google'],
+    signIn, signInWithApple, retryAuth, signOut, finishAccountDeletion, refresh: () => loadTrips('refreshing'), loadTripDetail, syncFromGmail, connectGmail, cancelGmailConnection: cancelConnectingGmail };
 }
 
 export function getApiBaseUrl() {
@@ -578,7 +697,7 @@ export async function storeAuthToken(token: string) {
   const serialized = JSON.stringify({ token, apiBaseUrl: getApiBaseUrl() });
   try {
     await queueStorage(async () => {
-      if (pendingAuthClear || await readClearPending()) {
+      if (pendingAuthClear || await readClearPending() || await hasDeletedAccountCleanup()) {
         if (!pendingAuthClear) { pendingAuthClear = true; changeMemoryToken(undefined); }
         throw new Error(AUTH_CLEAR_ERROR);
       }
@@ -606,6 +725,7 @@ export function clearAuthToken() {
     // Still try deleting the credential if the auxiliary marker cannot be saved.
     await writeClearPending(true).catch(() => undefined);
     await nativeShareInvalidation;
+    await finishDeletedAccountCleanup();
     if (Platform.OS === 'web') {
       const storage = browserStorage('sessionStorage');
       if (!storage) throw new Error(AUTH_CLEAR_ERROR);
@@ -621,7 +741,7 @@ export async function hydrateStoredToken() {
   if (memoryAuthToken) return memoryAuthToken;
   const revision = getAuthRevision();
   await storageQueue;
-  if (pendingAuthClear || await readClearPending()) {
+  if (pendingAuthClear || await readClearPending() || await hasDeletedAccountCleanup()) {
     if (!pendingAuthClear) { pendingAuthClear = true; changeMemoryToken(undefined); }
     throw new Error(AUTH_CLEAR_ERROR);
   }

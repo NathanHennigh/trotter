@@ -31,6 +31,7 @@ type NativeWindow = Window & {
   ReactNativeWebView?: { postMessage: (data: string) => void };
   __PASSPORT__: BookPayload;
   updatePassport?: (payload: BookPayload) => void;
+  setPassportVisible?: (visible: boolean) => void;
   openPassport?: () => void;
 };
 const bridge = window as unknown as NativeWindow;
@@ -61,6 +62,7 @@ const pagesFor = (data: BookPayload) =>
 let payload = bridge.__PASSPORT__,
   pages = pagesFor(payload),
   textures: PageTexture[] = [];
+let presentationVisible = payload.visible !== false;
 let model = new PassportController(
     pages.length / 2,
     payload.state?.spread ?? 0,
@@ -507,17 +509,7 @@ host.addEventListener("keydown", (event) => {
 });
 async function update(next: BookPayload) {
   const token = ++generation;
-  if (next.visible === false) {
-    const id = pointer?.id;
-    pointer = null;
-    feedbackOrigin = null;
-    if (id !== undefined && host.hasPointerCapture(id))
-      host.releasePointerCapture(id);
-    model.cancel();
-    cover.snap(cover.settled);
-    post("gesture", { active: false });
-    payload = { ...payload, visible: false };
-  }
+  setVisible(next.visible !== false);
   try {
     for (const [name, source] of Object.entries(next.fonts)) {
       if (
@@ -535,8 +527,9 @@ async function update(next: BookPayload) {
     const nextPages = pagesFor(next),
       nextTextures = await makeTextures(nextPages, next);
     if (disposed || token !== generation) return;
-    pendingUpdate = { payload: next, pages: nextPages, textures: nextTextures };
-    wake();
+    pendingUpdate = { payload: { ...next, visible: presentationVisible }, pages: nextPages, textures: nextTextures };
+    if (presentationVisible) wake();
+    else flushUpdate();
   } catch {
     if (token !== generation || disposed) return;
     loading.replaceChildren();
@@ -552,6 +545,26 @@ async function update(next: BookPayload) {
     paint();
   }
 }
+function setVisible(visible: boolean) {
+  const wasVisible = presentationVisible;
+  presentationVisible = visible;
+  payload.visible = visible;
+  if (pendingUpdate) pendingUpdate.payload.visible = visible;
+  if (!visible) {
+    const id = pointer?.id;
+    pointer = null;
+    feedbackOrigin = null;
+    if (id !== undefined && host.hasPointerCapture(id))
+      host.releasePointerCapture(id);
+    model.cancel();
+    cover.snap(cover.settled);
+    cancelAnimationFrame(frame);
+    frame = 0;
+    lastTime = 0;
+    post("gesture", { active: false });
+  } else if (!wasVisible) wake();
+}
+bridge.setPassportVisible = setVisible;
 bridge.updatePassport = (next) => {
   void update(next);
 };
@@ -566,6 +579,8 @@ window.addEventListener("message", (event) => {
     void update(event.data.payload);
   if (event.source === window.parent && event.data?.type === "passport-open")
     bridge.openPassport?.();
+  if (event.source === window.parent && event.data?.type === "passport-visibility" && typeof event.data.visible === "boolean")
+    setVisible(event.data.visible);
 });
 const resize = new ResizeObserver(paint);
 resize.observe(host);

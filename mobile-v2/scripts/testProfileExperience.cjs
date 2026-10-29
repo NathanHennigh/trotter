@@ -19,11 +19,12 @@ function runtime(file, overrides = {}) {
     '../components/trotter/TrotterKit':{BottomNav:'BottomNav'}, '../components/world-window/WorldWindowUI':{WWHeader:'WWHeader',WWIcon:'WWIcon'},
     '../components/world-window/motion':{PressFeedback:'Pressable'}, '../components/world-window/profile/TravelerCard':{TravelerCard:'TravelerCard'},
     '../components/world-window/profile/HomeAirportPicker':{HomeAirportPicker:'HomeAirportPicker'},
+    '../components/world-window/profile/AccountControls':{AccountControls:'AccountControls'},
     '../theme/trotterTheme':{colors:{},fonts:{},layout:{bottomNavHeight:73}},
     '../utils/mobileLayout':{getMobileVisualWidth:width=>width},
     '../utils/experiencePreferences':{useExperiencePreferences:()=>({texture:'classic',haptics:true,setTexture:noop,setHaptics:noop}),selectionHaptic:noop},
     '../utils/travelerIdentity':{useTravelerIdentity:()=>({ready:true,setHomeAirport:async()=>{}})},
-    '../services/travelTrips':{getApiBaseUrl:()=> 'https://synthetic.example',useTravelTrips:()=>({profile:{name:'Alex Morgan',firstFlightDate:'2016-01-01'},trips:[],accountId:1,accountEmail:'alex@example.test',status:'idle',gmailSyncStatus:'unknown',refresh:noop,syncFromGmail:noop,signOut:noop})},
+    '../services/travelTrips':{getApiBaseUrl:()=> 'https://synthetic.example',useTravelTrips:()=>({profile:{name:'Alex Morgan',firstFlightDate:'2016-01-01'},trips:[],accountId:1,accountEmail:'alex@example.test',status:'idle',gmailConnected:true,gmailSyncStatus:'unknown',refresh:noop,syncFromGmail:noop,signOut:noop})},
   };
   const absolute=path.join(root,file), mod={exports:{}};
   const code=ts.transpileModule(fs.readFileSync(absolute,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
@@ -43,7 +44,7 @@ test('Profile replaces repeated archive blocks with identity and meaningful acco
   const host=runtime('screens/ProfileScreen.tsx'), tree=host.render(host.exports.ProfileScreen,{active:'profile',onChange:noop});
   assert(find(tree,'TravelerCard'));assert(find(tree,'WWHeader'));assert(button(tree,'Scan Gmail for flights'));
   for(const duplicate of ['Trip archive','Country stamps','Latest recorded flight','Most visited airport','Refresh archive','Not checked']) assert(!text(tree).includes(duplicate),duplicate);
-  assert(text(tree).includes('Ready to scan for flights'));assert(text(tree).includes('alex@example.test'));host.dispose();
+  assert(text(tree).includes('Ready to scan for flights'));assert(find(tree,'AccountControls'));host.dispose();
 });
 test('Globe and haptic preferences control the same store used by Home',()=>{
   const changed=[],haptics=[];const host=runtime('screens/ProfileScreen.tsx',{'../utils/experiencePreferences':{useExperiencePreferences:()=>({texture:'nasa',haptics:false,setTexture:v=>changed.push(v),setHaptics:v=>haptics.push(v)}),selectionHaptic:noop}});
@@ -65,9 +66,27 @@ test('Home airport opens a purposeful editor, saves explicit choice, and closes'
   assert.deepEqual(saved,['IAH']);assert.equal(find(tree,'HomeAirportPicker'),undefined);assert.equal(owner,'https://synthetic.example/1');host.dispose();
 });
 test('Scanning shows progress and disables repeated scans while leaving navigation available',()=>{
-  const host=runtime('screens/ProfileScreen.tsx',{'../services/travelTrips':{getApiBaseUrl:()=> 'https://synthetic.example',useTravelTrips:()=>({profile:{name:'Alex'},trips:[],accountId:1,status:'syncing',gmailSyncStatus:'syncing'})}});
+  const host=runtime('screens/ProfileScreen.tsx',{'../services/travelTrips':{getApiBaseUrl:()=> 'https://synthetic.example',useTravelTrips:()=>({profile:{name:'Alex'},trips:[],accountId:1,status:'syncing',gmailConnected:true,gmailSyncStatus:'syncing'})}});
   const tree=host.render(host.exports.ProfileScreen,{active:'profile',onChange:noop});assert.equal(button(tree,'Scan Gmail for flights').props.disabled,true);
   assert(text(tree).includes('Your scan continues'));assert(find(tree,'BottomNav'));host.dispose();
+});
+
+test('Profile offers optional Gmail consent without a scan action, and connection state keeps navigation and cancel available',()=>{
+  let connecting=false, attempts=0, cancellations=0;
+  const host=runtime('screens/ProfileScreen.tsx',{'../services/travelTrips':{getApiBaseUrl:()=> 'https://synthetic.example',useTravelTrips:()=>({profile:{name:'Alex'},trips:[],accountId:1,status:'idle',gmailConnected:false,gmailConnecting:connecting,
+    connectGmail:()=>{attempts++;connecting=true;},cancelGmailConnection:()=>{cancellations++;connecting=false;}})}});
+  let tree=host.render(host.exports.ProfileScreen,{active:'profile',onChange:noop});
+  assert(!button(tree,'Scan Gmail for flights')); assert(text(tree).includes('Dreams and Planner work without it'));
+  button(tree,'Connect Gmail').props.onPress(); tree=host.render(host.exports.ProfileScreen);
+  assert.equal(attempts,1); assert.equal(button(tree,'Connect Gmail').props.disabled,true); assert(find(tree,'BottomNav'));
+  button(tree,'Cancel Gmail connection').props.onPress(); tree=host.render(host.exports.ProfileScreen);
+  assert.equal(cancellations,1); assert.equal(button(tree,'Connect Gmail').props.disabled,false); host.dispose();
+});
+
+test('revoked Gmail offers reconnection beside its error without replacing the Google account controls',()=>{
+  const host=runtime('screens/ProfileScreen.tsx',{'../services/travelTrips':{getApiBaseUrl:()=> 'https://synthetic.example',useTravelTrips:()=>({profile:{name:'Alex'},trips:[],accountId:1,accountEmail:'alex@example.test',status:'idle',gmailConnected:false,gmailConnectionStatus:'needs_reconnect',gmailConnectionError:'Choose the same Google account.',connectGmail:noop})}});
+  const tree=host.render(host.exports.ProfileScreen,{active:'profile',onChange:noop});
+  assert(button(tree,'Reconnect Gmail')); assert(!button(tree,'Scan Gmail for flights')); assert(find(tree,'AccountControls')); assert(text(tree).includes('Choose the same Google account.')); host.dispose();
 });
 test('Home airport persistence is isolated by account and server and rejects invalid input',async()=>{
   const storage=new Map(), host=runtime('utils/travelerIdentity.ts',{'@react-native-async-storage/async-storage':{getItem:async key=>storage.get(key),setItem:async(key,value)=>storage.set(key,value)}}),api=host.exports;

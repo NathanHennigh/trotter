@@ -20,6 +20,19 @@ function mapsKeys() {
 
 module.exports = ({ config }) => {
   const keys = mapsKeys();
+  const projectId = (process.env.EAS_PROJECT_ID || config.extra?.eas?.projectId || '').trim();
+  const teamId = (process.env.APPLE_TEAM_ID || config.ios?.appleTeamId || '').trim();
+  if (projectId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)) {
+    throw new Error('EAS_PROJECT_ID must be the UUID of the actual linked Expo project.');
+  }
+  if (teamId && !/^[A-Z0-9]{10}$/.test(teamId)) throw new Error('APPLE_TEAM_ID must be a 10-character Apple Developer team identifier.');
+  // Universal links are associated only with the API host that issues invitations.
+  // The bearer invitation stays in the fragment and is never sent to AASA/CDN.
+  let invitationDomain;
+  try {
+    const api = new URL(process.env.EXPO_PUBLIC_TROTTER_API_URL || '');
+    if (api.protocol === 'https:' && !api.username && !api.password && !api.port && !api.search && !api.hash) invitationDomain = `applinks:${api.hostname}`;
+  } catch { /* The preflight explains missing/invalid release configuration. */ }
   return {
     ...config,
     android: {
@@ -28,12 +41,17 @@ module.exports = ({ config }) => {
     },
     ios: {
       ...config.ios,
+      ...(teamId ? { appleTeamId: teamId } : {}),
+      associatedDomains: [...new Set([...(config.ios?.associatedDomains || []), ...(invitationDomain ? [invitationDomain] : [])])],
       ...(keys.ios ? { config: { ...config.ios?.config, googleMapsApiKey: keys.ios } } : {}),
     },
     extra: {
       ...config.extra,
+      ...(projectId ? { eas: { ...config.extra?.eas, projectId } } : {}),
       googleMapsAndroidConfigured: Boolean(keys.android),
       googleMapsIosConfigured: Boolean(keys.ios),
+      // Enable only after Trotter's own Apple setup and end-to-end verification.
+      appleSignInEnabled: Boolean(teamId && process.env.EXPO_PUBLIC_APPLE_SIGN_IN_ENABLED === 'true'),
     },
   };
 };

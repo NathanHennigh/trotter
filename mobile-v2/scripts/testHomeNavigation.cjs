@@ -97,10 +97,12 @@ function load(file, name, overrides = {}) {
   const compiled = ts.transpileModule(`${blurCapability?.getText(ast) ?? ""}\n${text.startsWith("export") ? text : "export " + text}\n${styles?.getText(ast) ?? ""}`, {
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  const tags = "View Text Pressable FlatList BoardingPass TripAtlas WalletHeading WWEmpty ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionScope CollectionList TransportCollectionIndex AirportLuggageLabel CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen PaperReveal PaperPresence TripNavigationSurface TripBackground".split(" ");
+  const tags = "View Text Pressable FlatList BoardingPass TripAtlas WalletHeading WWEmpty ScrollView Modal RefreshControl ActivityIndicator BottomNav WWHeader WWButton WWEmblem WWIcon WorldWindowGlobe PassportBook ActivityChart CollectionButtons CollectionScope CollectionList TransportCollectionIndex AirportLuggageLabel CountryArrivalDetail CountryIndex CollectionHeading CollectionTitle CollectionBack CroppedPassportStamp TripRows AirlineLogo AirportRouteFan HomeGlobeScreen PassportStatsScreen CountryStampCollectionScreen TripDetailScreen TripsListScreen DreamsScreen ProfileScreen PaperReveal PaperPresence TripNavigationSurface TripBackground RetainedScene".split(" ");
   const globals = {
     ...Object.fromEntries(tags.map(tag => [tag, tag])),
     CollectionProgress: "CollectionProgress",
+    FlightSharingScreen: "FlightSharingScreen", useFlightInvitation: () => ({ ready: true, consume: noOp }),
+    PlannerScreen: "PlannerScreen", DreamTripPicker: "DreamTripPicker", ProfileAvatar: "ProfileAvatar", usePlannerInvitation: () => ({ ready: true, consume: noOp }),
     React: host.React, useState: host.React.useState, useMemo: host.React.useMemo, useEffect: host.React.useEffect, useRef: host.React.useRef,
     StyleSheet: { create: x => x, absoluteFillObject: {}, absoluteFill: {} },
     Animated: { Value: class { constructor(value) { this.value = value; } setValue(value) { this.value = value; } stopAnimation() {} } },
@@ -108,6 +110,7 @@ function load(file, name, overrides = {}) {
     useExperiencePreferences: () => { const [texture, setTexture] = host.React.useState("classic"); return { texture, setTexture, haptics: true, setHaptics: noOp }; },
     ...pure("src/utils/travelScope.ts"), ...pure("src/components/world-window/routeSelection.ts"),
     ...pure("src/components/world-window/displayTextFit.ts"),
+    ...pure("src/components/world-window/headerGeometry.ts"),
     ...pure("src/data/collections/catalogs.ts"), ...pure("src/components/world-window/collections/catalogProgress.ts"),
     ...pure("src/components/world-window/collections/transportCollectionModel.ts"),
     scopedPassportArchive: () => archive,
@@ -138,8 +141,65 @@ const countriesHost = () => load("src/screens/CountryStampCollectionScreen.tsx",
 const listHost = () => load("src/components/world-window/passport/PassportCollections.tsx", "CollectionList");
 const finishTripTransition = host => { let tree = host.render(); const surface = find(tree, "TripNavigationSurface"); assert(surface?.props.closing); surface.props.onClosed(); return host.render(); };
 
+test("Retained scenes pause once on departure and skip unrelated hidden tab renders", () => {
+  const file = path.join(__dirname, '../src/components/world-window/RetainedScene.tsx');
+  const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
+  const mod = { exports: {} };
+  new Function('module', 'exports', 'require', output)(mod, mod.exports, require);
+  const boundary = mod.exports.RetainedScene;
+  const oldTree = { active: true, children: { draft: 'keep this note', scroll: 385 } };
+  const hidden = { active: false, children: { ...oldTree.children, visible: false } };
+  assert.equal(boundary.compare(oldTree, hidden), false, 'Departure reaches native pause and modal cleanup');
+  for (const tab of ['profile', 'trips', 'globe', 'passport', 'dreams'])
+    assert.equal(boundary.compare(hidden, { active: false, children: { unrelatedTab: tab } }), true, 'Hidden subtree retains its own state and native surface');
+  assert.equal(boundary.compare(hidden, { active: true, children: { latestData: true } }), false, 'Return receives the latest props immediately');
+  assert.equal(boundary.compare(oldTree, { ...oldTree, children: { updatedData: true } }), false, 'Visible data updates are never suppressed');
+});
+
+test("Rapid tab changes retain unique scene boundaries and do not reset an already selected tab", () => {
+  const host = appHost(); let tree = host.render({ consumeShare: noOp });
+  const visited = new Set(['globe']);
+  for (const tab of ['profile', 'passport', 'trips', 'dreams', 'profile', 'dreams', 'globe', 'passport']) {
+    const activeScene = nodes(tree).find(node => node.type === 'RetainedScene' && node.props.active);
+    const screen = nodes(activeScene).find(node => typeof node.props?.onChange === 'function');
+    screen.props.onChange(tab); tree = host.render(); visited.add(tab);
+    const layers = screenLayers(tree);
+    assert.equal(layers.length, visited.size);
+    assert.equal(new Set(layers.map(layer => layer.props.testID)).size, visited.size);
+    assert.equal(nodes(tree).filter(node => node.type === 'RetainedScene' && node.props.active).length, 1);
+  }
+  const epoch = find(tree, 'PassportStatsScreen').props.resetEpoch;
+  find(tree, 'PassportStatsScreen').props.onChange('passport'); tree = host.render();
+  assert.equal(find(tree, 'PassportStatsScreen').props.resetEpoch, epoch);
+  host.unmount();
+});
+
 const deferredShare = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const flushShare = async () => { for (let n = 0; n < 12; n++) await Promise.resolve(); };
+
+test('native Add to trip opens explicit group selection without another personal capture', () => {
+  const captures = [], consumed = [];
+  const host = appHost({ useDreams: () => ({ refresh: noOp, shareInstagramLinkDurable: (...args) => captures.push(args) }) });
+  let tree = host.render({ incomingShare: { queueId: 12, sourceUrl: 'https://www.instagram.com/reel/trip/', viewOnly: true, addToTrip: true }, consumeShare: id => consumed.push(id) });
+  assert.equal(find(tree, 'DreamTripPicker').props.sourceUrl, 'https://www.instagram.com/reel/trip/');
+  assert.deepEqual(captures, []);
+  assert.deepEqual(consumed, [12]);
+  find(tree, 'DreamTripPicker').props.onOpenPlanner({ tripId: 'shared-trip' });
+  tree = host.render();
+  assert.equal(find(tree, 'PlannerScreen').props.initialTripId, 'shared-trip');
+  assert.equal(find(tree, 'PlannerScreen').props.visible, true);
+  host.unmount();
+});
+
+test('profile shortcut returns to the retained planner rather than losing its trip', () => {
+  const host = appHost(); let tree = host.render({ consumeShare: noOp });
+  find(tree, 'HomeGlobeScreen').props.onChange('planner'); tree = host.render();
+  find(tree, 'PlannerScreen').props.onOpenProfile(); tree = host.render();
+  assert.equal(find(tree, 'PlannerScreen').props.visible, false);
+  find(tree, 'ProfileScreen').props.onBack(); tree = host.render();
+  assert.equal(find(tree, 'PlannerScreen').props.visible, true);
+  host.unmount();
+});
 
 test("A cold Instagram share opens Dreams without starting the globe, then retains a visited globe", async () => {
   const saved = [], consumed = [];
@@ -191,16 +251,27 @@ test("Late share capture cannot consume a receipt after its account shell unmoun
   assert.deepEqual(consumed, []);
 });
 
-test("Home controls share one balanced row and preserve touch targets and texture toggle", () => {
+test("Home groups the year beside its emblem and keeps account controls at the shared trailing anchor", () => {
   const host = load("src/screens/HomeGlobeScreen.tsx", "HomeGlobeScreen");
   let tree = host.render({ active: "globe", onChange: noOp });
   const year = button(tree, "Filter flights by year"), texture = button(tree, "Switch to NASA imagery");
-  const row = nodes(tree).find(n => n.type === "View" && n.props.children.includes(year) && n.props.children.includes(texture));
-  assert(row && find(row, "WWEmblem"), "Emblem and both controls have the same row parent");
+  const primary = nodes(tree).find(n => n.type === "View" && n.props.children.includes(year));
+  const account = nodes(tree).find(n => n.type === "View" && n.props.children.includes(texture));
+  const row = nodes(tree).find(n => n.type === "View" && n.props.children.includes(primary) && n.props.children.includes(account));
+  assert(primary && find(primary, "WWEmblem"), "The year stays beside the emblem");
+  assert(account && find(account, "ProfileAvatar"), "Texture and profile controls stay together");
+  assert(row && primary !== account, "Primary and account controls form separate groups on one row");
   assert.equal(row.props.style.flexDirection, "row");
   assert.equal(row.props.style.alignItems, "center");
-  assert(year.props.style({ pressed: false })[0].minHeight >= 44);
-  assert(texture.props.style({ pressed: false })[0].height >= 44);
+  assert.equal(primary.props.style.flex, 1, "The primary group takes spare space so account controls remain at the right edge");
+  assert.equal(account.props.style.flexShrink, 0, "The trailing controls keep their full touch targets");
+  assert.equal(account.props.children.filter(Boolean).at(-1).type, "ProfileAvatar", "The avatar is the final trailing action");
+  const top = nodes(tree).find(n => n.type === "View" && n.props.children.includes(row));
+  const topStyle = Object.assign({}, ...top.props.style);
+  assert.deepEqual([topStyle.left, topStyle.right, topStyle.top], [24, 24, 38], "Both edges are inset24px and the top is safe24px plus14px");
+  const controlStyle = node => { const value = typeof node.props.style === 'function' ? node.props.style({ pressed: false }) : node.props.style; return Object.assign({}, ...(Array.isArray(value) ? value : [value])); };
+  assert(controlStyle(year).minHeight >= 44);
+  assert(controlStyle(texture).height >= 44);
   texture.props.onPress();
   tree = host.render();
   assert.equal(find(tree, "WorldWindowGlobe").props.mapStyle, "nasa");
@@ -237,6 +308,28 @@ test("Profile airport goes directly to its airport history and Back returns Prof
   assert.equal(collection.props.initialCollection, "airports"); assert.equal(collection.props.initialAirport, "DFW");
   assert.equal(collection.props.collectionBackLabel, "Profile");
   collection.props.onCloseCollection(); tree = host.render(); assert.equal(find(tree, "ProfileScreen").props.active, "profile");
+});
+
+test("Profile flight inbox pauses retained scenes and closes back to Profile", () => {
+  const host = appHost(); let tree = host.render({ consumeShare: noOp });
+  find(tree, "HomeGlobeScreen").props.onChange("profile"); tree = host.render();
+  find(tree, "ProfileScreen").props.onOpenFlightInbox(); tree = host.render();
+  assert(find(tree, "FlightSharingScreen"));
+  assert.equal(find(tree, "HomeGlobeScreen").props.visible, false);
+  find(tree, "FlightSharingScreen").props.onBack(); tree = host.render();
+  assert.equal(find(tree, "FlightSharingScreen"), undefined);
+  assert.equal(find(tree, "ProfileScreen").props.active, "profile");
+});
+
+test("A pending flight invitation opens review and is consumed only on dismissal", () => {
+  const consumed = [];
+  const host = appHost({ useFlightInvitation: () => ({ ready: true, token: "invitation", consume: value => consumed.push(value) }) });
+  let tree = host.render({ consumeShare: noOp });
+  assert.equal(find(tree, "FlightSharingScreen").props.invitationToken, "invitation");
+  assert.deepEqual(consumed, []);
+  find(tree, "FlightSharingScreen").props.onBack(); tree = host.render();
+  assert.deepEqual(consumed, ["invitation"]);
+  assert.equal(find(tree, "FlightSharingScreen"), undefined);
 });
 
 test("Direct airport from Globe delegates Back to Globe and retains the chosen year", () => {

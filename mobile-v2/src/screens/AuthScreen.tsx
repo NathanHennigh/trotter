@@ -13,6 +13,9 @@ import { PressFeedback } from "../components/world-window/motion";
 import { WWEmblem } from "../components/world-window/WorldWindowUI";
 import { useTravelTrips } from "../services/travelTrips";
 import { colors, fonts } from "../theme/trotterTheme";
+import { PlannerAuthPreview } from "../components/world-window/planner/PlannerAuthPreview";
+import { AppleSignInButton } from "../components/world-window/profile/AppleSignInButton";
+import { isAppleSignInEnabled } from "../services/appleSignInAvailability";
 
 export function SessionRestoringScreen({ sourceUrl }: { sourceUrl?: string }) {
   const insets = useSafeAreaInsets();
@@ -34,10 +37,12 @@ export function SessionRestoringScreen({ sourceUrl }: { sourceUrl?: string }) {
   );
 }
 
-export function AuthScreen() {
+export function AuthScreen({ flightInvitation = false, plannerInvitationToken, onDismissPlannerInvitation }: {
+  flightInvitation?: boolean; plannerInvitationToken?: string; onDismissPlannerInvitation?: () => void;
+} = {}) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const { authStatus, status, error, signIn, signOut, signOutPending, retryAuth } =
+  const { authStatus, status, error, signIn, signInWithApple, signOut, signOutPending, retryAuth } =
     useTravelTrips();
   const [clearing, setClearing] = React.useState(false);
   const retrySignOut = async () => {
@@ -46,6 +51,7 @@ export function AuthScreen() {
     try { await signOut(); } finally { setClearing(false); }
   };
   const busy = authStatus === "loading";
+  const showApple = isAppleSignInEnabled() && !signOutPending && !busy;
   return (
     <ScrollView
       style={styles.screen}
@@ -64,6 +70,7 @@ export function AuthScreen() {
         <Text style={styles.wordmark}>TROTTER</Text>
       </View>
       <View style={styles.story}>
+        {plannerInvitationToken ? <PlannerAuthPreview token={plannerInvitationToken} onDismiss={onDismissPlannerInvitation} /> : <>
         <View
           style={styles.window}
           accessibilityElementsHidden
@@ -71,11 +78,13 @@ export function AuthScreen() {
         >
           <WWEmblem size={98} color={colors.blue} />
         </View>
-        <Text style={styles.title}>Welcome to Trotter</Text>
+        <Text style={styles.title}>{flightInvitation ? "A flight is waiting for you" : "Welcome to Trotter"}</Text>
         <Text style={styles.description}>
-          Sign in with the Google account that receives your flight
-          confirmations.
+          {flightInvitation
+            ? "Sign in with your invited email to review the flights."
+            : "Save places, plan trips and travel together."}
         </Text>
+        </>}
       </View>
       <View style={styles.actions}>
         {error ? (
@@ -104,7 +113,7 @@ export function AuthScreen() {
             <Text style={styles.loadingText}>Connecting your account…</Text>
           </View>
         ) : (
-          <PressFeedback
+          <View style={styles.googleOption}><PressFeedback
             accessibilityRole="button"
             onPress={() => void signIn()}
             style={styles.googleButton}
@@ -112,7 +121,10 @@ export function AuthScreen() {
             <GoogleMark />
             <Text style={styles.googleLabel}>Continue with Google</Text>
           </PressFeedback>
+          <Text style={styles.flightSyncNote}>Flight sync requires Gmail.</Text>
+          </View>
         )}
+        {showApple ? <AppleSignInButton appearance="outline" onPress={() => void signInWithApple()} /> : null}
         {signOutPending ? null : busy ? (
           <PressFeedback
             accessibilityRole="button"
@@ -130,10 +142,6 @@ export function AuthScreen() {
             <Text style={styles.textButtonLabel}>Try connection again</Text>
           </PressFeedback>
         ) : null}
-        <Text style={styles.privacy}>
-          Trotter uses read-only Gmail access to build your private travel
-          archive.
-        </Text>
       </View>
     </ScrollView>
   );
@@ -208,6 +216,7 @@ const styles = StyleSheet.create({
     maxWidth: 310,
   },
   actions: { width: "100%", maxWidth: 380, gap: 10 },
+  googleOption: { gap: 9 },
   googleButton: {
     minHeight: 54,
     borderWidth: 1,
@@ -233,13 +242,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.mutedInk,
   },
-  privacy: {
+  flightSyncNote: {
     color: colors.mutedInk,
     fontFamily: fonts.sansRegular,
     fontSize: 11,
     lineHeight: 17,
     textAlign: "center",
-    marginTop: 4,
   },
   error: {
     color: colors.redDeep,

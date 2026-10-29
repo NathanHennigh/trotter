@@ -34,6 +34,7 @@ function host(file, name, options = {}) {
   const motion = { PressFeedback: 'Pressable', useReducedMotion: () => options.reducedMotion !== false };
   const theme = { colors: palette, fonts: {}, layout: { bottomNavHeight: 68 } };
   const mocks = {
+    '../components/world-window/profile/ProfileAvatar': { ProfileAvatar: 'ProfileAvatar' },
     react, 'react-native': native,
     'react-native-svg': Object.fromEntries('default Svg Defs Line LinearGradient Rect Stop Circle Path Pattern ClipPath G'.split(' ').map(tag => [tag, tag])),
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) },
@@ -245,6 +246,17 @@ test('retained Trips keeps search, while a direct Home entry or Show all trips r
   h.dispose();
 });
 
+test('empty Trips offers explicit optional Gmail connection while retaining search and navigation', () => {
+  let connected=0, scans=0;
+  const service={trips:[],gmailConnected:false,gmailConnecting:false,connectGmail:()=>connected++,syncFromGmail:()=>scans++};
+  const h=host('screens/TripsListScreen.tsx','TripsListScreen',{service});
+  let tree=h.render({active:'trips',onChange:noop});
+  assert.match(find(tree,'WWEmpty').props.body,/Dreams and Planner work without email/);
+  button(tree,'Connect Gmail').props.onPress(); assert.equal(connected,1); assert.equal(scans,0);
+  service.gmailConnecting=true; tree=h.render(); assert.equal(button(tree,'Connecting…').props.disabled,true); assert(find(tree,'BottomNav')); assert(find(tree,'TextInput'));
+  h.dispose();
+});
+
 test('scoped wallet announces the same dates and counts as its preview', () => {
   const h = host('components/world-window/trips/WalletCover.tsx', 'WalletCover');
   const scoped = scope.scopeTripsToYear([trip], '2026')[0];
@@ -448,7 +460,7 @@ test('narrow large text stacks counts, full airport endpoints, group headings an
   const options = { width: 320, fontScale: 2, service: { trips: [trip] } };
   const listHost = host('screens/TripsListScreen.tsx', 'TripsListScreen', options);
   const listTree = listHost.render({ active: 'trips', onChange: noop });
-  assert.equal(find(listTree, 'WWHeader').props.action, undefined);
+  assert.equal(find(listTree, 'WWHeader').props.action.type, 'ProfileAvatar');
   assert(texts(listTree).some(value => value === '1 trip')); listHost.dispose();
   const detailHost = host('screens/TripDetailScreen.tsx', 'TripDetailScreen', options);
   const detailTree = detailHost.render({ trip, active: 'trips', onBack: noop, onChange: noop });

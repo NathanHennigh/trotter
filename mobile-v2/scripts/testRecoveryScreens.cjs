@@ -10,6 +10,17 @@ const draftModule = { exports: {} };
 new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(root, 'components/world-window/dreams/dreamDraft.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(draftModule, draftModule.exports);
 const processingModule = { exports: {} };
 new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(root, 'components/world-window/dreams/dreamProcessing.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(processingModule, processingModule.exports);
+// Exercise the actual pure presentation helpers so recovery tests cannot drift
+// from their exported predicates or accidentally treat a resolved pin as missing.
+const models = { dreamDraft: draftModule.exports, dreamProcessing: processingModule.exports };
+function dreamModel(name) {
+  if (models[name]) return models[name];
+  const module = { exports: {} };
+  const source = fs.readFileSync(path.join(root, 'components/world-window/dreams', name + '.ts'), 'utf8');
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  new Function('module', 'exports', 'require', compiled)(module, module.exports, request => dreamModel(path.basename(request)));
+  return models[name] = module.exports;
+}
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const flush = async () => { for (let n = 0; n < 30; n++) await Promise.resolve(); };
 function screen(file, exportName, overrides = {}) {
@@ -28,17 +39,20 @@ function screen(file, exportName, overrides = {}) {
     react, './dreamDraft': draftModule.exports, '../motion': { PressFeedback: 'Pressable', useReducedMotion: () => true }, '../components/world-window/motion': { PressFeedback: 'Pressable' }, '../../../utils/experiencePreferences': { selectionHaptic: noop }, 'react-native': native, 'react-native-svg': { default: 'Svg', Path: 'Path' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) },
     '../services/travelTrips': { useTravelTrips: () => overrides.account },
+    '../services/appleSignInAvailability': { isAppleSignInEnabled: () => overrides.appleEnabled === true },
     '../components/world-window/WorldWindowUI': { WWEmblem: 'WWEmblem' },
+    '../components/world-window/planner/PlannerAuthPreview': { PlannerAuthPreview: 'PlannerAuthPreview' },
+    '../components/world-window/profile/AppleSignInButton': { AppleSignInButton: 'AppleSignInButton' },
     '../theme/trotterTheme': { colors: {}, fonts: {} },
     '../../../theme/trotterTheme': { colors: {}, fonts: {} },
     '../WorldWindowUI': { WWButton: 'WWButton', WWHeader: 'WWHeader', WWIcon: 'WWIcon' },
     './DreamPlacesMap': { DreamPlacesMap: 'DreamPlacesMap' }, './DreamPhoto': { DreamPhoto: 'DreamPhoto' },
     './dreamProcessing': processingModule.exports,
-    './dreamCardPresentation': { dreamCardTitle: item => item.placeName || item.caption || item.summary || item.city || 'Saved reel' },
+    './dreamCardPresentation': dreamModel('dreamCardPresentation'),
     './useLiveDreamLocation': { useLiveDreamLocation: () => ({}) },
     './countryRegion': { countryRegion: () => undefined },
-    './dreamPresentation': { categoryLabel: x => x, dreamPlaceLabel: item => item.placeName || item.city || item.regionOrNeighborhood || item.country || 'Saved place', dreamLocationType: item => item.coordinatePrecision === 'area' ? 'Area' : item.category, exactMapPoint: () => undefined, safeWebUrl: x => x },
-    './locationPresentation': { canFindLocation: item => Boolean(item.placeName || item.city || item.regionOrNeighborhood) && !['queued','running'].includes(item.locationStatus), isFindingLocation: item => ['queued','running'].includes(item.locationStatus), locationExplanation: item => item.locationStatus === 'needs_review' ? 'Which location is the one you saved?' : 'Looking for the address.' },
+    './dreamPresentation': dreamModel('dreamPresentation'),
+    './locationPresentation': dreamModel('locationPresentation'),
     '../displayTextFit': { fitDisplayFont: (_text, size) => size },
     '../../../utils/mobileLayout': { getMobileVisualWidth: width => width },
   };
@@ -86,14 +100,34 @@ test('failed logout offers cleanup retry and never a Google sign-in or archive r
   wait.resolve(); await flush(); assert.equal(retries, 1); host.dispose();
 });
 
+test('welcome prioritizes Google, explains Gmail briefly and hides unfinished Apple login', () => {
+  const host = screen('screens/AuthScreen.tsx', 'AuthScreen', { account: { authStatus: 'signed-out', status: 'idle', signIn: noop } });
+  const tree = host.render();
+  assert(text(tree).includes('Continue with Google'));
+  assert(text(tree).includes('Flight sync requires Gmail.'));
+  assert(!find(tree, 'AppleSignInButton'));
+  assert(!text(tree).some(value => /Already use Trotter|Dreams and Planner work/.test(value)));
+  host.dispose();
+});
+
+test('configured Apple login follows Google and is separate from its Gmail note', () => {
+  const host = screen('screens/AuthScreen.tsx', 'AuthScreen', { appleEnabled: true, account: { authStatus: 'signed-out', status: 'idle', signIn: noop, signInWithApple: noop } });
+  const tree = host.render(), ordered = nodes(tree);
+  const google = ordered.find(node => node.type === 'Pressable' && text(node).includes('Continue with Google'));
+  const apple = find(tree, 'AppleSignInButton');
+  assert(ordered.indexOf(google) < ordered.indexOf(apple));
+  assert.equal(apple.props.appearance, 'outline');
+  host.dispose();
+});
+
 for (const closeVia of ['hardware', 'button']) test(`Dream editor ${closeVia} Close allows an in-flight save to finish and late success cannot close the next screen`, async () => {
   const wait = deferred(); let closes = 0, saves = 0, savedPatch;
   const host = screen('components/world-window/dreams/DreamEditor.tsx', 'DreamEditor');
   let tree = host.render({ item, initialMode: 'edit', points: [], onClose: () => closes++, onSave: (_id, patch) => { saves++; savedPatch = patch; return wait.promise; }, onDelete: noop, onRetry: noop });
-  button(tree, 'Notes').props.onChange('Notes being saved'); tree = host.render();
+  button(tree, 'Your note').props.onChange('Notes being saved'); tree = host.render();
   const save = button(tree, 'Save changes'); save.props.onPress(); save.props.onPress();
   assert.equal(saves, 1, 'Double press cannot launch two mutations before React rerenders');
-  assert.equal(savedPatch.summary, 'Notes being saved');
+  assert.equal(savedPatch.personalNote, 'Notes being saved'); assert(!Object.hasOwn(savedPatch,'summary'));
   tree = host.render();
   const close = button(tree, 'Close place'); assert.notEqual(close.props.disabled, true);
   if (closeVia === 'hardware') find(tree, 'Modal').props.onRequestClose(); else close.props.onPress();
@@ -106,10 +140,10 @@ test('failed Dreams save keeps the editor and its draft, then allows a deliberat
   let calls = 0, closes = 0;
   const host = screen('components/world-window/dreams/DreamEditor.tsx', 'DreamEditor');
   let tree = host.render({ item, initialMode: 'edit', points: [], onClose: () => closes++, onSave: async () => { if (++calls === 1) throw new Error('The request timed out. Refresh before retrying.'); }, onDelete: noop, onRetry: noop });
-  button(tree, 'Notes').props.onChange('My retained draft'); tree = host.render();
+  button(tree, 'Your note').props.onChange('My retained draft'); tree = host.render();
   button(tree, 'Save changes').props.onPress(); await flush(); tree = host.render();
   assert.equal(closes, 0); assert(text(tree).some(value => value.includes('request timed out')));
-  assert.equal(button(tree, 'Notes').props.value, 'My retained draft');
+  assert.equal(button(tree, 'Your note').props.value, 'My retained draft');
   assert.equal(button(tree, 'Save changes').props.disabled, false);
   button(tree, 'Save changes').props.onPress(); await flush(); tree = host.render(); assert.equal(closes, 0); assert.equal(button(tree, 'Save changes'), undefined); assert(text(tree).includes('Changes saved.')); host.dispose();
 });
@@ -118,20 +152,21 @@ test('editing notes does not silently turn an automatically found location into 
   let patch;
   const host=screen('components/world-window/dreams/DreamEditor.tsx','DreamEditor');
   let tree=host.render({item:{...item,needsReview:false,locationStatus:'resolved',googleMapsUrl:'https://www.google.com/maps/search/?api=1&query=38.7,-9.1'},initialMode:'edit',points:[],onClose:noop,onSave:async(id,value)=>{patch=value;},onDelete:noop,onRetry:noop});
-  button(tree,'Notes').props.onChange('My own notes, same mapped place'); tree=host.render();
+  button(tree,'Your note').props.onChange('My own notes, same mapped place'); tree=host.render();
   button(tree,'Save changes').props.onPress(); await flush();
-  assert.equal(patch.summary, 'My own notes, same mapped place'); assert(!Object.hasOwn(patch,'googleMapsUrl'),'An unchanged provider-derived Maps URL stays provider-derived'); host.dispose();
+  assert.equal(patch.personalNote, 'My own notes, same mapped place'); assert(!Object.hasOwn(patch,'summary'));
+  assert(!Object.hasOwn(patch,'googleMapsUrl'),'An unchanged provider-derived Maps URL stays provider-derived'); host.dispose();
 });
 
 test('retrying location remains open, then a resolved result displays without confirmation',async()=>{
   let closes=0,lookups=0;
   const host=screen('components/world-window/dreams/DreamEditor.tsx','DreamEditor');
   const props={item:{...item,needsReview:false},points:[],onClose:()=>closes++,onSave:noop,onDelete:noop,onRetry:noop,onLocate:async()=>lookups++};
-  let tree=host.render(props); assert(!button(tree,'Retry location'));
-  button(tree,'More place options').props.onPress(); tree=host.render();
+  let tree=host.render(props); assert(button(tree,'Retry location'));
   button(tree,'Retry location').props.onPress(); await flush(); assert.equal(lookups,1); assert.equal(closes,0);
   tree=host.render({...props,item:{...props.item,locationStatus:'resolved',latitude:38.7,longitude:-9.1,locationAddress:'1 Synthetic Road'}});
-  assert.equal(button(tree,'Confirm pin'),undefined); assert.equal(closes,0); assert(text(tree).includes('1 Synthetic Road')); host.dispose();
+  assert.equal(button(tree,'Confirm pin'),undefined); assert.equal(button(tree,'Retry location'),undefined);
+  assert.equal(closes,0); assert(text(tree).includes('1 Synthetic Road')); host.dispose();
 });
 
 test('entering Edit uses the latest parsed place, then polling preserves an active draft',()=>{

@@ -15,9 +15,10 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
   const calls = [];
   const storage = map => ({ getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), removeItem: key => map.delete(key) });
   let browserResult;
+  let uuidSequence = 0;
   let nextToken = 'token-a';
   let fetchImpl = fetcher || (async (url, init) => response(200, url.endsWith('/auth/me')
-    ? { user_id: init.headers.Authorization === 'Bearer token-b' ? 2 : 1, name: init.headers.Authorization === 'Bearer token-b' ? 'Blair Browser' : 'Alex Avery', email: 'owner@example.invalid' } : []));
+    ? { user_id: init.headers.Authorization === 'Bearer token-b' ? 2 : 1, name: init.headers.Authorization === 'Bearer token-b' ? 'Blair Browser' : 'Alex Avery', email: 'owner@example.invalid', gmail_connected: true, gmail_connection_status: 'connected' } : []));
   const slots = [];
   let cursor = 0;
   let effects = [];
@@ -34,7 +35,7 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
       calls.push({ kind: 'oauth', start, redirect });
       if (browserResult) return browserResult;
       const expected = new URL(start).searchParams.get('app_redirect_uri');
-      return { type: 'success', url: `${expected}&token=${nextToken}` };
+      return { type: 'success', url: new URL(expected).searchParams.get('flow') === 'gmail' ? `${expected}&gmail=connected` : `${expected}&token=${nextToken}` };
     },
     dismissAuthSession: () => calls.push({ kind: 'dismiss' }),
   };
@@ -51,6 +52,10 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
     location: { href: 'https://app.example.invalid/', origin: 'https://app.example.invalid', assign(url) { calls.push({ kind: 'navigate', url }); } },
     history: { replaceState() { calls.push({ kind: 'clean-url' }); } },
   };
+  const popup = { closed: false, location: { replace(url) { calls.push({ kind: 'popup-navigate', url }); } }, close() { this.closed = true; calls.push({ kind: 'popup-close' }); } };
+  const windowListeners = new Map();
+  globals.window = { location: globals.location, history: globals.history, open() { calls.push({ kind: 'popup-open' }); popup.closed = false; return popup; },
+    addEventListener(type, handler) { windowListeners.set(type, handler); }, removeEventListener(type) { windowListeners.delete(type); } };
   function load(name) {
     if (cache.has(name)) return cache.get(name).exports;
     const file = path.join(serviceRoot, `${name}.ts`);
@@ -62,10 +67,17 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
       if (request === 'react') return react;
       if (request === 'react-native') return native;
       if (request === 'expo-web-browser') return web;
-      if (request === 'expo-crypto') return { randomUUID: () => 'test-attempt' };
+      if (request === 'expo-crypto') return { randomUUID: () => ++uuidSequence === 1 ? 'test-attempt' : `test-attempt-${uuidSequence}` };
       if (request === 'expo-secure-store') return secureStore;
       if (request === '@react-native-async-storage/async-storage') return { getItem: async key => plain.get(key) ?? null, setItem: async (key, value) => { plain.set(key, value); }, removeItem: async key => { plain.delete(key); } };
       if (request === './googleAuth') return load('googleAuth');
+      if (request === './appleAuth') return load('appleAuth');
+      if (request === './accountRequest') return load('accountRequest');
+      if (request === './accountLifecycle') return load('accountLifecycle');
+      if (request === './deletedAccountCleanup') return { finishDeletedAccountCleanup: async () => {}, hasDeletedAccountCleanup: async () => false, markDeletedAccountForCleanup: () => {} };
+      if (request === 'expo-apple-authentication') return { isAvailableAsync: async () => true,
+        AppleAuthenticationScope: { FULL_NAME: 0, EMAIL: 1 }, formatFullName: name => name.givenName || '',
+        signInAsync: async options => ({ identityToken: 'apple-identity', authorizationCode: 'apple-code', state: options.state }) };
       if (request === './gmailRecovery') return load('gmailRecovery');
       if (request === './nativeDreamShare') return {
         invalidateNativeDreamShareSession: async revision => { calls.push({ kind: 'native-share-clear', revision }); },
@@ -86,7 +98,8 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
   const auth = load('googleAuth');
   const travel = load('travelTrips');
   return {
-    auth, travel, secure, plain, session, calls, globals, secureStore,
+    auth, travel, secure, plain, session, calls, globals, secureStore, popup,
+    message(data, options = {}) { windowListeners.get('message')?.({ origin: globals.location.origin, source: popup, data, ...options }); },
     token: value => { nextToken = value; },
     browserResult: value => { browserResult = value; },
     fetcher: value => { fetchImpl = value; },
@@ -115,6 +128,54 @@ test('native auth uses ephemeral browser session and preserves nonce in signed r
   assert.equal(call.redirect, 'trotterv2://oauthredirect');
   env.browserResult({ type: 'cancel' });
   await assert.rejects(env.auth.requestGoogleAuthToken('https://api.example.invalid'), env.auth.GoogleSignInCanceled);
+});
+
+test('Gmail callback accepts only the active connection and maps consent refusal separately from sign-in', () => {
+  const { auth } = environment(), expected = 'trotterv2://oauthredirect?flow=gmail&attempt=one';
+  assert.doesNotThrow(() => auth.readGmailCallback(`${expected}&gmail=connected`, expected));
+  for (const invalid of ['evil://oauthredirect?flow=gmail&attempt=one&gmail=connected', `${expected}&token=new-login`, `${expected}&gmail=connected&gmail=connected`, 'trotterv2://oauthredirect?flow=gmail&attempt=two&gmail=connected']) assert.throws(() => auth.readGmailCallback(invalid, expected));
+  assert.throws(() => auth.readGmailCallback(`${expected}&error=access_denied`, expected), auth.GmailConnectionCanceled);
+  assert.throws(() => auth.readGmailCallback(`${expected}&error=gmail_wrong_account`, expected), /different Trotter account/);
+});
+
+test('web Gmail consent opens before async preparation and ignores foreign popup, origin and stale attempts', async () => {
+  const env = environment({ os: 'web' }), prepared = deferred(); let target;
+  const pending = env.auth.requestGmailConnection(redirect => { target = redirect; return prepared.promise; });
+  assert.equal(env.calls[0].kind, 'popup-open');
+  prepared.resolve('https://accounts.google.com/consent'); await flush();
+  const data = { type: 'trotter.gmail.callback', url: `${target}&gmail=connected` };
+  env.message(data, { origin: 'https://evil.invalid' });
+  env.message(data, { source: {} });
+  env.message({ ...data, url: data.url.replace('test-attempt', 'old-attempt') });
+  assert.equal(env.popup.closed, false);
+  env.message(data); await pending;
+  assert.equal(env.popup.closed, true);
+  assert.equal(env.travel.getStoredToken(), undefined);
+  assert(!env.calls.some(call => call.kind === 'navigate' || call.kind === 'secure-write'));
+  env.dispose();
+});
+
+test('web Gmail popup blocking and cancellation are recoverable without navigating the existing tab', async () => {
+  const env = environment({ os: 'web' });
+  env.globals.window.open = () => null;
+  await assert.rejects(env.auth.requestGmailConnection(async () => { throw Error('must not prepare'); }), /Allow pop-ups/);
+  env.globals.window.open = () => env.popup;
+  const pending = env.auth.requestGmailConnection(async () => 'https://accounts.google.com/consent');
+  env.auth.cancelGmailConnection(); await assert.rejects(pending, env.auth.GmailConnectionCanceled);
+  assert(!env.calls.some(call => call.kind === 'navigate'));
+  env.dispose();
+});
+
+test('web Gmail callback returns to its same-origin opener without consuming the login attempt or token', () => {
+  const env = environment({ os: 'web' }), sent = [];
+  env.globals.location.href = 'https://app.example.invalid/oauthredirect?flow=gmail&attempt=test-attempt#gmail=connected';
+  env.globals.window.opener = { postMessage: (...args) => sent.push(args) };
+  env.session.set('trotter.oauth.pending', 'untouched');
+  assert.equal(env.auth.consumeWebOAuthCallback(), undefined);
+  assert.equal(sent[0][1], 'https://app.example.invalid');
+  assert.equal(env.session.get('trotter.oauth.pending'), 'untouched');
+  assert.equal(env.travel.getStoredToken(), undefined);
+  env.dispose();
 });
 
 test('signed-out startup is empty and ignores embedded credentials', async () => {
@@ -222,6 +283,61 @@ test('web rejects unsolicited and unrelated callbacks and scrubs tokens', () => 
   assert.equal(env.travel.getStoredToken(), undefined);
 });
 
+function beginWebLogin(env) {
+  void env.auth.requestGoogleAuthToken('https://api.example.invalid');
+  return JSON.parse(env.session.get('trotter.oauth.pending')).redirect;
+}
+
+test('web identity login consumes only its current random attempt and preserves the pending planner invitation', () => {
+  const env=environment({os:'web'}), invitation=JSON.stringify({token:'a'.repeat(40),receivedAt:Date.now()});
+  env.session.set('trotter.pending-planner-invitation.v1',invitation);
+  const expected=beginWebLogin(env);
+  assert.equal(new URL(env.calls.find(call=>call.kind==='navigate').url).searchParams.get('app_redirect_uri'),expected);
+  assert.equal(new URL(expected).searchParams.get('attempt'),'test-attempt');
+  env.globals.location.href=`${expected}#token=matching-session`;
+  assert.equal(env.auth.consumeWebOAuthCallback(),'matching-session');
+  assert.equal(env.session.has('trotter.oauth.pending'),false);
+  assert.equal(env.session.get('trotter.pending-planner-invitation.v1'),invitation);
+  assert.throws(()=>env.auth.consumeWebOAuthCallback(),/Start sign-in/);
+  env.dispose();
+});
+
+test('web identity rejects a mismatched, missing, duplicated, legacy or expired attempt before accepting a token', () => {
+  for(const variant of ['mismatch','missing','duplicate','legacy','expired']) {
+    const env=environment({os:'web'}),expected=beginWebLogin(env);
+    env.globals.location.href=`${expected}#token=untrusted`;
+    if(variant==='mismatch') env.globals.location.href=env.globals.location.href.replace('test-attempt','different-attempt');
+    if(variant==='missing') env.globals.location.href='https://app.example.invalid/oauthredirect#token=untrusted';
+    if(variant==='duplicate') env.globals.location.href=`${expected}&attempt=test-attempt#token=untrusted`;
+    if(variant==='legacy') env.session.set('trotter.oauth.pending',JSON.stringify({redirect:'https://app.example.invalid/oauthredirect',createdAt:Date.now()}));
+    if(variant==='expired') env.session.set('trotter.oauth.pending',JSON.stringify({redirect:expected,createdAt:Date.now()-11*60*1000}));
+    assert.throws(()=>env.auth.consumeWebOAuthCallback(),/attempt|expired/,variant);
+    assert.equal(env.travel.getStoredToken(),undefined); assert.equal(env.session.has('trotter.oauth.pending'),false);
+    assert(env.calls.some(call=>call.kind==='clean-url')); env.dispose();
+  }
+});
+
+test('starting a newer web identity login rejects an older return and cancellation leaves invitations ready for retry', async () => {
+  const env=environment({os:'web'}),old=beginWebLogin(env),current=beginWebLogin(env);
+  assert.notEqual(old,current);
+  env.globals.location.href=`${old}#token=old-session`; assert.throws(()=>env.auth.consumeWebOAuthCallback(),/different attempt/);
+  const invitation=JSON.stringify({token:'b'.repeat(40),receivedAt:Date.now()}); env.session.set('trotter.pending-planner-invitation.v1',invitation);
+  const canceled=beginWebLogin(env); env.globals.location.href=`${canceled}&error=access_denied`;
+  env.render(); await flush();
+  assert.equal(env.render().authStatus,'signed-out'); assert.equal(env.render().status,'idle'); assert.equal(env.render().error,undefined);
+  assert.equal(env.session.get('trotter.pending-planner-invitation.v1'),invitation);
+  void env.render().retryAuth();
+  assert.notEqual(JSON.parse(env.session.get('trotter.oauth.pending')).redirect,canceled); env.dispose();
+});
+
+test('web identity server failure has a retry state without accepting credentials or clearing a pending invitation', async () => {
+  const env=environment({os:'web'}),expected=beginWebLogin(env);
+  env.session.set('trotter.pending-planner-invitation.v1','pending-invitation'); env.globals.location.href=`${expected}&error=oauth_failed`;
+  env.render(); await flush();
+  assert.equal(env.render().authStatus,'signed-out'); assert.equal(env.render().status,'error'); assert.match(env.render().error,/could not be completed/);
+  assert.equal(env.travel.getStoredToken(),undefined); assert.equal(env.session.get('trotter.pending-planner-invitation.v1'),'pending-invitation'); env.dispose();
+});
+
 test('cancel invalidates a late browser success instead of accepting its token', async () => {
   const env = environment();
   const browser = deferred();
@@ -235,7 +351,7 @@ test('cancel invalidates a late browser success instead of accepting its token',
 
 test('signed-in Gmail sync retains import polling and final trip refresh', async () => {
   const env = environment({ fetcher: async url => {
-    if (url.endsWith('/auth/me')) return response(200, { user_id: 1, name: 'Alex', email: 'alex@example.invalid' });
+    if (url.endsWith('/auth/me')) return response(200, { user_id: 1, name: 'Alex', email: 'alex@example.invalid', gmail_connected: true });
     if (url.endsWith('/ingest/gmail/import')) return response(200, { job_id: 'job-one' });
     if (url.endsWith('/ingest/jobs/job-one')) return response(200, { state: 'done', parsed_count: 1, segment_count: 1 });
     return response(200, []);
@@ -252,7 +368,7 @@ test('signed-in Gmail sync retains import polling and final trip refresh', async
 test('signing out during import launch prevents stale job polling', async () => {
   const pendingImport = deferred();
   const env = environment({ fetcher: async url => url.endsWith('/ingest/gmail/import') ? pendingImport.promise : response(200,
-    url.endsWith('/auth/me') ? { user_id: 1, name: 'Alex', email: 'alex@example.invalid' } : []) });
+    url.endsWith('/auth/me') ? { user_id: 1, name: 'Alex', email: 'alex@example.invalid', gmail_connected: true } : []) });
   env.render(); await flush(); await env.render().signIn(); await flush();
   const sync = env.render().syncFromGmail();
   await env.render().signOut();
@@ -276,7 +392,7 @@ test('endpoint country metadata survives missing map coordinates', () => {
 });
 
 const itinerary = (id, count) => ({ id, title: 'Synthetic trip', segments: Array.from({ length: count }, (_, n) => ({ id: id * 10 + n, dep_airport: 'LHR', arr_airport: 'SIN', dep_time: `2026-09-${String(n + 1).padStart(2, '0')}T10:00:00Z`, arr_time: `2026-09-${String(n + 1).padStart(2, '0')}T18:00:00Z` })) });
-const identityResponse = () => response(200, { user_id: 1, email: 'alex@example.invalid' });
+const identityResponse = () => response(200, { user_id: 1, email: 'alex@example.invalid', gmail_connected: true });
 async function signedInArchive() {
   const env = environment({ fetcher: async url => url.endsWith('/auth/me') ? identityResponse() : response(200, [itinerary(1, 1), itinerary(2, 1)]) });
   env.render(); await flush(); await env.render().signIn(); await flush();
@@ -356,8 +472,110 @@ test('Gmail import status is independent of archive refresh and clears on accoun
 const recoveryKey = (owner = 1) => `trotter.gmail-recovery.v1.${encodeURIComponent('https://api.example.invalid')}.${owner}`;
 const savedSession = token => JSON.stringify({ token, apiBaseUrl: 'https://api.example.invalid' });
 const recoveryValue = (overrides = {}) => JSON.stringify({ version: 1, apiBaseUrl: 'https://api.example.invalid', ownerId: 1, ...overrides });
-const identityOrTrips = url => response(200, url.endsWith('/auth/me') ? { user_id: 1, name: 'Alex Avery', email: 'owner@example.invalid' } : []);
+const identityOrTrips = url => response(200, url.endsWith('/auth/me') ? { user_id: 1, name: 'Alex Avery', email: 'owner@example.invalid', gmail_connected: true } : []);
 async function settleRecovery(env) { env.render(); await flush(); env.render(); await flush(); return env.render(); }
+
+const basicIdentity = (connected = false) => ({ user_id: 1, name: 'Alex Avery', email: 'owner@example.invalid', gmail_connected: connected, gmail_connection_status: connected ? 'connected' : 'not_connected' });
+function gmailConnectFetcher({ connected = () => false, trips = [], prepare } = {}) {
+  return async (url, init) => {
+    if (url.endsWith('/auth/me')) return response(200, basicIdentity(connected()));
+    if (url.endsWith('/auth/google/gmail/start')) {
+      const redirect = JSON.parse(init.body).app_redirect_uri;
+      return prepare ? prepare(redirect) : response(200, { url: `https://accounts.google.com/o/oauth2/v2/auth?app_redirect_uri=${encodeURIComponent(redirect)}` });
+    }
+    if (url.endsWith('/ingest/gmail/import')) return response(200, { job_id: 'first-gmail-scan' });
+    if (url.includes('/ingest/jobs/')) return response(200, { state: 'done' });
+    return response(200, trips);
+  };
+}
+
+test('basic Google account opens an empty archive without Gmail recovery, scan calls or scan errors', async () => {
+  const env = environment({ stored: savedSession('token-a'), plainStored: { [recoveryKey()]: recoveryValue({ activeJobId: 'old-job', activeStartedAt: new Date().toISOString(), outcome: 'error' }) }, fetcher: gmailConnectFetcher() });
+  const state = await settleRecovery(env);
+  assert.equal(state.authStatus, 'signed-in'); assert.equal(state.gmailConnected, false); assert.equal(state.status, 'idle');
+  assert.equal(state.gmailSyncStatus, 'unknown'); assert.equal(state.gmailSyncError, undefined); assert.equal(state.error, undefined);
+  assert.deepEqual(state.trips, []); assert.equal(state.profile.flights, 0);
+  await state.syncFromGmail();
+  assert(!env.calls.some(call => call.url?.includes('/ingest/')));
+  assert.equal(env.render().authStatus, 'signed-in'); assert.equal(env.render().status, 'idle');
+  env.dispose();
+});
+
+test('explicit Gmail connection keeps the same session and archive, then starts exactly one initial scan', async () => {
+  let connected = false;
+  const env = environment({ stored: savedSession('token-a'), fetcher: gmailConnectFetcher({ trips: [itinerary(1, 1)], connected: () => connected, prepare: redirect => { connected = true; return response(200, { url: `https://accounts.google.com/consent?app_redirect_uri=${encodeURIComponent(redirect)}` }); } }) });
+  await settleRecovery(env);
+  const revision = env.travel.getAuthRevision(), state = env.render();
+  const first = state.connectGmail(), second = state.connectGmail();
+  assert.equal(env.render().authStatus, 'signed-in'); assert.equal(env.render().gmailConnecting, true); assert.equal(env.render().trips.length, 1);
+  await Promise.all([first, second]); await flush();
+  assert.equal(env.render().gmailConnected, true); assert.equal(env.render().gmailSyncStatus, 'synced');
+  assert.equal(env.travel.getAuthRevision(), revision); assert.equal(env.travel.getStoredToken(), 'token-a');
+  assert.equal(env.calls.filter(call => call.url?.endsWith('/auth/google/gmail/start')).length, 1);
+  assert.equal(env.calls.filter(call => call.url?.endsWith('/ingest/gmail/import')).length, 1);
+  assert(!env.calls.some(call => call.kind === 'secure-write'));
+  env.dispose();
+});
+
+test('canceling Gmail while URL preparation is pending returns immediately and cannot launch a late browser', async () => {
+  const prepare = deferred();
+  const env = environment({ stored: savedSession('token-a'), fetcher: gmailConnectFetcher({ trips: [itinerary(1, 1)], prepare: () => prepare.promise }) });
+  await settleRecovery(env); const revision = env.travel.getAuthRevision();
+  const pending = env.render().connectGmail();
+  env.render().cancelGmailConnection(); await pending;
+  assert.equal(env.render().gmailConnecting, false); assert.equal(env.render().gmailConnectionError, undefined);
+  assert.equal(env.render().authStatus, 'signed-in'); assert.equal(env.render().trips.length, 1); assert.equal(env.travel.getAuthRevision(), revision);
+  prepare.resolve(response(200, { url: 'https://accounts.google.com/consent' })); await flush();
+  assert(!env.calls.some(call => call.kind === 'oauth' || call.url?.includes('/ingest/')));
+  env.dispose();
+});
+
+test('wrong-account or refused Gmail consent preserves login and archive without starting a scan', async () => {
+  for (const error of ['gmail_wrong_account', 'access_denied']) {
+    const env = environment({ stored: savedSession('token-a'), fetcher: gmailConnectFetcher({ trips: [itinerary(1, 1)] }) });
+    await settleRecovery(env); const revision = env.travel.getAuthRevision();
+    env.browserResult({ type: 'success', url: `trotterv2://oauthredirect?flow=gmail&attempt=test-attempt&error=${error}` });
+    await env.render().connectGmail();
+    assert.equal(env.render().authStatus, 'signed-in'); assert.equal(env.render().status, 'idle'); assert.equal(env.render().trips.length, 1);
+    assert.equal(env.travel.getAuthRevision(), revision); assert.equal(env.render().error, undefined);
+    if (error === 'access_denied') assert.equal(env.render().gmailConnectionError, undefined);
+    else assert.match(env.render().gmailConnectionError, /different Trotter account/);
+    assert(!env.calls.some(call => call.url?.includes('/ingest/'))); env.dispose();
+  }
+});
+
+test('sign-out during Gmail consent rejects late success without attaching Gmail or a scan to another account', async () => {
+  const consent = deferred();
+  const env = environment({ stored: savedSession('token-a'), fetcher: gmailConnectFetcher() });
+  await settleRecovery(env); env.browserResult(consent.promise);
+  const pending = env.render().connectGmail(); await flush(); await env.render().signOut(); await pending;
+  consent.resolve({ type: 'success', url: 'trotterv2://oauthredirect?flow=gmail&attempt=test-attempt&gmail=connected' }); await flush();
+  assert.equal(env.render().authStatus, 'signed-out'); assert.equal(env.render().gmailConnected, false);
+  assert(!env.calls.some(call => call.url?.includes('/ingest/'))); env.dispose();
+});
+
+test('an older archive identity response cannot undo a newly connected Gmail account', async () => {
+  const env = environment({ stored: savedSession('token-a'), fetcher: gmailConnectFetcher() }); await settleRecovery(env);
+  const oldIdentity = deferred(), scan = deferred(); let identityRequests = 0;
+  const connectedFetcher = gmailConnectFetcher({ connected: () => true });
+  env.fetcher((url, init) => url.endsWith('/auth/me') && ++identityRequests === 1 ? oldIdentity.promise : url.includes('/ingest/jobs/') ? scan.promise : connectedFetcher(url, init));
+  const refresh = env.render().refresh(), connecting = env.render().connectGmail(); await flush();
+  assert.equal(env.render().gmailConnected, true);
+  oldIdentity.resolve(response(200, basicIdentity(false))); await refresh;
+  assert.equal(env.render().gmailConnected, true); assert.equal(env.render().gmailSyncStatus, 'syncing');
+  scan.resolve(response(200, { state: 'done' })); await connecting;
+  assert.equal(env.render().gmailConnected, true); env.dispose();
+});
+
+test('a server request to reconnect Gmail stays separate from login and ordinary archive errors', async () => {
+  const env = await signedInArchive(); const revision = env.travel.getAuthRevision();
+  env.fetcher(async url => url.endsWith('/ingest/gmail/import') ? response(409, { detail: { code: 'gmail_connection_required', message: 'Reconnect Gmail to import your flights.' } }) : identityResponse());
+  await env.render().syncFromGmail();
+  const state = env.render();
+  assert.equal(state.gmailConnectionStatus, 'needs_reconnect'); assert.equal(state.gmailConnected, false);
+  assert.equal(state.authStatus, 'signed-in'); assert.equal(state.status, 'idle'); assert.equal(state.error, undefined); assert.equal(state.gmailSyncError, undefined);
+  assert.equal(state.trips.length, 2); assert.equal(env.travel.getAuthRevision(), revision); assert.match(state.gmailConnectionError, /Reconnect Gmail/); env.dispose();
+});
 
 test('auth retry repeats Google only without a token and verifies an existing token directly', async () => {
   const env=environment();await settleRecovery(env);
@@ -413,7 +631,7 @@ test('recovery never observes another account, server, malformed or expired job'
 
 test('late recovered job completion cannot overwrite the next account', async () => {
   const job=deferred();
-  const env=environment({stored:savedSession('token-a'),plainStored:{[recoveryKey()]:recoveryValue({activeJobId:'account-a-job',activeStartedAt:new Date().toISOString()})},fetcher:async(url,init)=>url.includes('/ingest/jobs/')?job.promise:response(200,url.endsWith('/auth/me')?{user_id:init.headers.Authorization==='Bearer token-b'?2:1,email:'owner@example.invalid'}:[])});
+  const env=environment({stored:savedSession('token-a'),plainStored:{[recoveryKey()]:recoveryValue({activeJobId:'account-a-job',activeStartedAt:new Date().toISOString()})},fetcher:async(url,init)=>url.includes('/ingest/jobs/')?job.promise:response(200,url.endsWith('/auth/me')?{user_id:init.headers.Authorization==='Bearer token-b'?2:1,email:'owner@example.invalid',gmail_connected:true}:[])});
   await settleRecovery(env);assert.equal(env.render().gmailSyncStatus,'syncing');await env.render().signOut();env.token('token-b');await env.render().signIn();await flush();env.render();job.resolve(response(200,{state:'done'}));await flush();
   assert.equal(env.render().accountId,2);assert.equal(env.render().gmailSyncStatus,'unknown');assert.equal(env.render().lastGmailSyncedAt,undefined);env.dispose();
 });
@@ -537,4 +755,79 @@ test('an identity response arriving after sign-out cannot restore native backgro
   identity.resolve(response(200, { user_id: 7, email: 'old@example.invalid' })); await flush();
   assert.equal(env.calls.filter(call => call.kind === 'native-share-session').length, 0);
   assert.equal(env.travel.getStoredToken(), undefined); env.dispose();
+});
+
+test('web reauthentication is bound to its popup and attempt without replacing the current session', async () => {
+  const env = environment({ os: 'web' }); let target;
+  await env.travel.storeAuthToken('existing');
+  const verification = env.auth.requestGoogleReauthentication(async redirect => { target = redirect; return 'https://accounts.google.com/o/oauth2/v2/auth'; });
+  await flush();
+  const data = { type: 'trotter.reauth.callback', url: `${target}#token=fresh` };
+  env.message(data, { origin: 'https://foreign.invalid' });
+  env.message(data, { source: {} });
+  env.message({ ...data, url: data.url.replace('test-attempt', 'old-attempt') });
+  assert.equal(env.popup.closed, false);
+  env.message(data); assert.equal(await verification, 'fresh');
+  assert.equal(env.travel.getStoredToken(), 'existing'); assert.equal(env.popup.closed, true); env.dispose();
+});
+
+test('canceling native verification during URL preparation never opens a late browser', async () => {
+  const env = environment(), prepared = deferred();
+  const verification = env.auth.requestGoogleReauthentication(() => prepared.promise);
+  env.auth.cancelGoogleAuthSession();
+  await assert.rejects(verification, env.auth.GoogleSignInCanceled);
+  prepared.resolve('https://accounts.google.com/o/oauth2/v2/auth'); await flush();
+  assert(!env.calls.some(call => call.kind === 'oauth')); env.dispose();
+});
+
+test('web reauth callback forwards only to its origin and scrubs token without consuming login state', () => {
+  const env = environment({ os: 'web' }), sent = [];
+  env.globals.location.href = 'https://app.example.invalid/oauthredirect?flow=reauth&attempt=test-attempt#token=fresh';
+  env.globals.window.opener = { postMessage: (...args) => sent.push(args) };
+  env.session.set('trotter.oauth.pending', 'untouched');
+  assert.equal(env.auth.consumeWebOAuthCallback(), undefined);
+  assert.equal(sent[0][0].type, 'trotter.reauth.callback'); assert.equal(sent[0][1], 'https://app.example.invalid');
+  assert(env.calls.some(call => call.kind === 'clean-url'));
+  assert.equal(env.session.get('trotter.oauth.pending'), 'untouched'); assert.equal(env.travel.getStoredToken(), undefined); env.dispose();
+});
+
+test('Apple provider signs in through verified identity before sharing credentials', async () => {
+  const env = environment({ os: 'ios', fetcher: async url => response(200,
+    url.endsWith('/apple/challenge') ? { challenge_id: 'challenge', nonce: 'server-nonce' }
+      : url.endsWith('/auth/apple') ? { access_token: 'apple-session', user_id: 7, email: 'relay@example.invalid' }
+      : url.endsWith('/auth/me') ? { user_id: 7, email: 'relay@example.invalid', auth_providers: ['apple'], gmail_connected: false } : []) });
+  env.render(); await flush(); await env.render().signInWithApple(); await flush();
+  assert.equal(env.render().accountId, 7); assert.deepEqual(env.render().authProviders, ['apple']);
+  assert.equal(env.travel.getStoredToken(), 'apple-session');
+  assert(env.calls.some(call => call.kind === 'native-share-session' && call.ownerId === 7)); env.dispose();
+});
+
+test('first Gmail connection for an Apple account verifies Apple and keeps its original app session', async () => {
+  let connected = false;
+  const env = environment({ os: 'ios', stored: JSON.stringify({ token: 'apple-session', apiBaseUrl: 'https://api.example.invalid' }), fetcher: async (url, init) => {
+    if (url.endsWith('/auth/apple/challenge')) return response(200, { challenge_id: 'reauth', nonce: 'fresh-nonce' });
+    if (url.endsWith('/auth/apple')) return response(200, { access_token: 'apple-fresh', user_id: 7, email: 'relay@example.invalid' });
+    if (url.endsWith('/auth/me')) return response(200, { user_id: 7, email: 'relay@example.invalid', auth_providers: connected ? ['apple', 'google'] : ['apple'], gmail_connected: connected });
+    if (url.endsWith('/auth/google/gmail/start')) {
+      assert.equal(init.headers.Authorization, 'Bearer apple-fresh'); connected = true;
+      return response(200, { url: `https://accounts.google.com/o/oauth2/v2/auth?app_redirect_uri=${encodeURIComponent(JSON.parse(init.body).app_redirect_uri)}` });
+    }
+    if (url.endsWith('/ingest/gmail/import')) return response(200, { job_id: 'scan' });
+    if (url.includes('/ingest/jobs/')) return response(200, { state: 'done' });
+    return response(200, []);
+  } });
+  env.render(); await flush(); await env.render().connectGmail(); await flush();
+  assert.equal(env.travel.getStoredToken(), 'apple-session'); assert.equal(env.render().accountId, 7);
+  assert.deepEqual(env.render().authProviders, ['apple', 'google']); assert.equal(env.render().gmailConnected, true); env.dispose();
+});
+
+test('canceling first Gmail enrollment while Apple challenge loads cannot open consent later', async () => {
+  const challenge = deferred();
+  const env = environment({ os: 'ios', stored: JSON.stringify({ token: 'apple-session', apiBaseUrl: 'https://api.example.invalid' }), fetcher: async url => url.endsWith('/auth/apple/challenge') ? challenge.promise
+    : response(200, url.endsWith('/auth/me') ? { user_id: 7, email: 'relay@example.invalid', auth_providers: ['apple'], gmail_connected: false } : []) });
+  env.render(); await flush(); const connect = env.render().connectGmail(); await flush(); env.render().cancelGmailConnection();
+  challenge.resolve(response(200, { challenge_id: 'canceled', nonce: 'unused' })); await connect; await flush();
+  assert.equal(env.render().gmailConnecting, false); assert.equal(env.render().gmailConnectionError, undefined);
+  assert(!env.calls.some(call => call.kind === 'oauth' || call.url?.endsWith('/auth/google/gmail/start')));
+  assert.equal(env.travel.getStoredToken(), 'apple-session'); env.dispose();
 });

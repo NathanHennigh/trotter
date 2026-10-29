@@ -43,11 +43,19 @@ mobile-v2/android/google-maps.properties
 mobile-v2/android/app/trotter-upload.keystore
 mobile-v2/android/app/*.jks
 
+# Generated iPhone project and local signing credentials; sources live in native-ios/plugins.
+/mobile-v2/ios/
+*.p8
+*.p12
+*.mobileprovision
+credentials.json
+
 # Local Android build outputs and downloaded build tooling
 artifacts/
 .tooling/
 deploy/home-server.env
 deploy/backups/
+deploy/downloads/
 deploy/secrets/*
 !deploy/secrets/README.md
 trotter-photo-curation/
@@ -76,3 +84,8 @@ Thumbs.db
 
 # Claude
 .claude/
+
+# Dedicated PC-to-Mac pipeline state (sources and examples remain tracked).
+.ios-remote/config.psd1
+.ios-remote/artifacts/
+.ios-remote/logs/

@@ -51,10 +51,9 @@ class DreamShareActivity : Activity() {
   private lateinit var shell: LinearLayout
   private lateinit var title: TextView
   private lateinit var detail: TextView
-  private lateinit var preview: TextView
   private lateinit var thumbnail: ImageView
-  private lateinit var checkmark: TextView
   private lateinit var open: TextView
+  private lateinit var addToTrip: TextView
   private lateinit var close: TextView
   private lateinit var accessibility: AccessibilityManager
   private val ink = Color.parseColor("#31576B")
@@ -77,7 +76,7 @@ class DreamShareActivity : Activity() {
       captured = savedInstanceState?.getBoolean("captured") ?: false,
       storageFailed = savedInstanceState?.getBoolean("storageFailed") ?: false,
       status = savedInstanceState?.getString("status") ?: "",
-      remainingMs = savedInstanceState?.getLong("remainingMs", 2200L) ?: 2200L,
+      remainingMs = savedInstanceState?.getLong("remainingMs", DreamShareReceiptPolicy.READING_MS) ?: DreamShareReceiptPolicy.READING_MS,
     ))
     confirmed = savedInstanceState?.getBoolean("confirmed") ?: false
     policy.accessibility(accessibility.isTouchExplorationEnabled, now())
@@ -112,11 +111,9 @@ class DreamShareActivity : Activity() {
         runOnUiThread {
           if (!isFinishing && !isDestroyed) {
             policy.storageFailed(now())
-            title.text = "Couldn’t save this reel"
-            detail.text = (error.cause ?: error).message ?: "Please try sharing it again."
-            preview.text = "Your other saves are safe."
+            showCopy(DreamShareReceiptCopy.forState("storage_failed"))
             close.isEnabled = true
-            open.visibility = View.GONE
+            open.isEnabled = true
             scheduleDismissal()
           }
         }
@@ -153,14 +150,13 @@ class DreamShareActivity : Activity() {
   private fun buildReceipt() {
     shell = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
-      setPadding(dp(18), dp(10), dp(12), dp(8))
-      background = shape(paper, 18, Color.parseColor("#DCE0D7"))
+      setPadding(dp(18), dp(4), dp(12), dp(4))
+      background = shape(paper, 14, Color.parseColor("#DCE0D7"))
       elevation = dp(2).toFloat()
     }
-    shell.addView(View(this).apply { background = shape(Color.parseColor("#C7CEC7"), 2); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
-      LinearLayout.LayoutParams(dp(28), dp(3)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(9) })
     val heading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-    heading.addView(text("TROTTER / DREAMS", 10f, muted).apply { letterSpacing = 0.13f }, LinearLayout.LayoutParams(0, -2, 1f))
+    heading.addView(text("T", 24f, serif = true).apply { typeface = Typeface.create(typeface, Typeface.ITALIC); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, LinearLayout.LayoutParams(dp(24), -2))
+    heading.addView(text("Trotter", 12f, muted), LinearLayout.LayoutParams(0, -2, 1f))
     close = text("×", 25f, muted).apply {
       gravity = Gravity.CENTER; contentDescription = "Dismiss save confirmation"; isEnabled = false
       isClickable = true; isFocusable = true
@@ -189,28 +185,35 @@ class DreamShareActivity : Activity() {
         @Suppress("DEPRECATION") override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
       })
     }
-    row.addView(thumbnail, LinearLayout.LayoutParams(dp(46), dp(58)).apply { marginEnd = dp(13) })
+    row.addView(thumbnail, LinearLayout.LayoutParams(dp(46), dp(52)).apply { marginEnd = dp(13) })
     val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    val titleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-    title = text("Saving reel…", 24f, serif = true).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
-    titleRow.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
-    checkmark = text("✓", 17f).apply { alpha = 0f; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
-    titleRow.addView(checkmark, LinearLayout.LayoutParams(dp(22), -2).apply { marginStart = dp(8) })
-    content.addView(titleRow)
-    detail = text("", 12f, muted).apply { minLines = 1; setLineSpacing(dp(2).toFloat(), 1f) }
+    title = text("Saving…", 17f).apply { typeface = Typeface.create(typeface, Typeface.BOLD); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
+    content.addView(title, LinearLayout.LayoutParams(-1, -2))
+    detail = text("Keeping your link.", 12f, muted).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; setLineSpacing(dp(2).toFloat(), 1f) }
     content.addView(detail, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
     row.addView(content, LinearLayout.LayoutParams(0, -2, 1f))
     shell.addView(row, LinearLayout.LayoutParams(-1, -2).apply { marginEnd = dp(10) })
-    preview = text("Instagram reel", 12f, muted).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
-    shell.addView(preview, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10); marginEnd = dp(12) })
 
-    open = text("View in Dreams", 13f).apply {
+    open = text("", 13f).apply {
       gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, dp(16), 0)
       isEnabled = false; isClickable = true; isFocusable = true
-      setOnClickListener { openDreams() }
+      setOnClickListener {
+        if (!policy.captured) dismissReceipt()
+        else if (receipt?.optString("status") == "failed") retryUpload()
+        else openDreams()
+      }
     }
     buttonRole(open)
-    shell.addView(open, LinearLayout.LayoutParams(-2, dp(44)))
+    val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+    addToTrip = text("Add to a trip", 13f).apply {
+      gravity = Gravity.CENTER_VERTICAL; isEnabled = false; isClickable = true; isFocusable = true
+      contentDescription = "Choose a trip to share this post with"
+      setOnClickListener { openDreams(planner = true) }
+    }
+    buttonRole(addToTrip)
+    actions.addView(addToTrip, LinearLayout.LayoutParams(0, dp(44), 1f))
+    actions.addView(open, LinearLayout.LayoutParams(-2, dp(44)))
+    shell.addView(actions)
     setContentView(shell)
     val width = minOf(resources.displayMetrics.widthPixels - dp(24), dp(420))
     window.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT)
@@ -221,28 +224,42 @@ class DreamShareActivity : Activity() {
     receipt = item
     val status = item.optString("status")
     policy.stored(status, now())
-    val post = item.optString("sourceUrl").contains("/p/")
-    title.text = if (post) "Post saved" else "Reel saved"
-    detail.text = when (status) {
-      "saved" -> "Saved to Dreams."
-      "sign_in" -> "Sign in to add it to your Dreams."
-      "failed" -> "Open Dreams to finish saving this reel."
-      else -> "Saved on this phone."
-    }
-    val caption = item.optString("sharedText").replace(Regex("https?://\\S+"), "").trim()
-    preview.text = caption.ifBlank { if (post) "Instagram post" else "Instagram reel" }
-    open.text = if (status == "sign_in") "Sign in to Trotter" else "View in Dreams"
+    showCopy(DreamShareReceiptCopy.forState(status, item.optString("sharedText")))
     open.isEnabled = true
+    addToTrip.isEnabled = true
     close.isEnabled = true
     if (!confirmed) {
       confirmed = true
-      if (motionEnabled()) {
-        checkmark.scaleX = 0.9f; checkmark.scaleY = 0.9f
-        checkmark.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(140).setInterpolator(easeOut).start()
-      } else checkmark.alpha = 1f
       if (!stopped) shell.performHapticFeedback(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY)
-    } else checkmark.alpha = 1f
+    }
     scheduleDismissal()
+  }
+
+  private fun showCopy(copy: DreamShareReceiptCopy) {
+    title.text = copy.title
+    detail.text = copy.detail
+    detail.visibility = if (copy.detail.isBlank()) View.GONE else View.VISIBLE
+    open.text = copy.action
+  }
+
+  private fun retryUpload() {
+    val id = receiptId ?: return
+    open.isEnabled = false
+    io.execute {
+      val result = runCatching {
+        DreamShareStore.retry(applicationContext, id)
+        DreamShareWorker.enqueue(applicationContext, id, restart = true)
+        DreamShareStore.receipt(applicationContext, id)
+      }
+      runOnUiThread {
+        if (!isFinishing && !isDestroyed && !closing) {
+          result.getOrNull()?.let { render(it) }
+          if (result.isFailure) detail.text = "Couldn’t retry yet. Please try again."
+          open.isEnabled = true
+          poll()
+        }
+      }
+    }
   }
 
   private fun scheduleDismissal() {
@@ -322,11 +339,12 @@ class DreamShareActivity : Activity() {
   @Suppress("DEPRECATION")
   override fun onBackPressed() { dismissReceipt() }
 
-  private fun openDreams() {
+  private fun openDreams(planner: Boolean = false) {
     val item = receipt ?: return
     if (closing) return
     val uri = Uri.Builder().scheme("trotterv2").authority("dreams")
       .appendQueryParameter("source_url", item.getString("sourceUrl")).appendQueryParameter("receipt_id", item.getString("id"))
+    if (planner) uri.appendQueryParameter("add_to_trip", "1")
     if (item.optInt("itemId") > 0) uri.appendQueryParameter("item_id", item.getInt("itemId").toString())
     startActivity(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri.build())
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))

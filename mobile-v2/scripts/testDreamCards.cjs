@@ -26,6 +26,8 @@ function host(exportName, items = [item]) {
     '../components/world-window/motion': { useReducedMotion: () => true, PressFeedback: 'Pressable', paperEase: noop },
     '../components/world-window/WorldWindowUI': Object.fromEntries(['WWButton', 'WWHeader', 'WWIcon', 'WWEmpty'].map(t => [t, t])),
     '../components/trotter/TrotterKit': { BottomNav: 'BottomNav' },
+    '../components/world-window/profile/ProfileAvatar': { ProfileAvatar: 'ProfileAvatar' },
+    '../components/world-window/planner/DreamTripPicker': { DreamTripPicker: 'DreamTripPicker' },
     '../components/world-window/dreams/DreamPlacesMap': { DreamPlacesMap: 'DreamPlacesMap' },
     '../components/world-window/dreams/DreamPhoto': { DreamPhoto: 'DreamPhoto' },
     '../components/world-window/dreams/CountryPostcard': { CountryPostcard: 'CountryPostcard' },
@@ -56,7 +58,7 @@ function host(exportName, items = [item]) {
 }
 function nodes(value, seen = new Set()) { if (!value || typeof value !== 'object' || seen.has(value)) return []; seen.add(value); return [value, ...Object.values(value).flatMap(child => nodes(child, seen))]; }
 const find = (tree, type) => nodes(tree).find(node => node.type === type);
-const action = (tree, label) => nodes(tree).find(node => node.props?.accessibilityLabel === label);
+const action = (tree, label) => nodes(tree).find(node => node.props?.accessibilityLabel === label || node.props?.label === label);
 const text = tree => nodes(tree).filter(node => node.type === 'Text').map(node => node.props.children.flat(Infinity).join(''));
 const countryProps = overrides => ({ title: 'Thailand', items: [item], topInset: 0, bottomInset: 20,
   loading: false, onBack: noop, onRefresh: noop, onSelect: noop, onLocateMissing: async () => {}, motion: false, ...overrides });
@@ -65,13 +67,56 @@ test('unidentified reels use recognizable source words without inventing a desti
   const h = host('PlaceRow'), { dreamCardTitle, dreamCardMeta } = h.model;
   const unknown = { ...item, placeName: undefined, city: undefined, country: undefined, category: 'unknown', caption: 'Deluxe room with view #fyp https://example.com', summary: '' };
   assert.equal(dreamCardTitle(unknown), 'Deluxe room with view'); assert.equal(dreamCardMeta(unknown), 'Saved reel');
-  assert.equal(dreamCardTitle({ ...unknown, caption: '🏜️' }), '🏜️');
+  assert.equal(dreamCardTitle({ ...unknown, caption: '🏜️' }), 'Saved reel');
   assert.equal(dreamCardTitle({ ...unknown, caption: '' }), 'Saved reel');
   assert.equal(dreamCardTitle({ ...unknown, caption: '#fyp #travel' }), 'Saved reel');
   assert.equal(dreamCardTitle({ ...item, caption: 'An unrelated line' }), item.placeName);
   assert.equal(dreamCardMeta(item), 'Café · Krabi');
   assert.equal(dreamCardMeta({ ...item, city: undefined, regionOrNeighborhood: 'South Thailand' }), 'Café · South Thailand');
   h.dispose();
+});
+
+test('social follow and bio promotions are secondary source copy, while real route instructions remain titles',()=>{
+ const h=host('PlaceRow'),{dreamCardTitle}=h.model;
+ const source={...item,placeName:undefined,city:undefined,country:'Morocco',category:'unknown',locationState:'source_details',summary:''};
+ for(const caption of [
+  'Follow @isabella.aroundtheworld for more daily travel inspiration and epic roadtrips! 🚗🏜️',
+  'Follow for more places worth saving.',
+  'Get the full travel guide — link in bio.',
+  'Find our itinerary through the link in our bio.',
+ ]){
+  assert.equal(dreamCardTitle({...source,caption}),'Inspiration in Morocco');
+  assert.equal(dreamCardTitle({...source,placeName:caption,caption}),'Inspiration in Morocco');
+ }
+ assert.equal(dreamCardTitle({...source,caption:'A quiet road through the Atlas Mountains. Follow @roadtrip.guide for more.'}),'A quiet road through the Atlas Mountains.');
+ assert.equal(dreamCardTitle({...source,caption:'Follow the coast to the hidden cove.'}),'Follow the coast to the hidden cove.');
+ assert.equal(dreamCardTitle({...source,placeName:'Follow the Sun Café',caption:'Follow @travel for more.'}),'Follow the Sun Café');
+ h.dispose();
+});
+
+test('long source titles truncate without splitting a non-BMP character into a replacement glyph',()=>{
+ const h=host('PlaceRow'),{dreamCardTitle}=h.model;
+ const prefix='A'.repeat(88),caption=prefix+'🚗'+'B'.repeat(12);
+ const saved={...item,placeName:undefined,caption,summary:''};
+ const title=dreamCardTitle(saved);
+ assert.equal(title,prefix+'🚗…');
+ assert(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(title));
+ assert.equal(dreamCardTitle({...saved,caption:'A'+ '🚗'.repeat(90)}),'A'+ '🚗'.repeat(90),'The limit counts Unicode characters, not UTF-16 halves');
+ assert.equal(saved.caption,caption,'Presentation never changes the saved source');h.dispose();
+});
+
+test('same-title saves from different posts retain their identity and expose their own stored descriptions',()=>{
+ const h=host('PlaceRow'),{repeatedDreamTitleIds,dreamCardExcerpt}=h.model;
+ const first={...item,id:'80',placeName:'Taghazout',city:undefined,country:'Morocco',sourceUrl:'https://instagram.com/reel/post-one',
+  locationState:'source_details',locationReason:'creator_link_required',summary:'A beautiful hideaway located above the ocean with stunning sunset views.'};
+ const second={...first,id:'85',sourceUrl:'https://instagram.com/reel/post-two',locationReason:'identity_not_shared',summary:'Boutique stays and Airbnb rentals with ocean views.'};
+ const sameSource={...first,id:'81',sourceUrl:'https://instagram.com/reel/post-one/?tracking=ignored'};
+ assert.deepEqual([...repeatedDreamTitleIds([first,second])],['80','85']);
+ assert.equal(repeatedDreamTitleIds([first,sameSource]).size,0,'Several entries from one post use their source group, not a false separate-source distinction');
+ assert.equal(dreamCardExcerpt(first),first.summary);assert.equal(dreamCardExcerpt(second),second.summary);
+ assert.equal(dreamCardExcerpt({...first,summary:'Saved from Instagram',caption:'Ocean views at sunset. Follow @creator for more.'}),'Ocean views at sunset.');
+ assert.equal(dreamCardExcerpt({...first,summary:'Taghazout',caption:'Comment LINK for the address.'}),'');
+ assert.equal(first.placeName,'Taghazout');assert.equal(second.placeName,'Taghazout');h.dispose();
 });
 
 test('cards have a single details action and a separate pin action only for a valid location', () => {
@@ -87,16 +132,16 @@ test('cards have a single details action and a separate pin action only for a va
   h.dispose();
 });
 
-test('Unsorted is a compact inbox above real country postcards without a redundant review destination', () => {
+test('Needs attention separates actionable saves from automatic organizing above country postcards', () => {
   const saves = [item, { ...item, id: '2', country: undefined, placeName: undefined, status: 'processing', sortingState: 'running' },
     { ...item, id: '3', country: undefined, status: 'needs_review', sortingState: 'needs_details' },
     { ...item, id: '4', country: undefined, status: 'needs_review', sortingState: 'unavailable' }];
   const h = host('DreamsScreen', saves); let tree = h.render({ active: 'dreams', onChange: noop });
   assert.deepEqual(find(tree, 'FlatList').props.data.map(board => board.title), ['Thailand']);
-  const inbox = action(tree, 'Unsorted, 3 saves. 1 sorting · 1 needs details · 1 couldn’t be read'); assert(inbox);
+  const inbox = action(tree, 'Needs attention, 2 saves'); assert(inbox);
   assert(!text(tree).some(value => /^Review \d/.test(value))); inbox.props.onPress(); tree = h.render();
   const collection = nodes(tree).find(node => typeof node.type === 'function' && node.type.name === 'CountryPlaces');
-  assert.equal(collection.props.title, 'Unsorted'); assert.equal(collection.props.items.length, 3);
+  assert.equal(collection.props.title, 'Needs attention'); assert.equal(collection.props.items.length, 2);
   collection.props.onBack(); tree = h.render(); assert.equal(find(tree, 'FlatList').props.data.length, 1); h.dispose();
 });
 
@@ -107,7 +152,7 @@ test('country card opens details directly while its pin selects the country map 
   const row = nodes(list.props.renderItem({ item: saved, index: 0 })).find(node => typeof node.type === 'function' && node.type.name === 'PlaceRow');
   row.props.onPress(); assert.deepEqual(selected, [['1', 'view']]);
   row.props.onShowMap(); tree = h.render(); assert.equal(find(tree, 'DreamPlacesMap').props.selectedId, '1');
-  assert.deepEqual(scrolls, [{ offset: 0, animated: false }]); assert.equal(selected.length, 1); h.dispose();
+  assert.deepEqual(scrolls, [], 'Switching to Map preserves the list scroll offset'); assert.equal(selected.length, 1); h.dispose();
 });
 
 test('the detail sheet owns multi-place reel navigation and returning preserves its country', () => {
@@ -117,8 +162,11 @@ test('the detail sheet owns multi-place reel navigation and returning preserves 
   let collection = nodes(tree).find(node => typeof node.type === 'function' && node.type.name === 'CountryPlaces');
   collection.props.onSelect('1', 'view'); tree = h.render(); const detail = find(tree, 'DreamEditor');
   assert.equal(detail.props.sourceCount, 2); detail.props.onShowSource(); tree = h.render();
-  assert(!find(tree, 'DreamEditor')); collection = nodes(tree).find(node => typeof node.type === 'function' && node.type.name === 'CountryPlaces');
-  assert.equal(collection.props.title, 'From this reel'); assert.equal(collection.props.items.length, 2);
+  assert(!find(tree, 'DreamEditor'));
+  const retained=nodes(tree).find(node=>typeof node.type==='function'&&node.type.name==='CountryPlaces'&&!node.props.sourceUrl);
+  assert.equal(retained.props.active,false);
+  collection = nodes(tree).find(node => typeof node.type === 'function' && node.type.name === 'CountryPlaces' && node.props.sourceUrl);
+  assert.equal(collection.props.title, 'Places from this post'); assert.equal(collection.props.items.length, 2);
   collection.props.onBack(); tree = h.render(); collection = nodes(tree).find(node => typeof node.type === 'function' && node.type.name === 'CountryPlaces');
   assert.equal(collection.props.title, 'Thailand'); h.dispose();
 });
@@ -128,7 +176,7 @@ test('source-limited saves keep their country, photo and recognizable title with
     caption: 'A little house by the sea', needsReview: true, sortingState: 'needs_details',
     locationState: 'source_details', locationReason: 'creator_link_required', locationStatus: 'not_found' };
   const h = host('PlaceRow'); const tree = h.render({ item: saved, onPress: noop, onShowMap: noop });
-  assert(text(tree).includes('A little house by the sea')); assert(text(tree).includes('Hotel · Serifos'));
+  assert(text(tree).includes('A little house by the sea')); assert(text(tree).includes('Inspiration · Serifos'));
   assert(text(tree).includes('Location not shared')); assert.equal(find(tree, 'DreamPhoto').props.item, saved);
   assert(!text(tree).some(value => /error|needs details|finding location|retry/i.test(value)));
   assert.equal(nodes(tree).filter(node => node.type === 'Pressable').length, 1); h.dispose();
@@ -142,8 +190,10 @@ test('a mixed collection retries only identifiable places and describes inspirat
   const unresolved = { ...item, id: '3', locationState: 'unresolved', locationReason: 'named_unresolved', locationStatus: 'not_found' };
   const deferred = { ...unresolved, id: '4', locationState: 'unavailable', locationRetryAt: '2099-01-01' };
   const calls = [], h = host('CountryPlaces'); let tree = h.render(countryProps({ items: [inspiration, unresolved, deferred], onLocateMissing: async ids => calls.push(ids) }));
-  assert(text(tree).includes('1 saved as inspiration · 2 not on map'));
+  action(tree,'Show map').props.onPress(); tree=h.render();
+  assert(nodes(tree).some(node=>node.props?.title==='Places first. Pins later.'));
+  action(tree,'Add locations').props.onPress(); tree=h.render();
   assert(!text(tree).some(value => /needs? a pin/.test(value)));
-  await action(tree, 'Find locations').props.onPress(); assert.deepEqual(calls, [['3']]);
-  tree = h.render(countryProps({ items: [inspiration, deferred] })); assert(!action(tree, 'Find locations')); h.dispose();
+  await action(tree, 'Retry available locations').props.onPress(); assert.deepEqual(calls, [['3']]);
+  tree = h.render(countryProps({ items: [inspiration, deferred] })); assert(!action(tree, 'Retry available locations')); h.dispose();
 });

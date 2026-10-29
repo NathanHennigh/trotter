@@ -990,7 +990,7 @@ export function BottomNav({
     { key: "trips", label: "Trips", icon: "trips" },
     { key: "passport", label: "Passport", icon: "passport" },
     { key: "dreams", label: "Dreams", icon: "dreams" },
-    { key: "profile", label: "Profile", icon: "profile" },
+    { key: "planner", label: "Planner", icon: "planner" },
   ];
   const navWidth = Platform.OS === "web" ? Math.min(width, 430) : width;
   const tabWidth = (navWidth - 16) / tabs.length;

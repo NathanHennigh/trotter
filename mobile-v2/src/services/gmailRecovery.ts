@@ -36,3 +36,9 @@ export function writeGmailRecovery(value: GmailRecovery): Promise<void> {
   writes = pending;
   return pending;
 }
+
+export function clearGmailRecovery(apiBaseUrl: string, ownerId: number): Promise<void> {
+  const pending = writes.catch(() => undefined).then(() => AsyncStorage.removeItem(key(apiBaseUrl, ownerId)));
+  writes = pending;
+  return pending;
+}

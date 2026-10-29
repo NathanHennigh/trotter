@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomNav } from "../components/trotter/TrotterKit";
 import { WWHeader } from "../components/world-window/WorldWindowUI";
+import { ProfileAvatar } from "../components/world-window/profile/ProfileAvatar";
 import { PassportBook } from "../components/world-window/passport/PassportBook";
 import { ActivityChart } from "../components/world-window/passport/ActivityChart";
 import {
@@ -197,7 +198,7 @@ export function PassportStatsScreen({
             paddingBottom: insets.bottom + layout.bottomNavHeight + 24,
           }}
         >
-          <WWHeader title="Passport" />
+          <WWHeader title="Passport" action={<ProfileAvatar onPress={() => onChange("profile")} />} />
           <View style={styles.content}>
             <CollectionScope year={year} onClear={clearYear} />
           </View>

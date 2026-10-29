@@ -4,15 +4,40 @@ import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, type Pressa
 export const paperEase = Easing.bezier(0.23, 1, 0.32, 1);
 
 let motionPreference: boolean | undefined;
+const motionListeners = new Set<(value: boolean) => void>();
+let motionSubscription: ReturnType<typeof AccessibilityInfo.addEventListener> | undefined;
+let motionGeneration = 0;
+function subscribeMotion(listener: (value: boolean) => void) {
+  motionListeners.add(listener);
+  listener(motionPreference ?? true);
+  if (!motionSubscription) {
+    const generation = ++motionGeneration;
+    let changedSinceRead = false;
+    const publish = (value: boolean) => {
+      if (generation !== motionGeneration) return;
+      motionPreference = value;
+      motionListeners.forEach(update => update(value));
+    };
+    motionSubscription = AccessibilityInfo.addEventListener("reduceMotionChanged", value => {
+      changedSinceRead = true;
+      publish(value);
+    });
+    void AccessibilityInfo.isReduceMotionEnabled().then(value => {
+      if (!changedSinceRead) publish(value);
+    }).catch(() => { if (!changedSinceRead) publish(true); });
+  }
+  return () => {
+    motionListeners.delete(listener);
+    if (!motionListeners.size) {
+      motionSubscription?.remove();
+      motionSubscription = undefined;
+      motionGeneration++;
+    }
+  };
+}
 export function useReducedMotion() {
   const [reduced, setReduced] = React.useState(motionPreference ?? true);
-  React.useEffect(() => {
-    let active = true;
-    const update = (value: boolean) => { motionPreference = value; if (active) setReduced(value); };
-    void AccessibilityInfo.isReduceMotionEnabled().then(update).catch(() => update(true));
-    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", update);
-    return () => { active = false; subscription.remove(); };
-  }, []);
+  React.useEffect(() => subscribeMotion(setReduced), []);
   return reduced;
 }
 
@@ -45,8 +70,8 @@ export function PressFeedback({ children, style, paper = false, onPressIn, onPre
     Animated.timing(amount, { toValue, duration: reduced ? 0 : toValue ? 65 : 150, easing: paperEase, useNativeDriver: true }).start();
   };
   return <AnimatedPressable {...props}
-    onPressIn={event => { setPressed(true); change(1); onPressIn?.(event); }}
-    onPressOut={event => { setPressed(false); change(0); onPressOut?.(event); }}
+    onPressIn={event => { if (typeof style === "function") setPressed(true); change(1); onPressIn?.(event); }}
+    onPressOut={event => { if (typeof style === "function") setPressed(false); change(0); onPressOut?.(event); }}
     style={[baseStyle, {
       opacity: amount.interpolate({ inputRange: [0, 1], outputRange: [opacity, opacity * (paper ? 0.96 : 0.72)] }),
       ...(paper && !reduced ? { transform: [...(Array.isArray(base?.transform) ? base.transform : []), { translateY: amount.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }) }] } : {}),

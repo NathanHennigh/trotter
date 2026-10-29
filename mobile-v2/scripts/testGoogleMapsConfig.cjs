@@ -6,7 +6,7 @@ const source = fs.readFileSync(path.join(__dirname, '../app.config.js'), 'utf8')
 const base = JSON.parse(fs.readFileSync(path.join(__dirname, '../app.json'), 'utf8')).expo;
 
 function config(file, env = {}) {
-  const sandbox = { module: { exports: {} }, __dirname: '/test/mobile', process: { env }, require(name) {
+  const sandbox = { module: { exports: {} }, __dirname: '/test/mobile', URL, process: { env }, require(name) {
     if (name === 'node:path') return path;
     if (name === 'node:fs') return { existsSync: () => file !== null, readFileSync: () => file };
     throw new Error(`Unexpected import: ${name}`);
@@ -20,7 +20,7 @@ assert.equal(absent.extra.googleMapsAndroidConfigured, false);
 assert.equal(absent.extra.googleMapsIosConfigured, false);
 assert.equal(JSON.stringify(absent).includes('SERVER-ONLY'), false);
 assert.equal(absent.android.package, base.android.package);
-assert.equal(absent.extra.eas.projectId, base.extra.eas.projectId);
+assert.equal(absent.extra.eas?.projectId, base.extra?.eas?.projectId);
 
 const local = config('# ignored\r\nandroidApiKey= android-restricted-key \r\niosApiKey=ios-restricted-key\r\n');
 assert.equal(local.android.config.googleMaps.apiKey, 'android-restricted-key');

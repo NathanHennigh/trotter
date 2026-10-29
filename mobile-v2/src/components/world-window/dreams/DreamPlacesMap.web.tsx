@@ -4,12 +4,14 @@ import { colors, fonts } from "../../../theme/trotterTheme";
 import { WWIcon } from "../WorldWindowUI";
 import { googleMapUrl, type DreamPlacesMapProps } from "./dreamMapModel";
 
-export function DreamPlacesMap({ points, overview, height = 240, placing }: DreamPlacesMapProps) {
+export function DreamPlacesMap({ points, overview, height = 240, placing, selectedId }: DreamPlacesMapProps) {
   const [error, setError] = React.useState(false);
-  const url = googleMapUrl(points, overview);
+  const selected = points.find(point => point.id === selectedId);
+  const displayed = selected ? [selected] : points;
+  const url = googleMapUrl(displayed, overview);
   return <View style={[s.frame, { minHeight: Math.min(height, 160) }]}>
     <WWIcon name="pin" size={24} />
-    <Text style={s.copy}>{placing ? "Use the Trotter app to place a pin, or paste a Google Maps link." : points.length === 1 && points[0].area ? "Explore this area in Google Maps." : "Explore these places in Google Maps."}</Text>
+    <Text style={s.copy}>{placing ? "Use the Trotter app to place a pin, or paste a Google Maps link." : displayed.length === 1 && displayed[0].area ? "Explore this area in Google Maps." : "Explore these places in Google Maps."}</Text>
     {url && <Pressable accessibilityRole="link" style={s.button} onPress={() => { setError(false); void Linking.openURL(url).catch(() => setError(true)); }}>
       <Text style={s.action}>Open Google Maps ↗</Text>
     </Pressable>}

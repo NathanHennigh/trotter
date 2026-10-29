@@ -29,6 +29,8 @@ import { getMobileVisualWidth } from "../utils/mobileLayout";
 import type { BottomNavTab, TripSummary } from "../data/trotterMock";
 import type { FlightRoute } from "../data/demoTravel";
 import { useTravelTrips } from "../services/travelTrips";
+import { ProfileAvatar } from "../components/world-window/profile/ProfileAvatar";
+import { HEADER_GEOMETRY } from "../components/world-window/headerGeometry";
 import { colors, fonts, layout } from "../theme/trotterTheme";
 
 type Props = {
@@ -60,7 +62,7 @@ export function HomeGlobeScreen({
   const visualWidth = getMobileVisualWidth(width), paperWidth = visualWidth - 48;
   const largeText = fontScale >= 1.35;
   const airportSize = Math.min(35, (paperWidth - 81) / (6 * .62 * fontScale));
-  const { trips, status, error, syncFromGmail, refresh } = useTravelTrips();
+  const { trips, status, error, syncFromGmail, refresh, gmailConnected, gmailConnecting, gmailConnectionError, connectGmail } = useTravelTrips();
   const reducedMotion = useReducedMotion();
   const [localYear, setLocalYear] = useState("All years");
   const year = filterYear ?? localYear;
@@ -163,56 +165,59 @@ export function HomeGlobeScreen({
       />
       <View
         pointerEvents="box-none"
-        style={[styles.top, { top: insets.top + 18 }]}
+        style={[styles.top, { top: insets.top + HEADER_GEOMETRY.topInset }]}
       >
         <View style={styles.controls}>
-          <View pointerEvents="none" style={styles.brand}>
-            <WWEmblem size={33} />
+          <View pointerEvents="box-none" style={styles.primaryControls}>
+            <View pointerEvents="none" style={styles.brand}>
+              <WWEmblem size={33} />
+            </View>
+            <PressFeedback
+              accessibilityRole="button"
+              accessibilityLabel="Filter flights by year"
+              onPress={() => setYearOpen(true)}
+              style={styles.year}
+            >
+              <Text style={styles.yearText} numberOfLines={1}>
+                {year}
+              </Text>
+              <WWIcon name="down" size={15} />
+            </PressFeedback>
           </View>
-          <PressFeedback
-            accessibilityRole="button"
-            accessibilityLabel="Filter flights by year"
-            onPress={() => setYearOpen(true)}
-            style={({ pressed }) => [styles.year]}
-          >
-            <Text style={styles.yearText} numberOfLines={1}>
-              {year}
-            </Text>
-            <WWIcon name="down" size={15} />
-          </PressFeedback>
-          <PressFeedback
-            accessibilityRole="button"
-            accessibilityLabel={
-              mapStyle === "classic"
-                ? "Switch to NASA imagery"
-                : "Switch to classic globe"
-            }
-            accessibilityState={{ selected: mapStyle === "nasa" }}
-            onPress={() => {
-              const next = mapStyle === "classic" ? "nasa" : "classic";
-              setMapStyle(next);
-              setTextureNotice(next === "nasa" ? "Satellite" : "Classic");
-              if (noticeTimer.current) clearTimeout(noticeTimer.current);
-              noticeTimer.current = setTimeout(() => setTextureNotice(undefined), 1500);
-            }}
-            style={({ pressed }) => [
-              styles.iconButton,
-              styles.textureButton,
-              mapStyle === "nasa" && styles.chosen,
-
-            ]}
-          >
-            <WWIcon name="globe" size={21} />
-          </PressFeedback>
+          <View pointerEvents="box-none" style={styles.accountControls}>
+            <PressFeedback
+              accessibilityRole="button"
+              accessibilityLabel={
+                mapStyle === "classic"
+                  ? "Switch to NASA imagery"
+                  : "Switch to classic globe"
+              }
+              accessibilityState={{ selected: mapStyle === "nasa" }}
+              onPress={() => {
+                const next = mapStyle === "classic" ? "nasa" : "classic";
+                setMapStyle(next);
+                setTextureNotice(next === "nasa" ? "Satellite" : "Classic");
+                if (noticeTimer.current) clearTimeout(noticeTimer.current);
+                noticeTimer.current = setTimeout(() => setTextureNotice(undefined), 1500);
+              }}
+              style={styles.iconButton}
+            >
+              <View style={[styles.textureFace, mapStyle === "nasa" && styles.chosen]}>
+                <WWIcon name="globe" size={20} />
+              </View>
+            </PressFeedback>
+            <ProfileAvatar onPress={() => onChange("profile")} />
+          </View>
         </View>
         {textureNotice ? <View pointerEvents="none" style={styles.textureNotice}><Text accessibilityLiveRegion="polite" style={styles.textureNoticeText}>{textureNotice}</Text></View> : null}
         {!trips.length && !busy ? (
           <View style={styles.import}>
             <Text style={styles.importTitle}>Add your flight history</Text>
             <Text style={styles.body}>
-              Find flight confirmations in your connected Gmail account.
+              {gmailConnected ? 'Find flight confirmations in your connected Gmail account.' : 'Connect Gmail to automatically import flights. Dreams and Planner work without email access.'}
             </Text>
-            <WWButton label="Import flights" onPress={syncFromGmail} />
+            <WWButton label={gmailConnected ? 'Import flights' : gmailConnecting ? 'Connecting…' : 'Connect Gmail'} disabled={gmailConnecting} onPress={() => { if (!gmailConnecting) void (gmailConnected ? syncFromGmail() : connectGmail()); }} />
+            {gmailConnectionError ? <Text style={styles.error} accessibilityRole="alert">{gmailConnectionError}</Text> : null}
             {error ? <Text style={styles.error}>{error}</Text> : null}
           </View>
         ) : null}
@@ -434,17 +439,18 @@ export function HomeGlobeScreen({
 }
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.paperSoft },
-  top: { position: "absolute", left: 24, right: 24 },
-  brand: { width: 48, height: 44, justifyContent: "center" },
+  top: { position: "absolute", left: HEADER_GEOMETRY.horizontalInset, right: HEADER_GEOMETRY.horizontalInset },
+  brand: { width: HEADER_GEOMETRY.touchSize, height: HEADER_GEOMETRY.touchSize, justifyContent: "center", flexShrink: 0 },
   controls: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    minHeight: 44,
-    gap: 12,
+    minHeight: HEADER_GEOMETRY.touchSize,
+    gap: 16,
   },
+  primaryControls: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 12 },
+  accountControls: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 },
   year: {
-    minHeight: 44,
+    minHeight: HEADER_GEOMETRY.touchSize,
     flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
@@ -457,17 +463,13 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   iconButton: {
-    height: 44,
-    minWidth: 44,
-    paddingHorizontal: 7,
-    flexDirection: "row",
-    gap: 7,
-    borderRadius: 22,
+    height: HEADER_GEOMETRY.touchSize,
+    width: HEADER_GEOMETRY.touchSize,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: colors.paperSoft,
   },
-  textureButton: { width: 48, borderWidth: 1, borderColor: colors.paperBorder },
+  textureFace: { width: HEADER_GEOMETRY.avatarSize, height: HEADER_GEOMETRY.avatarSize, borderRadius: HEADER_GEOMETRY.avatarSize / 2,
+    borderWidth: 1, borderColor: colors.paperBorder, backgroundColor: colors.paperSoft, alignItems: "center", justifyContent: "center" },
   chosen: { backgroundColor: colors.paperDeep },
   pressed: { opacity: 0.85 },
   textureNotice: { position: "absolute", top: 52, right: 0, backgroundColor: colors.paperSoft, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 4 },
