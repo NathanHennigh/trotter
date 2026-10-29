@@ -43,7 +43,6 @@ function screen(file, exportName, overrides = {}) {
     '../components/world-window/WorldWindowUI': { WWEmblem: 'WWEmblem' },
     '../components/world-window/planner/PlannerAuthPreview': { PlannerAuthPreview: 'PlannerAuthPreview' },
     '../components/world-window/profile/AppleSignInButton': { AppleSignInButton: 'AppleSignInButton' },
-    '../components/world-window/profile/DemoSignIn': { DemoSignIn: 'DemoSignIn' },
     '../theme/trotterTheme': { colors: {}, fonts: {} },
     '../../../theme/trotterTheme': { colors: {}, fonts: {} },
     '../WorldWindowUI': { WWButton: 'WWButton', WWHeader: 'WWHeader', WWIcon: 'WWIcon' },
@@ -119,19 +118,6 @@ test('configured Apple login follows Google and is separate from its Gmail note'
   assert(ordered.indexOf(google) < ordered.indexOf(apple));
   assert.equal(apple.props.appearance, 'outline');
   host.dispose();
-});
-
-test('demo form prevents duplicate submissions and cancelling abandons the pending sign-in', async () => {
-  const wait = deferred(); let submitted = 0, cancelled = 0;
-  const host = screen('screens/AuthScreen.tsx', 'AuthScreen', { account: { authStatus: 'signed-out', status: 'idle',
-    signInWithDemo: () => { submitted++; return wait.promise; }, signOut: () => { cancelled++; } } });
-  let tree = host.render();
-  nodes(tree).find(node => node.type === 'Pressable' && text(node).includes('Demo sign-in')).props.onPress();
-  tree = host.render(); let form = find(tree, 'DemoSignIn'); assert(form); assert.equal(form.props.busy, false);
-  form.props.onSubmit('demo@example.invalid', 'password'); form.props.onSubmit('demo@example.invalid', 'password');
-  form = find(host.render(), 'DemoSignIn'); assert.equal(form.props.busy, true); assert.equal(submitted, 1);
-  form.props.onClose(); assert.equal(cancelled, 1); assert(!find(host.render(), 'DemoSignIn'));
-  wait.resolve(); await flush(); host.dispose();
 });
 
 for (const closeVia of ['hardware', 'button']) test(`Dream editor ${closeVia} Close allows an in-flight save to finish and late success cannot close the next screen`, async () => {
