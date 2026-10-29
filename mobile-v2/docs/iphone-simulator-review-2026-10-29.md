@@ -44,10 +44,16 @@ Source fix: `8da6eee8eb79d26a26bbcf223335fcf8e4ba5f8e`.
 - Six iOS configuration checks and the Mac TypeScript check passed. A fresh native Release build compiled and was installed over the existing account session.
 - Simulator source snapshot: `cceb83d14b9b3ab00975f9c76ab21e5f7f958f39f8dec153786d6c5dc97c402d`. Artifact SHA256: `74379c643e8e38f80f527d8739a68d4769c5ec6b3fc5ed838b1aecfd115bc464`.
 - Evidence: `31-frame-barrier.png` (all routes), `32-flight-year.png` (2026), `33-globe-rotated.png`, `35-nasa-loaded.png`. Classic and All years were restored afterward. No diagnostic renderer is installed.
-- This simulator-specific follow-up is not included in TestFlight build 4 below; it will be included in the next native build. No additional upload was necessary to verify this preview fix.
+- This simulator-specific follow-up is not included in TestFlight build 4 below. It was subsequently included in build 5 when the owner requested external beta setup.
 
 ## Distribution build
 
 Version **0.1.2 (4)** compiled and passed the exact-IPA checks for both targets, signing, production configuration and the location-purpose string. IPA SHA256: `1639c13af7fc3eaa09dc0209e01fafa966dd7f85b0c55413c478d8c8b9f720b5`.
 
 Apple validation and upload succeeded with no errors. Delivery: `6dbdac36-b319-4118-944a-04327b1d5413`. Apple processing completed with `VALID`, `READY_FOR_BETA_TESTING` for internal testing and `READY_FOR_BETA_SUBMISSION` for external testing. The delivery record reported no errors or warnings. Evidence and the verified IPA are retained under `.ios-remote/artifacts/iphone-beta-build4-20261029/`. No friends have been invited and no public App Store release has been submitted.
+
+### Updated build for external beta setup
+
+Version **0.1.2 (5)** includes the frame-barrier follow-up, from source `11dbef5f89eeae8a7a444d081ef26a7c0cd6e5d5`. The Mac release checks and native build passed. Both signed targets and production configuration passed the exact-IPA gate. Apple archive validation and upload succeeded; delivery `1ee47616-c049-4575-84cc-f0e6eff6c402` is processing. IPA SHA256: `7779479ea11550f77be0cf8865c03254b43c56ecbd3f054925f7994f8c1ee95b`.
+
+External beta review has not been submitted. The upload key lacks external-group management permission; the owner's Apple browser sign-in, dedicated Google review account and review phone number are still pending. Tester-facing text and the supplied feedback email are saved in the private submission draft. No group or invitation link has been created. Evidence is under `.ios-remote/artifacts/iphone-beta-build5-20261029/`.

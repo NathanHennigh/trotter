@@ -134,10 +134,26 @@ Evidence is under `.ios-remote/artifacts/iphone-beta-build4-20261029/`.
 The simulator's software graphics backlog was subsequently fixed with a native
 asynchronous frame barrier, limited to Apple Software Renderer. Flight paths,
 year filters, rotation, tab returns and NASA imagery now update in the preview.
-That follow-up is installed in the simulator and will enter the next native
-release; build 4 does not include it. Physical graphics performance and the
+That follow-up is installed in the simulator and included in build 5 below;
+build 4 does not include it. Physical graphics performance and the
 unavailable software keyboard still prevent a complete device sign-off; see the
 review's explicit limitations.
+
+Version **0.1.2 (5)** was built from
+`11dbef5f89eeae8a7a444d081ef26a7c0cd6e5d5`. Mac release checks, native compilation,
+both signed-target checks and Apple's archive validation passed. Apple accepted
+the upload as delivery `1ee47616-c049-4575-84cc-f0e6eff6c402`; processing is pending.
+IPA SHA256: `7779479ea11550f77be0cf8865c03254b43c56ecbd3f054925f7994f8c1ee95b`.
+The verified IPA, receipts and prepared beta description/testing notes are under
+`.ios-remote/artifacts/iphone-beta-build5-20261029/` outside Git.
+
+External testing is not configured or submitted. The upload API key's Developer
+role cannot create an external beta group (Apple returned HTTP 403). The owner
+will sign into App Store Connect later and create a dedicated Google review
+account. Review email was supplied and saved in the private metadata draft;
+a contact phone number is still needed. Continue with that browser session to
+save test information, create Friends & Family, attach build 5, submit beta
+review and prepare its invitation link. No tester invitation has been sent.
 
 The certificate extractor uses `--extract-certificates=prefix`: with a separate
 argument, macOS treated the prefix as another code path and failed. This was a
