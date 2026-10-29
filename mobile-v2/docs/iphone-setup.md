@@ -149,19 +149,28 @@ IPA SHA256: `7779479ea11550f77be0cf8865c03254b43c56ecbd3f054925f7994f8c1ee95b`.
 The verified IPA, receipts and prepared beta description/testing notes are under
 `.ios-remote/artifacts/iphone-beta-build5-20261029/` outside Git.
 
-External beta review is not submitted. Build 5's What to Test notes are saved in
-App Store Connect. The required internal Core Team group exists, and the signed-in
-Zen session now has an external group named **beta testers**
-(`234f118c-62e0-4fd7-9291-bbc2d7a5fdd0`). It has no testers or builds yet.
+Build 5 was submitted for external beta review on October 29 at 21:44 UTC.
+Apple confirms `WAITING_FOR_BETA_REVIEW` / `WAITING_FOR_REVIEW`. The external
+**beta testers** group (`234f118c-62e0-4fd7-9291-bbc2d7a5fdd0`) contains build 5
+and no testers. A public invitation link is enabled with a 50-person limit,
+but Apple prevents joining until the group has an approved build. Automatic
+tester notifications are disabled; no invitations were sent.
+
+The dedicated Google review account completed normal sign-in and contains 12
+sample saved places, a seven-day editable Morocco itinerary and six clearly
+fictional flight segments across three sample trips. Only this account was
+seeded. Repeat application preserves existing sample content. Dreams images,
+the itinerary and the globe's six routes/four countries were checked in the web
+app; this does not replace native-device testing. The owner entered the password
+directly in Apple. Beta description, contact details, credentials, What to Test
+and notes explaining the sample data are saved. No password is stored in the
+repository or local evidence.
+
 The upload key's Developer role cannot save beta app information or manage
-external groups (HTTP 403); use the owner's Zen session for those steps.
-The beta description, feedback email, review contact name/email/phone and notes
-are prepared in the original Zen Test Information tab and in the private draft.
-They are not yet saved on Apple: with Sign-in required checked, Apple disables
-Save until the dedicated Google review username and password are entered.
-The owner is creating that account and will enter credentials directly in Apple.
-Then save the form, attach build 5 to beta testers, submit beta review, and prepare
-its invitation link once approved. No public link or tester invitation exists.
+external groups (HTTP 403); those steps used the owner's Zen session. Sanitized
+submission evidence and the invitation URL are in the private build-5 artifacts;
+the guarded sample fixture and validation results are under
+`.ios-remote/artifacts/review-account-20261029/`.
 
 The certificate extractor uses `--extract-certificates=prefix`: with a separate
 argument, macOS treated the prefix as another code path and failed. This was a
