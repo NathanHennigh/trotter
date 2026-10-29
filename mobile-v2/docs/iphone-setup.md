@@ -142,18 +142,26 @@ review's explicit limitations.
 Version **0.1.2 (5)** was built from
 `11dbef5f89eeae8a7a444d081ef26a7c0cd6e5d5`. Mac release checks, native compilation,
 both signed-target checks and Apple's archive validation passed. Apple accepted
-the upload as delivery `1ee47616-c049-4575-84cc-f0e6eff6c402`; processing is pending.
+the upload as delivery `1ee47616-c049-4575-84cc-f0e6eff6c402`. Processing completed
+with `VALID`, internal `READY_FOR_BETA_TESTING` and external
+`READY_FOR_BETA_SUBMISSION`; the delivery reported no errors or warnings.
 IPA SHA256: `7779479ea11550f77be0cf8865c03254b43c56ecbd3f054925f7994f8c1ee95b`.
 The verified IPA, receipts and prepared beta description/testing notes are under
 `.ios-remote/artifacts/iphone-beta-build5-20261029/` outside Git.
 
-External testing is not configured or submitted. The upload API key's Developer
-role cannot create an external beta group (Apple returned HTTP 403). The owner
-will sign into App Store Connect later and create a dedicated Google review
-account. Review email was supplied and saved in the private metadata draft;
-a contact phone number is still needed. Continue with that browser session to
-save test information, create Friends & Family, attach build 5, submit beta
-review and prepare its invitation link. No tester invitation has been sent.
+External beta review is not submitted. Build 5's What to Test notes are saved in
+App Store Connect. The required internal Core Team group exists, and the signed-in
+Zen session now has an external group named **beta testers**
+(`234f118c-62e0-4fd7-9291-bbc2d7a5fdd0`). It has no testers or builds yet.
+The upload key's Developer role cannot save beta app information or manage
+external groups (HTTP 403); use the owner's Zen session for those steps.
+The beta description, feedback email, review contact name/email/phone and notes
+are prepared in the original Zen Test Information tab and in the private draft.
+They are not yet saved on Apple: with Sign-in required checked, Apple disables
+Save until the dedicated Google review username and password are entered.
+The owner is creating that account and will enter credentials directly in Apple.
+Then save the form, attach build 5 to beta testers, submit beta review, and prepare
+its invitation link once approved. No public link or tester invitation exists.
 
 The certificate extractor uses `--extract-certificates=prefix`: with a separate
 argument, macOS treated the prefix as another code path and failed. This was a
