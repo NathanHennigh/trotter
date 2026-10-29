@@ -120,6 +120,20 @@ The IPA is 70,977,062 bytes; SHA256:
 `0ec68ce79a789b0b55a5e80a545677c3645e8cff60cc9a6ca7ee1eb3fa5b9486`.
 Evidence is preserved under `.ios-remote/artifacts/iphone-beta-build3-20261029/`.
 
+The October 29 signed-in simulator review is recorded in
+[iPhone simulator review](iphone-simulator-review-2026-10-29.md). Google sign-in,
+populated Dreams/Maps, trip wallets, Passport, profile and Planner editing were
+exercised. Safari-to-Trotter sharing of an existing Instagram post succeeded.
+Source `8da6eee8eb79d26a26bbcf223335fcf8e4ba5f8e` fixes a native iOS globe
+accessibility-range conversion error. Version **0.1.2 (4)** passed native
+compilation and signed-IPA validation, then uploaded as delivery
+`6dbdac36-b319-4118-944a-04327b1d5413`. Apple processing completed with `VALID`
+and `READY_FOR_BETA_TESTING`; the delivery record had no errors or warnings.
+IPA SHA256: `1639c13af7fc3eaa09dc0209e01fafa966dd7f85b0c55413c478d8c8b9f720b5`.
+Evidence is under `.ios-remote/artifacts/iphone-beta-build4-20261029/`.
+The simulator's software graphics backlog and unavailable software keyboard
+prevent a complete device sign-off; see the review's explicit limitations.
+
 The certificate extractor uses `--extract-certificates=prefix`: with a separate
 argument, macOS treated the prefix as another code path and failed. This was a
 verification-script fix; the verified IPA bytes did not change.
