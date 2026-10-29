@@ -84,7 +84,7 @@ Thumbs.db
 
 # EAS builds only the maintained mobile application in this repository.
 /*
-!/mobile-v2/
+!/mobile-v2
 !/.easignore
 /mobile-v2/ios/
 /mobile-v2/qa-screens/
