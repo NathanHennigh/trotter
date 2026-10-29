@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const { createSnapshot, gatherFiles } = require('./create-snapshot.cjs');
-const python = process.platform === 'win32' ? path.resolve(__dirname, '../backend/.venv/Scripts/python.exe') : 'python3';
+const localPython = path.resolve(__dirname, '../backend/.venv/Scripts/python.exe');
+const python = process.env.PYTHON || (process.platform === 'win32' && fs.existsSync(localPython) ? localPython : 'python3');
 const verifier = path.join(__dirname, 'verify-snapshot.py');
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trotter-snapshot-test-'));
@@ -13,7 +14,7 @@ function fixture() {
   write('mobile-v2/assets/icon.png', 'image-fixture'); write('mobile-v2/native-ios/Share.swift', 'import Foundation');
   write('mobile-v2/plugins/share.js', 'module.exports = x => x;');
   return { root, write, out: path.join(root, '.ios-remote/artifacts'), cleanup() {
-    assert.equal(path.dirname(root), fs.realpathSync(os.tmpdir())); assert(path.basename(root).startsWith('trotter-snapshot-test-'));
+    assert.equal(fs.realpathSync(path.dirname(root)), fs.realpathSync(os.tmpdir())); assert(path.basename(root).startsWith('trotter-snapshot-test-'));
     fs.rmSync(root, { recursive: true, force: true });
   } };
 }
