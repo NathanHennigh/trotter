@@ -45,6 +45,17 @@ test('missing credentials stay missing and cannot pass as a configured release',
   assert.throws(() => config({ APPLE_TEAM_ID: 'wrong' }), /10-character/);
 });
 
+test('the linked map SDK requires a location purpose even without location requests', () => {
+  for (const purpose of [undefined, '', '   ', false, 123]) {
+    const value = config(complete);
+    value.ios.infoPlist = { ...value.ios.infoPlist };
+    if (purpose === undefined) delete value.ios.infoPlist.NSLocationWhenInUseUsageDescription;
+    else value.ios.infoPlist.NSLocationWhenInUseUsageDescription = purpose;
+    assert.ok(checkIosReadiness(value, complete).errors.some(error => error.includes('NSLocationWhenInUseUsageDescription')));
+  }
+  assert.deepEqual(checkIosReadiness(config(complete), complete).errors, []);
+});
+
 test('unsafe API configuration never becomes an associated domain', () => {
   for (const url of ['http://api.example.test', 'https://user:pass@api.example.test', 'https://api.example.test?token=bad', 'https://api.example.test/#token=bad', 'https://api.example.test:8443']) {
     const env = { ...complete, EXPO_PUBLIC_TROTTER_API_URL: url };

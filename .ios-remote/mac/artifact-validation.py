@@ -205,6 +205,9 @@ def validate_signed_target(info, entitlements, profile, certificate, expected, e
         require(not entitlements.get("com.apple.developer.associated-domains") and not entitlements.get("com.apple.developer.applesignin"),
                 "Share extension unexpectedly inherits main-app sign-in/link capabilities")
     else:
+        location_purpose = info.get("NSLocationWhenInUseUsageDescription")
+        require(isinstance(location_purpose, str) and location_purpose.strip(),
+                "Main app is missing NSLocationWhenInUseUsageDescription required by the linked map SDK")
         require(entitlements.get("com.apple.developer.applesignin") == ["Default"]
                 and grants.get("com.apple.developer.applesignin") == ["Default"], "Sign in with Apple capability is missing")
         _, host = api_origin(expected["api_url"])

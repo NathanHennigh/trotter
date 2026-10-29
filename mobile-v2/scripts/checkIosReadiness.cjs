@@ -10,6 +10,10 @@ function checkIosReadiness(config, env, { local = false, simulator = false, root
     errors.push('Set APPLE_TEAM_ID for signing the app and Instagram share extension.');
   }
   if (!config.ios?.usesAppleSignIn) errors.push('Enable ios.usesAppleSignIn.');
+  const locationPurpose = config.ios?.infoPlist?.NSLocationWhenInUseUsageDescription;
+  if (typeof locationPurpose !== 'string' || !locationPurpose.trim()) {
+    errors.push('Set ios.infoPlist.NSLocationWhenInUseUsageDescription for the linked map SDK, even when user location is disabled.');
+  }
   if (config.ios?.supportsTablet !== false) errors.push('This release targets iPhone; disable unverified iPad support.');
   if (!config.extra?.googleMapsIosConfigured) errors.push('Set GOOGLE_MAPS_IOS_API_KEY to an iOS-restricted Maps SDK key.');
   const pluginNames = (config.plugins || []).map(plugin => Array.isArray(plugin) ? plugin[0] : plugin);

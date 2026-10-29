@@ -17,6 +17,9 @@ function assertIosProject(projectRoot) {
   assert.ok(app, 'One app target is required');
   assert.equal(extensions.length, 1, 'Prebuild must never duplicate the share extension');
   const appName = unquote(app[1].name);
+  const appInfo = plist.parse(fs.readFileSync(path.join(ios, appName, 'Info.plist'), 'utf8'));
+  assert.ok(typeof appInfo.NSLocationWhenInUseUsageDescription === 'string' && appInfo.NSLocationWhenInUseUsageDescription.trim(),
+    'The generated app must include NSLocationWhenInUseUsageDescription for the linked map SDK');
   const appEntitlements = plist.parse(fs.readFileSync(path.join(ios, appName, `${appName}.entitlements`), 'utf8'));
   const shareEntitlements = plist.parse(fs.readFileSync(path.join(ios, 'TrotterShare/TrotterShare.entitlements'), 'utf8'));
   assert.deepEqual(appEntitlements['com.apple.developer.applesignin'], ['Default']);
@@ -44,7 +47,7 @@ function assertIosProject(projectRoot) {
   assert.equal((delegate.match(/GMSServices.provideAPIKey/g) || []).length, 1);
   assert.equal((delegate.match(/\/\/ Trotter background share uploads/g) || []).length, 1);
   assert.match(delegate, /RCTLinkingManager.application\(application, continue: userActivity/);
-  console.log('Generated Xcode project: extension embedding, shared entitlements, Apple login, invitation links, fonts and Google Maps integration passed.');
+  console.log('Generated Xcode project: extension embedding, shared entitlements, Apple login, invitation links, fonts, location purpose and Google Maps integration passed.');
 }
 
 module.exports = { assertIosProject };

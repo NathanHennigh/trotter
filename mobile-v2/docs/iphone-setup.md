@@ -31,7 +31,7 @@ iPhone 17 Pro simulator (iOS 26.5) opens the welcome screen without the secure
 storage error or JavaScript launch errors. Native inbox tests, generated-file
 path checks and compiled simulator entitlements also pass.
 
-This is not a distribution-signed or device-tested iPhone release yet. Trotter has its own Expo project
+Distribution signing and TestFlight delivery subsequently passed; physical iPhone testing is still pending. Trotter has its own Expo project
 `@nathanhennigh/trotter-v2` (`99fd8582-8058-41da-b72f-bd09e78ac528`), linked in
 `app.json` on October 28, 2026. Apple account setup is now complete:
 
@@ -101,6 +101,13 @@ entitlement, version and production API checks. The compiled Google Maps key
 matches the configured iOS key; 13 privacy manifests are present, including the
 main app and Google Maps. Evidence and the signed IPA are preserved under
 `.ios-remote/artifacts/iphone-beta-20261029/` in the original project.
+
+Apple later emailed warning ITMS-90683 for build 2: the main app lacked
+`NSLocationWhenInUseUsageDescription`. The linked map SDK requires it even though
+Trotter currently disables user-location display and does not request location.
+The maintained Expo configuration now includes the purpose string. Readiness,
+generated-project and signed-IPA checks reject a missing or blank description;
+the share extension does not require it. This adds no location request or tracking.
 
 The certificate extractor uses `--extract-certificates=prefix`: with a separate
 argument, macOS treated the prefix as another code path and failed. This was a

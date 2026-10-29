@@ -191,7 +191,8 @@ class SigningTests(unittest.TestCase):
     def setUp(self):
         self.team = 'TESTTEAM01'; self.prefix = 'APPPRFX001'
         self.expected = {'team_id': self.team, 'app_id_prefix': self.prefix, 'api_url': 'https://api.example.invalid'}
-        self.info = {'CFBundleIdentifier': artifact.BUNDLE, 'TrotterShareKeychainGroup': self.prefix + '.' + artifact.BUNDLE + '.dreamshare'}
+        self.info = {'CFBundleIdentifier': artifact.BUNDLE, 'TrotterShareKeychainGroup': self.prefix + '.' + artifact.BUNDLE + '.dreamshare',
+                     'NSLocationWhenInUseUsageDescription': 'Show your position alongside saved places.'}
         self.signed = {'application-identifier': self.prefix + '.' + artifact.BUNDLE,
                        'com.apple.developer.team-identifier': self.team, 'get-task-allow': False,
                        'com.apple.security.application-groups': [artifact.GROUP],
@@ -208,6 +209,16 @@ class SigningTests(unittest.TestCase):
         artifact.validate_signed_target(self.info, self.signed, self.profile, b'actual-leaf', self.expected, **kwargs)
 
     def test_signed_app_and_different_valid_app_id_prefix(self): self.verify()
+
+    def test_main_app_requires_a_location_purpose_before_upload(self):
+        for purpose in (None, '', '   ', False, 123):
+            with self.subTest(purpose=purpose):
+                if purpose is None:
+                    self.info.pop('NSLocationWhenInUseUsageDescription', None)
+                else:
+                    self.info['NSLocationWhenInUseUsageDescription'] = purpose
+                with self.assertRaisesRegex(ValueError, 'NSLocationWhenInUseUsageDescription'):
+                    self.verify()
 
     def test_expired_debug_device_profiles_are_rejected(self):
         cases = [('ExpirationDate', datetime.now(timezone.utc) - timedelta(days=1)), ('ProvisionedDevices', ['phone']), ('ProvisionsAllDevices', True)]
@@ -241,6 +252,7 @@ class SigningTests(unittest.TestCase):
 
     def test_share_extension_has_own_profile_without_parent_capabilities(self):
         self.info['CFBundleIdentifier'] = artifact.EXTENSION
+        self.info.pop('NSLocationWhenInUseUsageDescription')
         for grant in (self.signed, self.profile['Entitlements']):
             grant['application-identifier'] = self.prefix + '.' + artifact.EXTENSION
             grant.pop('com.apple.developer.applesignin'); grant.pop('com.apple.developer.associated-domains')

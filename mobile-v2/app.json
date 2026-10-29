@@ -22,7 +22,8 @@
       "buildNumber": "1",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "Allow Trotter to show your position on the map alongside your saved places."
       },
       "privacyManifests": {
         "NSPrivacyTracking": false,
