@@ -24,7 +24,7 @@
     "test:ios-config": "node --test scripts/testIosConfiguration.cjs",
     "eas-build-post-install": "node scripts/checkIosReadiness.cjs --eas",
     "ios:verify-prebuild": "node scripts/verifyIosPrebuild.cjs",
-    "test:iphone": "node --test scripts/testIosConfiguration.cjs scripts/testIosShareExtension.cjs scripts/testNativeDreamShare.cjs scripts/testPlannerLinks.cjs scripts/testPlannerInvitationLanding.cjs scripts/testAppleAccounts.cjs scripts/testAccountControls.cjs scripts/testDeletedAccountCleanup.cjs && node scripts/testNativeAuth.js && node scripts/testProfileExperience.cjs && node scripts/testRecoveryScreens.cjs"
+    "test:iphone": "node --test scripts/testIosConfiguration.cjs scripts/testIosShareExtension.cjs scripts/testNativeDreamShare.cjs scripts/testPlannerLinks.cjs scripts/testPlannerInvitationLanding.cjs scripts/testAppleAccounts.cjs scripts/testAccountControls.cjs scripts/testDeletedAccountCleanup.cjs scripts/testGlFrameBarrier.cjs && node scripts/testNativeAuth.js && node scripts/testProfileExperience.cjs && node scripts/testRecoveryScreens.cjs"
   },
   "expo": {
     "doctor": {

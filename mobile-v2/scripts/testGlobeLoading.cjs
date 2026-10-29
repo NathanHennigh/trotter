@@ -91,7 +91,8 @@ test('failed asset resolutions do not poison the next retry and discovered dimen
   await h.load(1); await h.load(1); assert.equal(h.counts().copies, 2); assert.equal(h.counts().sizeReads, 1);
 });
 
-function globeHarness() {
+function globeHarness(software = false) {
+  const presentations = [];
   const slots = [], pending = [], renderers = [], frames = new Map(), nativeEvents = new Map(); let cursor = 0, effects = [], frameId = 0, props, tree;
   const same = (a, b) => a && b && a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
   const React = { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
@@ -112,6 +113,9 @@ function globeHarness() {
       AppState: { currentState: 'active', addEventListener: (event, callback) => { nativeEvents.set(event, callback); return { remove() { nativeEvents.delete(event); } }; } },
       AccessibilityInfo: { isReduceMotionEnabled: async () => false, addEventListener: () => ({ remove() {} }) } };
     if (name === 'expo-gl') return { GLView: 'GLView' };
+    if (name === 'expo-modules-core') return { NativeModulesProxy: { ExponentGLObjectManager: {
+      trotterWaitForFrameAsync: id => new Promise((resolve, reject) => presentations.push({ id, resolve, reject })),
+    } } };
     if (name.includes('expoThree')) return { ExpoRenderer: Renderer };
     if (name === './globeAssets') return { globeFailureDetails: assetHarness().globeFailureDetails, loadGlobeBaseTextures: (_sources, signal) => new Promise((resolve, reject) => pending.push({ signal, resolve, reject })), loadGlobeTexture: async () => texture() };
     if (name === './globe-geography') return { globeCountries: [], sunPosition: () => ({ lat: 0, lon: 0 }) };
@@ -122,15 +126,50 @@ function globeHarness() {
     throw Error(name);
   }, { requestAnimationFrame: callback => { const id = ++frameId; frames.set(id, callback); return id; }, cancelAnimationFrame: id => frames.delete(id), console: { warn() {}, info() {} } });
   const render = next => { props = next ?? props; cursor = 0; effects = []; tree = api.WorldWindowGlobe(props); effects.forEach(fn => fn()); return tree; };
-  const gl = () => ({ pixelStorei() {}, drawingBufferWidth: 390, drawingBufferHeight: 800, getParameter: () => 4096, endFrameEXP() {} });
+  const gl = () => ({ contextId: 7, RENDERER: 0x1F01, MAX_TEXTURE_SIZE: 0x0D33, pixelStorei() {}, drawingBufferWidth: 390, drawingBufferHeight: 800,
+    getParameter: key => key === 0x1F01 ? software ? 'Apple Software Renderer' : 'Apple GPU' : 4096, endFrameEXP() {} });
   const textures = () => ({ day: texture(), night: texture(), index: texture() });
-  return { pending, renderers, frames, render, textures, gl, initial: { active: true, routes: [], visited: [], mapStyle: 'classic', cycle: false, onClear() {}, onRoute() {}, onCountry() {} },
+  return { presentations, pending, renderers, frames, render, textures, gl, initial: { active: true, routes: [], visited: [], mapStyle: 'classic', cycle: false, onClear() {}, onRoute() {}, onCountry() {} },
     step(time = 16) { const [id, callback] = frames.entries().next().value; frames.delete(id); callback(time); },
     unmount: () => slots.forEach(slot => slot?.cleanup?.()),
     background: state => nativeEvents.get('change')?.(state),
   };
 }
 function find(tree, type) { if (!tree || typeof tree !== 'object') return undefined; if (Array.isArray(tree)) return tree.map(node => find(node, type)).find(Boolean); return tree.type === type ? tree : find(tree.props.children, type); }
+test('software rendering waits asynchronously for one native frame, including rapid tab returns', async () => {
+  const h = globeHarness(true), view = h.render(h.initial);
+  const creating = find(view, 'GLView').props.onContextCreate(h.gl());
+  h.pending.shift().resolve(h.textures()); await creating; h.step();
+  assert.equal(h.renderers[0].draws, 1); assert.equal(h.frames.size, 0);
+  assert.equal(h.presentations.length, 1); assert.equal(h.presentations[0].id, 7);
+  h.render({ ...h.initial, active: false }); h.render(h.initial);
+  h.background('background'); h.background('active');
+  assert.equal(h.frames.size, 0, 'Returning must not queue a second frame while the first is drawing');
+  h.presentations.shift().resolve(true); await Promise.resolve();
+  assert.equal(h.frames.size, 1); h.step(32); assert.equal(h.renderers[0].draws, 2);
+  h.render({ ...h.initial, active: false }); h.presentations.shift().resolve(true); await Promise.resolve();
+  assert.equal(h.frames.size, 0, 'A completed background frame must not restart the hidden globe');
+  h.render(h.initial); assert.equal(h.frames.size, 1); h.step(48);
+  h.unmount(); h.presentations.shift().reject(Error('Context was removed')); await Promise.resolve();
+  assert.equal(h.frames.size, 0); assert.equal(h.renderers[0].disposals, 1);
+});
+test('hardware graphics retain their RAF path without waiting on the simulator barrier', async () => {
+  const h = globeHarness(), view = h.render(h.initial);
+  const creating = find(view, 'GLView').props.onContextCreate(h.gl());
+  h.pending.shift().resolve(h.textures()); await creating;
+  h.step(); h.step(32); h.step(48);
+  assert.equal(h.renderers[0].draws, 3); assert.equal(h.presentations.length, 0);
+  assert.equal(h.frames.size, 1); h.unmount();
+});
+test('a failed software frame uses the existing bounded context recovery', async () => {
+  const h = globeHarness(true), view = h.render(h.initial);
+  const creating = find(view, 'GLView').props.onContextCreate(h.gl());
+  h.pending.shift().resolve(h.textures()); await creating; h.step();
+  h.presentations.shift().reject(Error('Native context unavailable')); await Promise.resolve();
+  const recovered = h.render();
+  assert.equal(find(recovered, 'GLView').props.key, 1);
+  assert.equal(h.frames.size, 0); assert.equal(h.renderers[0].disposals, 1); h.unmount();
+});
 test('base loading gates first draw and tab/background return reuses the same renderer and textures', async () => {
   const h = globeHarness(); let view = h.render(h.initial); view.props.onLayout({ nativeEvent: { layout: { width: 390, height: 800 } } });
   const first = find(view, 'GLView'), creating = first.props.onContextCreate(h.gl()); assert.equal(h.frames.size, 0);

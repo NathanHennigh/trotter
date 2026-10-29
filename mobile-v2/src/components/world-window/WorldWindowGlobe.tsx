@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { GLView } from "expo-gl";
+import { NativeModulesProxy } from "expo-modules-core";
 import * as THREE from "three";
 import { ExpoRenderer } from "../../lib/expoThree";
 import { globeFailureDetails, loadGlobeBaseTextures, loadGlobeTexture } from "./globeAssets";
@@ -545,6 +546,14 @@ export function WorldWindowGlobe(props: Props) {
         stage = 'renderer';
         const renderer = new ExpoRenderer({ gl, antialias: true });
         resources.push(() => renderer.dispose());
+        const manager = NativeModulesProxy.ExponentGLObjectManager;
+        // Simulator OpenGL is CPU-rendered. Keep at most one frame queued there;
+        // physical-device GPUs retain the ordinary full-resolution RAF path.
+        const waitForFrame = typeof manager?.trotterWaitForFrameAsync === 'function' &&
+          String(gl.getParameter(gl.RENDERER)) === 'Apple Software Renderer'
+          ? () => manager.trotterWaitForFrameAsync(gl.contextId) as Promise<unknown>
+          : undefined;
+        let waitingForFrame = false;
         // Expo's drawing buffer already includes device pixel density. Do not
         // replace it with layout points or multiply by PixelRatio a second time.
         let bufferWidth = gl.drawingBufferWidth,
@@ -711,6 +720,12 @@ void main(){
           cycleStart: number | undefined;
         const portNight = new THREE.Color("#fbd3a0"),
           portDay = new THREE.Color("#e5bc8d");
+        const nextFrame = () => {
+          waitingForFrame = false;
+          if (isCurrent() && context.current?.renderer === renderer &&
+              foreground.current && live.current.active && !frame.current)
+            frame.current = requestAnimationFrame(draw);
+        };
         const draw = (time: number) => {
           frame.current = 0;
           if (!isCurrent() || !foreground.current || !live.current.active)
@@ -841,13 +856,13 @@ void main(){
           if (!presented) console.info(`[WorldWindowGlobe] first-frame generation=${ownGeneration}`);
           presented = true;
           stage = 'render';
-          if (
-            isCurrent() &&
-            context.current?.renderer === renderer &&
-            foreground.current &&
-            live.current.active
-          )
-            frame.current = requestAnimationFrame(draw);
+          if (waitForFrame) {
+            waitingForFrame = true;
+            waitForFrame().then(nextFrame, error => {
+              waitingForFrame = false;
+              textureError(error);
+            });
+          } else nextFrame();
           } catch (error) { textureError(error); }
         };
         pauseRendering.current = () => {
@@ -863,6 +878,7 @@ void main(){
             mounted.current &&
             foreground.current &&
             live.current.active &&
+            !waitingForFrame &&
             !frame.current
           ) {
             previous = 0;

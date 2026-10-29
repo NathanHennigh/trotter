@@ -52,6 +52,7 @@ new Function(
   if (request === "react-native")
     return { StyleSheet: { create: (styles) => styles } };
   if (request === "expo-gl" || request.includes("expoThree")) return {};
+  if (request === "expo-modules-core") return { NativeModulesProxy: {} };
   if (request === "./globeAssets") return {};
   if (request.includes("trotterTheme")) return { colors: {}, fonts: {} };
   if (request === "./globe-geography") return geography;

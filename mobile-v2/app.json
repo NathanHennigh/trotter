@@ -13,7 +13,8 @@
       "expo-secure-store",
       "expo-web-browser",
       "expo-apple-authentication",
-      "./plugins/withTrotterShareExtension"
+      "./plugins/withTrotterShareExtension",
+      "./plugins/withTrotterGlFrameBarrier"
     ],
     "ios": {
       "supportsTablet": false,

@@ -131,8 +131,13 @@ compilation and signed-IPA validation, then uploaded as delivery
 and `READY_FOR_BETA_TESTING`; the delivery record had no errors or warnings.
 IPA SHA256: `1639c13af7fc3eaa09dc0209e01fafa966dd7f85b0c55413c478d8c8b9f720b5`.
 Evidence is under `.ios-remote/artifacts/iphone-beta-build4-20261029/`.
-The simulator's software graphics backlog and unavailable software keyboard
-prevent a complete device sign-off; see the review's explicit limitations.
+The simulator's software graphics backlog was subsequently fixed with a native
+asynchronous frame barrier, limited to Apple Software Renderer. Flight paths,
+year filters, rotation, tab returns and NASA imagery now update in the preview.
+That follow-up is installed in the simulator and will enter the next native
+release; build 4 does not include it. Physical graphics performance and the
+unavailable software keyboard still prevent a complete device sign-off; see the
+review's explicit limitations.
 
 The certificate extractor uses `--extract-certificates=prefix`: with a separate
 argument, macOS treated the prefix as another code path and failed. This was a

@@ -102,6 +102,7 @@ function environment(trips = []) {
       if (name === "react-native") return RN;
       if (name === "three") return require("three");
       if (name === "expo-gl") return { GLView: "GLView" };
+      if (name === "expo-modules-core") return { NativeModulesProxy: {} };
       if (name === "react-native-safe-area-context")
         return { useSafeAreaInsets: () => ({ top: 24, bottom: 20 }) };
       if (name.endsWith("expoThree")) return {};
