@@ -109,6 +109,16 @@ The maintained Expo configuration now includes the purpose string. Readiness,
 generated-project and signed-IPA checks reject a missing or blank description;
 the share extension does not require it. This adds no location request or tracking.
 
+The corrected source is `c4de3efb61f497f7491ff1565cec3591ccd703da`. Mac validation
+and native compilation passed for **0.1.2 (3)**. The exported main-app plist was
+read back and matched the configured purpose exactly; the updated IPA gate also
+correctly rejected build 2 for the missing key. Build 3 passed signing and Apple
+pre-upload validation, then uploaded successfully as delivery
+`93140d20-ba2a-4750-a9f7-3060d7caefa8`. Apple processing is pending.
+The IPA is 70,977,062 bytes; SHA256:
+`0ec68ce79a789b0b55a5e80a545677c3645e8cff60cc9a6ca7ee1eb3fa5b9486`.
+Evidence is preserved under `.ios-remote/artifacts/iphone-beta-build3-20261029/`.
+
 The certificate extractor uses `--extract-certificates=prefix`: with a separate
 argument, macOS treated the prefix as another code path and failed. This was a
 verification-script fix; the verified IPA bytes did not change.
