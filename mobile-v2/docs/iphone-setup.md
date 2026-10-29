@@ -114,7 +114,8 @@ and native compilation passed for **0.1.2 (3)**. The exported main-app plist was
 read back and matched the configured purpose exactly; the updated IPA gate also
 correctly rejected build 2 for the missing key. Build 3 passed signing and Apple
 pre-upload validation, then uploaded successfully as delivery
-`93140d20-ba2a-4750-a9f7-3060d7caefa8`. Apple processing is pending.
+`93140d20-ba2a-4750-a9f7-3060d7caefa8`. Apple processing completed with `VALID`
+and `READY_FOR_BETA_TESTING`; its delivery status reported no errors or warnings.
 The IPA is 70,977,062 bytes; SHA256:
 `0ec68ce79a789b0b55a5e80a545677c3645e8cff60cc9a6ca7ee1eb3fa5b9486`.
 Evidence is preserved under `.ios-remote/artifacts/iphone-beta-build3-20261029/`.
