@@ -489,12 +489,17 @@ test("accessibility actions zoom, rotate, browse every repeated flight, pick cou
   const action = (name) => {
     tree.props.onAccessibilityAction({ nativeEvent: { actionName: name } });
     tree = render();
+    for (const key of ["min", "max", "now"]) {
+      assert.ok(Number.isInteger(tree.props.accessibilityValue[key]), `${key} must cross the native Fabric bridge as an integer`);
+    }
   };
   assert.equal(tree.props.accessibilityRole, "adjustable");
+  assert.deepEqual(tree.props.accessibilityValue, { min: 100, max: 480, now: 100, text: "1.0 times zoom" });
   for (let i = 0; i < 20; i++) action("increment");
-  assert.equal(tree.props.accessibilityValue.now, 4.8);
+  assert.equal(tree.props.accessibilityValue.now, 480);
+  assert.equal(tree.props.accessibilityValue.text, "4.8 times zoom");
   for (let i = 0; i < 20; i++) action("decrement");
-  assert.equal(tree.props.accessibilityValue.now, 1);
+  assert.equal(tree.props.accessibilityValue.now, 100);
   const rotation = env.refs.find(
       (r) =>
         r.current &&

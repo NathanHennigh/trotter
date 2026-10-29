@@ -892,9 +892,11 @@ void main(){
       accessibilityLabel={`Travel globe. ${props.routes.length} flights, ${props.visited.length} visited countries${props.selectedRouteId ? ". Flight selected" : props.selectedCountryCode ? ". Country selected" : ""}`}
       accessibilityHint="Use accessibility actions to zoom, rotate, select flights or countries, and clear selection. Selected flights open in the ticket below."
       accessibilityValue={{
-        min: 1,
-        max: 4.8,
-        now: accessibleZoom,
+        // Fabric's native range requires integers. Keep the spoken zoom in
+        // multiples while exposing its numeric range as whole percentages.
+        min: 100,
+        max: 480,
+        now: Math.round(accessibleZoom * 100),
         text: `${accessibleZoom.toFixed(1)} times zoom`,
       }}
       accessibilityActions={[
