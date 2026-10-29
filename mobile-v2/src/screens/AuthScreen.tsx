@@ -16,7 +16,6 @@ import { colors, fonts } from "../theme/trotterTheme";
 import { PlannerAuthPreview } from "../components/world-window/planner/PlannerAuthPreview";
 import { AppleSignInButton } from "../components/world-window/profile/AppleSignInButton";
 import { isAppleSignInEnabled } from "../services/appleSignInAvailability";
-import { DemoSignIn } from "../components/world-window/profile/DemoSignIn";
 
 export function SessionRestoringScreen({ sourceUrl }: { sourceUrl?: string }) {
   const insets = useSafeAreaInsets();
@@ -43,18 +42,9 @@ export function AuthScreen({ flightInvitation = false, plannerInvitationToken, o
 } = {}) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const { authStatus, status, error, signIn, signInWithApple, signInWithDemo, signOut, signOutPending, retryAuth } =
+  const { authStatus, status, error, signIn, signInWithApple, signOut, signOutPending, retryAuth } =
     useTravelTrips();
   const [clearing, setClearing] = React.useState(false);
-  const [demoOpen, setDemoOpen] = React.useState(false);
-  const [demoBusy, setDemoBusy] = React.useState(false);
-  const demoPending = React.useRef(false);
-  const submitDemo = async (email: string, password: string) => {
-    if (demoPending.current) return;
-    demoPending.current = true; setDemoBusy(true);
-    try { await signInWithDemo(email, password); }
-    finally { demoPending.current = false; setDemoBusy(false); }
-  };
   const retrySignOut = async () => {
     if (clearing) return;
     setClearing(true);
@@ -63,7 +53,7 @@ export function AuthScreen({ flightInvitation = false, plannerInvitationToken, o
   const busy = authStatus === "loading";
   const showApple = isAppleSignInEnabled() && !signOutPending && !busy;
   return (
-    <><ScrollView
+    <ScrollView
       style={styles.screen}
       contentContainerStyle={[
         styles.content,
@@ -135,9 +125,6 @@ export function AuthScreen({ flightInvitation = false, plannerInvitationToken, o
           </View>
         )}
         {showApple ? <AppleSignInButton appearance="outline" onPress={() => void signInWithApple()} /> : null}
-        {!busy && !signOutPending ? <PressFeedback accessibilityRole="button" onPress={() => setDemoOpen(true)} style={styles.textButton}>
-          <Text style={styles.textButtonLabel}>Demo sign-in</Text>
-        </PressFeedback> : null}
         {signOutPending ? null : busy ? (
           <PressFeedback
             accessibilityRole="button"
@@ -157,8 +144,6 @@ export function AuthScreen({ flightInvitation = false, plannerInvitationToken, o
         ) : null}
       </View>
     </ScrollView>
-    {demoOpen ? <DemoSignIn busy={demoBusy} error={error} onSubmit={(email, password) => void submitDemo(email, password)}
-      onClose={() => { setDemoOpen(false); if (demoPending.current) void signOut(); }} /> : null}</>
   );
 }
 

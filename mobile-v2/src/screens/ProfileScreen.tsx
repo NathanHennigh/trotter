@@ -23,7 +23,7 @@ export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInb
   const visualWidth = getMobileVisualWidth(width);
   const large = fontScale >= 1.35 || visualWidth < 350;
   const preferences = useExperiencePreferences();
-  const { profile, trips, status, error, accountId, accountEmail, lastSyncedAt, gmailConnected, gmailConnectionStatus, gmailConnecting, gmailConnectionError, connectGmail, cancelGmailConnection, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt, refresh, syncFromGmail, signOut, demoSession } = useTravelTrips();
+  const { profile, trips, status, error, accountId, accountEmail, lastSyncedAt, gmailConnected, gmailConnectionStatus, gmailConnecting, gmailConnectionError, connectGmail, cancelGmailConnection, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt, refresh, syncFromGmail, signOut } = useTravelTrips();
   const identity = useTravelerIdentity(accountId ? `${getApiBaseUrl()}/${accountId}` : undefined);
   const [choosingHome, setChoosingHome] = React.useState(false);
   const busy = ['loading', 'refreshing', 'syncing'].includes(status);
@@ -45,9 +45,7 @@ export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInb
         <TravelerCard name={profile.name} firstYear={firstYear} homeAirport={identity.homeAirport} homeCity={home?.city || home?.name} segments={segments} ready={identity.ready}
           onChooseHome={() => setChoosingHome(true)} onOpenAirport={onOpenAirport} />
         {identity.error ? <Text style={s.error} accessibilityRole="alert">{identity.error}</Text> : null}
-        {demoSession ? <View style={s.connection}><Text style={s.overline}>SAMPLE FLIGHTS</Text>
-          <Text style={s.note}>These flights are fictional. Sign in to your own account to connect Gmail and import your travel history.</Text>
-        </View> : <View style={s.connection}>
+        <View style={s.connection}>
           <View style={s.sectionHeading}><Text style={s.overline}>FLIGHT CONFIRMATIONS</Text>
             {gmailSyncStatus === 'synced' && !scanning ? <Text style={s.success} accessibilityLabel="Scan complete">✓</Text> : null}
           </View>
@@ -63,7 +61,7 @@ export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInb
           {gmailConnecting ? <PressFeedback accessibilityRole="button" accessibilityLabel="Cancel Gmail connection" onPress={cancelGmailConnection} style={s.signOut}><Text style={s.signOutText}>Cancel</Text></PressFeedback> : null}
           {gmailConnectionError ? <Text style={s.error} accessibilityRole="alert">{gmailConnectionError}</Text> : null}
           {gmailSyncError ? <Text style={s.error} accessibilityRole="alert">{gmailSyncError}</Text> : null}
-        </View>}
+        </View>
         {onOpenFlightInbox ? <PressFeedback onPress={onOpenFlightInbox} accessibilityRole="button" accessibilityLabel="Flights for others. Send and receive flight bookings." style={s.flightInbox}>
           <View style={s.flightInboxCopy}><Text style={s.providerName}>Flights for others</Text><Text style={s.secondary}>Bookings to send · Flights shared with you</Text></View>
           <WWIcon name="chevron" size={20} color={colors.blue} />

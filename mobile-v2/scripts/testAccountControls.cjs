@@ -11,7 +11,6 @@ const click = async (root, label) => React.act(async () => { const target = butt
 function harness(options = {}) {
   const events = []; let revision = 1;
   const account = { accountId: 7, accountEmail: 'relay@example.invalid', authProviders: options.providers || ['apple'],
-    demoSession: !!options.demoSession,
     signOut: async () => { events.push('signout'); }, finishAccountDeletion: async () => { events.push('signout'); }, refresh: async () => {} };
   const module = { exports: {} };
   const native = { View: 'View', Text: 'Text', ActivityIndicator: 'ActivityIndicator', Platform: { OS: options.os || 'ios' }, StyleSheet: { create: v => v } };
@@ -38,13 +37,6 @@ test('account controls show the actual account and providers without assuming Go
   const h = harness(), view = await render(h);
   assert.match(allText(view.root), /relay@example.invalid/); assert.match(allText(view.root), /Sign in with Apple/);
   assert.doesNotMatch(allText(view.root), /Link Apple/); await close(view);
-});
-
-test('sample sessions expose sign-out without personal identity or deletion actions', async () => {
-  const h = harness({ demoSession: true, providers: ['google'], appleEnabled: true }), view = await render(h);
-  assert.match(allText(view.root), /Demo account/);
-  assert.doesNotMatch(allText(view.root), /Link Apple|Delete account|Sign in with Google/);
-  await click(view.root, 'Sign out'); assert.deepEqual(h.events, ['signout']); await close(view);
 });
 test('deletion requires preview, explicit confirmation, and provider verification', async () => {
   const h = harness(), view = await render(h);
