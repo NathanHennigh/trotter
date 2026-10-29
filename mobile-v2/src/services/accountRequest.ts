@@ -5,6 +5,10 @@ export class AccountRequestError extends Error {
 }
 
 const messages: Record<string, string> = {
+  invalid_demo_credentials: 'That demo email and password do not match. Please try again.',
+  demo_signin_unavailable: 'Demo sign-in is unavailable right now. Please try again later.',
+  demo_signin_limited: 'Too many attempts. Wait a minute, then try again.',
+  demo_personal_account_required: 'Use your own account to connect sign-in services or manage account deletion.',
   reauthentication_required: 'Please verify your identity again to continue.',
   account_deletion_retry: 'Your account could not be deleted yet. Please try again.',
   apple_account_already_linked: 'This Apple account is already linked to another Trotter account.',

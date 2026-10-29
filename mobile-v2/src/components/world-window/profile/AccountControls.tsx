@@ -11,7 +11,7 @@ import { AppleSignInButton } from './AppleSignInButton';
 import { isAppleSignInEnabled } from '../../../services/appleSignInAvailability';
 
 export function AccountControls() {
-  const { accountId, accountEmail, authProviders, signOut, finishAccountDeletion, refresh } = useTravelTrips();
+  const { accountId, accountEmail, authProviders, demoSession, signOut, finishAccountDeletion, refresh } = useTravelTrips();
   const [operation, setOperation] = React.useState<'link' | 'preview' | 'delete'>();
   const [error, setError] = React.useState<string>();
   const [deleting, setDeleting] = React.useState(false);
@@ -52,10 +52,10 @@ export function AccountControls() {
   return <View style={s.account}>
     <Text style={s.overline}>ACCOUNT</Text>
     <Text selectable style={s.email}>{accountEmail}</Text>
-    <View style={s.row}><Text style={s.note}>Sign in with {providerNames}</Text>
+    <View style={s.row}><Text style={s.note}>{demoSession ? 'Demo account · Sample travel data' : `Sign in with ${providerNames}`}</Text>
       <PressFeedback accessibilityRole="button" disabled={!!operation} onPress={() => void signOut()} style={s.textButton}><Text style={s.secondary}>Sign out</Text></PressFeedback>
     </View>
-    {isAppleSignInEnabled() && !authProviders.includes('apple') ? <View>
+    {!demoSession && isAppleSignInEnabled() && !authProviders.includes('apple') ? <View>
       <PressFeedback accessibilityRole="button" disabled={!!operation} accessibilityState={{ busy: operation === 'link', disabled: !!operation }}
         onPress={() => void run('link', async owner => { await linkAppleAccount(owner); if (owner.isCurrent()) await refresh(); })} style={s.textButton}>
         {operation === 'link' ? <ActivityIndicator size="small" color={colors.blue} /> : null}
@@ -63,7 +63,7 @@ export function AccountControls() {
       </PressFeedback>
       <Text style={s.note}>Keep this account and all your trips. You may be asked to verify with Google first.</Text>
     </View> : null}
-    <PressFeedback accessibilityRole="button" disabled={!!operation} onPress={openDeletion} style={s.textButton}><Text style={s.secondary}>Delete account</Text></PressFeedback>
+    {!demoSession ? <PressFeedback accessibilityRole="button" disabled={!!operation} onPress={openDeletion} style={s.textButton}><Text style={s.secondary}>Delete account</Text></PressFeedback> : null}
     {error && !deleting ? <Text accessibilityRole="alert" style={s.error}>{error}</Text> : null}
     {deleting ? <PlannerSheet title={confirmed ? 'Verify to delete' : 'Delete your account?'} transitionKey={`delete-account-${accountId}`} onClose={closeDeletion} error={error}>
       <View style={s.sheet}>

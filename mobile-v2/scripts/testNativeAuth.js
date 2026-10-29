@@ -72,6 +72,7 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
       if (request === '@react-native-async-storage/async-storage') return { getItem: async key => plain.get(key) ?? null, setItem: async (key, value) => { plain.set(key, value); }, removeItem: async key => { plain.delete(key); } };
       if (request === './googleAuth') return load('googleAuth');
       if (request === './appleAuth') return load('appleAuth');
+      if (request === './demoAuth') return load('demoAuth');
       if (request === './accountRequest') return load('accountRequest');
       if (request === './accountLifecycle') return load('accountLifecycle');
       if (request === './deletedAccountCleanup') return { finishDeletedAccountCleanup: async () => {}, hasDeletedAccountCleanup: async () => false, markDeletedAccountForCleanup: () => {} };
@@ -107,6 +108,43 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
     dispose() { slots.forEach(slot => slot?.cleanup?.()); },
   };
 }
+
+test('demo login sends credentials in the request body and opens only a verified session', async () => {
+  let sent;
+  const env = environment({ fetcher: async (url, init) => {
+    if (url.endsWith('/auth/demo')) { sent = { url, body: JSON.parse(init.body) }; return response(200, { access_token: 'demo-token', user_id: 10, email: 'sample@example.invalid' }); }
+    return response(200, url.endsWith('/auth/me') ? { user_id: 10, email: 'sample@example.invalid', demo_session: true } : []);
+  } });
+  env.render(); await flush();
+  await env.render().signInWithDemo(' sample@example.invalid ', 'demo-password'); await flush();
+  assert.deepEqual(sent, { url: 'https://api.example.invalid/auth/demo', body: { email: 'sample@example.invalid', password: 'demo-password' } });
+  assert.equal(env.render().authStatus, 'signed-in'); assert.equal(env.render().accountId, 10); assert.equal(env.render().demoSession, true);
+  assert(!JSON.stringify([...env.secure, ...env.plain, ...env.session]).includes('demo-password'));
+  assert(!env.calls.some(call => call.kind === 'oauth')); env.dispose();
+});
+
+test('cancelling demo login discards a late token and preserves sign-out', async () => {
+  const result = deferred(); const env = environment({ fetcher: () => result.promise });
+  env.render(); await flush();
+  const login = env.render().signInWithDemo('sample@example.invalid', 'password'); await flush();
+  assert.equal(env.render().authStatus, 'signed-out', 'The retry/cancel form stays mounted');
+  await env.render().signOut();
+  result.resolve(response(200, { access_token: 'too-late', user_id: 10 })); await login; await flush();
+  assert.equal(env.travel.getStoredToken(), undefined); assert.equal(env.render().authStatus, 'signed-out'); env.dispose();
+});
+
+test('invalid demo credentials leave a retryable signed-out state', async () => {
+  const env = environment({ fetcher: async () => response(401, { detail: 'invalid_demo_credentials' }) });
+  env.render(); await flush(); await env.render().signInWithDemo('sample@example.invalid', 'wrong'); await flush();
+  assert.equal(env.render().authStatus, 'signed-out'); assert.match(env.render().error, /do not match/);
+  assert.equal(env.travel.getStoredToken(), undefined); env.dispose();
+});
+
+test('malformed demo responses cannot persist a session', async () => {
+  const env = environment({ fetcher: async () => response(200, { access_token: 'has whitespace', user_id: 10 }) });
+  env.render(); await flush(); await env.render().signInWithDemo('sample@example.invalid', 'password'); await flush();
+  assert.equal(env.travel.getStoredToken(), undefined); assert.match(env.render().error, /verified/); env.dispose();
+});
 
 test('native callback requires exact target, attempt, and one token', () => {
   const { auth } = environment();

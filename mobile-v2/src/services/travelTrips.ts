@@ -14,6 +14,7 @@ import { travelCountry, SOMALILAND_ICON_KEY } from '../utils/travelCountry';
 import { groupTripItineraries } from '../utils/tripItineraries';
 import { cancelGmailConnection, cancelGoogleAuthSession, consumeWebOAuthCallback, GmailConnectionCanceled, GoogleSignInCanceled, requestGmailConnection, requestGoogleAuthToken } from './googleAuth';
 import { AppleSignInCanceled, cancelAppleAuthSession, requestAppleAuth } from './appleAuth';
+import { requestDemoAuth } from './demoAuth';
 import { reauthenticateAccount } from './accountLifecycle';
 import { finishDeletedAccountCleanup, hasDeletedAccountCleanup, markDeletedAccountForCleanup } from './deletedAccountCleanup';
 
@@ -143,7 +144,7 @@ export type TravelTripsStatus = 'idle' | 'loading' | 'refreshing' | 'syncing' | 
 export type TravelAuthStatus = 'loading' | 'signed-out' | 'signed-in';
 export type GmailSyncStatus = 'unknown' | 'syncing' | 'synced' | 'error';
 type GmailConnectionStatus = 'not_connected' | 'connected' | 'needs_reconnect';
-type AccountIdentity = { user_id: number; email: string; name?: string | null; gmail_connected?: boolean; gmail_connection_status?: GmailConnectionStatus; auth_providers?: ('google' | 'apple')[] };
+type AccountIdentity = { user_id: number; email: string; name?: string | null; gmail_connected?: boolean; gmail_connection_status?: GmailConnectionStatus; auth_providers?: ('google' | 'apple')[]; demo_session?: boolean };
 type TravelTripsContextValue = {
   trips: TripSummary[];
   profile: TravelerProfile;
@@ -166,6 +167,8 @@ type TravelTripsContextValue = {
   lastSyncedAt?: string;
   signIn: () => Promise<void>;
   signInWithApple: () => Promise<void>;
+  signInWithDemo: (email: string, password: string) => Promise<void>;
+  demoSession: boolean;
   retryAuth: () => Promise<void>;
   signOut: () => Promise<void>;
   finishAccountDeletion: () => Promise<void>;
@@ -411,6 +414,22 @@ function useTravelTripsState(): TravelTripsContextValue {
     }
   }, []);
 
+  const signInWithDemo = React.useCallback(async (email: string, password: string) => {
+    if (pendingAuthClear) { setError(AUTH_CLEAR_ERROR); setSignOutPending(true); return; }
+    const attempt = ++authAttempt.current;
+    // Keep the form mounted for retry/cancel; only a verified token starts restoration.
+    setError(undefined); setStatus('loading');
+    try {
+      const result = await requestDemoAuth(getApiBaseUrl(), email, password);
+      if (!mounted.current || attempt !== authAttempt.current) return;
+      await storeAuthToken(result.access_token);
+    } catch (caught) {
+      if (!mounted.current || attempt !== authAttempt.current) return;
+      setAuthStatus(accountRef.current ? 'signed-in' : 'signed-out');
+      setStatus('error'); setError(friendlyError(caught));
+    }
+  }, []);
+
   const finishAccountDeletion = React.useCallback(async () => {
     const owner = accountRef.current;
     if (!owner) return;
@@ -630,7 +649,7 @@ function useTravelTripsState(): TravelTripsContextValue {
     gmailConnecting, gmailConnectionError,
     error, accountId: account?.user_id, accountRevision, accountEmail: account?.email, lastSyncedAt,
     authProviders: account?.auth_providers ?? ['google'],
-    signIn, signInWithApple, retryAuth, signOut, finishAccountDeletion, refresh: () => loadTrips('refreshing'), loadTripDetail, syncFromGmail, connectGmail, cancelGmailConnection: cancelConnectingGmail };
+    signIn, signInWithApple, signInWithDemo, demoSession: account?.demo_session === true, retryAuth, signOut, finishAccountDeletion, refresh: () => loadTrips('refreshing'), loadTripDetail, syncFromGmail, connectGmail, cancelGmailConnection: cancelConnectingGmail };
 }
 
 export function getApiBaseUrl() {
