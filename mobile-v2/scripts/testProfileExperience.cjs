@@ -20,6 +20,7 @@ function runtime(file, overrides = {}) {
     '../components/world-window/motion':{PressFeedback:'Pressable'}, '../components/world-window/profile/TravelerCard':{TravelerCard:'TravelerCard'},
     '../components/world-window/profile/HomeAirportPicker':{HomeAirportPicker:'HomeAirportPicker'},
     '../components/world-window/profile/AccountControls':{AccountControls:'AccountControls'},
+    '../components/world-window/profile/TravelRecoveryStatus':{TravelRecoveryStatus:'TravelRecoveryStatus'},
     '../theme/trotterTheme':{colors:{},fonts:{},layout:{bottomNavHeight:73}},
     '../utils/mobileLayout':{getMobileVisualWidth:width=>width},
     '../utils/experiencePreferences':{useExperiencePreferences:()=>({texture:'classic',haptics:true,setTexture:noop,setHaptics:noop}),selectionHaptic:noop},

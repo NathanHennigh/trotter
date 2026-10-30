@@ -235,7 +235,7 @@ export function FlightSharingScreen({ onBack, invitationToken, onInvitationConsu
     selectionHaptic('confirmation'); setTab('send'); setPage({ kind: 'inbox' });
     void load();
   });
-  const header = page.kind === 'claim' ? 'Your travel name' : page.kind === 'compose' ? 'Prepare flights' : page.kind === 'detail' ? 'Shared flights' : 'Flights for others';
+  const header = page.kind === 'claim' ? 'Travel name' : page.kind === 'compose' ? 'Prepare flights' : page.kind === 'detail' ? 'Shared flights' : 'Flights for others';
   const share = page.kind === 'detail' ? page.share : undefined;
   const status = share ? shareStatus(share) : undefined;
   const groupItems = page.kind === 'compose' ? page.group.items : [];
