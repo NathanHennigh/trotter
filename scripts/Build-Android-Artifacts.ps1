@@ -77,6 +77,9 @@ if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[0-9a-f]{40}$') {
 }
 
 $buildChannel = if ($Development) { 'development' } else { 'release' }
+if ([string]::IsNullOrWhiteSpace($ApiBaseUrl)) {
+    throw 'All installable Android builds require an explicit -ApiBaseUrl; its /ready endpoint will be checked before building.'
+}
 if (![string]::IsNullOrWhiteSpace($ApiBaseUrl)) {
     $parsedApiUrl = $null
     if (![Uri]::TryCreate($ApiBaseUrl, [UriKind]::Absolute, [ref]$parsedApiUrl) -or

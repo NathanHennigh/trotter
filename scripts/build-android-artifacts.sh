@@ -25,7 +25,7 @@ case "$BUILD_CHANNEL" in
     ;;
 esac
 
-if [[ -n "$API_BASE_URL" && ! "$API_BASE_URL" =~ ^https?://[^/]+/?$ ]]; then
+if [[ ! "$API_BASE_URL" =~ ^https?://[^/]+/?$ ]]; then
   echo 'ERROR: API base URL must be an absolute HTTP(S) origin without a path.' >&2
   exit 2
 fi
@@ -100,6 +100,11 @@ if [[ -d /usr/lib/jvm/java-17-openjdk-amd64 ]]; then
   export PATH="$JAVA_HOME/bin:$PATH"
 fi
 hash -r
+
+echo
+echo '=== Checking the selected API before building ==='
+API_PREFLIGHT_JSON="$(node "$SOURCE_ROOT/scripts/android-build-api.cjs" check "$API_BASE_URL")"
+echo "API ready: ${API_BASE_URL%/}"
 
 for command_name in node npm npx java rsync unzip sha256sum install; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -231,11 +236,16 @@ publish_artifact() {
   local timestamped_tmp="$WINDOWS_BUILDS/.$timestamped_name.tmp.$$"
   local latest_tmp="$WINDOWS_BUILDS/.$latest_name.tmp.$$"
 
+  node "$SOURCE_ROOT/scripts/android-build-api.cjs" metadata "$source" "$TEMP_DIR/build-metadata.json" \
+    "$SOURCE_SHA" "$effective_version_code" "$BUILD_CHANNEL" "$API_PREFLIGHT_JSON"
+
   install -m 0644 "$source" "$timestamped_tmp"
   install -m 0644 "$source" "$latest_tmp"
   mv -f "$timestamped_tmp" "$WINDOWS_BUILDS/$timestamped_name"
   mv -f "$latest_tmp" "$WINDOWS_BUILDS/$latest_name"
   sha256sum "$WINDOWS_BUILDS/$timestamped_name" > "$WINDOWS_BUILDS/$timestamped_name.sha256"
+  install -m 0644 "$TEMP_DIR/build-metadata.json" "$WINDOWS_BUILDS/$timestamped_name.metadata.json"
+  install -m 0644 "$TEMP_DIR/build-metadata.json" "$WINDOWS_BUILDS/$latest_name.metadata.json"
 
   echo "Saved:  $timestamped_name"
   echo "Latest: $latest_name"

@@ -72,26 +72,28 @@ The helper mirrors the Etch build-only workflow: it copies `mobile-v2` into WSL'
 
 WSL Ubuntu needs nvm with Node `20.20.2`, Java 17, `rsync`, `unzip`, and the Android SDK at `~/Android/Sdk`.
 
+Every installable build requires an explicit API origin. Trotter's production API is `https://trotter-api.thehennighs.com`. The build checks `/ready` before compiling, rejects redirects or unhealthy responses, then verifies the selected origin appears inside the packaged JavaScript. Do not substitute a guessed hostname.
+
 Build a standalone preview APK:
 
 ```powershell
-.\scripts\Build-Android-Artifacts.ps1 -Mode apk -ApiBaseUrl https://api.example.com
+.\scripts\Build-Android-Artifacts.ps1 -Mode apk -ApiBaseUrl https://trotter-api.thehennighs.com
 ```
 
 Build a personal test APK from the current working tree, including uncommitted changes:
 
 ```powershell
-.\scripts\Build-Android-Artifacts.ps1 -Mode apk -Development -ApiBaseUrl https://api.example.com
+.\scripts\Build-Android-Artifacts.ps1 -Mode apk -Development -ApiBaseUrl https://trotter-api.thehennighs.com
 ```
 
 Development artifacts include `-dev` in their timestamped filename. Release builds remain restricted to a clean `main` branch that exactly matches `origin/main`.
 
-Artifacts are written to `$env:USERPROFILE\Documents\builds`, including a timestamped file, `trotter-latest.apk`, and a SHA-256 checksum.
+Artifacts are written to `$env:USERPROFILE\Documents\builds`, including a timestamped file, `trotter-latest.apk`, a SHA-256 checksum, and `.metadata.json` recording the exact verified API origin, version code, readiness response, source commit, and artifact hash.
 
 For a Play AAB, first create an Android upload key, copy `mobile-v2/android/signing.properties.example` to the ignored `signing.properties`, and fill in its real values. Then supply a Play version code greater than every version already uploaded:
 
 ```powershell
-.\scripts\Build-Android-Artifacts.ps1 -Mode both -VersionCode 2 -ApiBaseUrl https://api.example.com
+.\scripts\Build-Android-Artifacts.ps1 -Mode both -VersionCode 2 -ApiBaseUrl https://trotter-api.thehennighs.com
 ```
 
 The APK falls back to the tracked debug key for convenient local installation. The script refuses to create an AAB unless the private signing configuration and keystore exist.
