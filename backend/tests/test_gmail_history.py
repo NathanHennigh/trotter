@@ -149,3 +149,77 @@ def test_reconnection_resumes_only_connection_pause_and_preserves_page(db, monke
     db.commit()
     assert history.discover_history_jobs(db, now=NOW) == [(row.id, row.user_id)]
     assert row.pending_message_ids == ["still-needed"] and row.next_page_token == "next"
+
+
+def _three_accounts_with_only_last_connected(db):
+    first = db.query(Account).one()
+    first.gmail_connection_status = "needs_reconnect"
+    accounts = [first]
+    for number in (2, 3):
+        user = User(email=f"person-{number}@example.com", name=f"Person {number}")
+        db.add(user)
+        db.flush()
+        account = Account(user_id=user.id, provider="google", refresh_token_encrypted=b"test",
+                          scopes="https://www.googleapis.com/auth/gmail.readonly",
+                          gmail_connection_status="needs_reconnect" if number == 2 else None)
+        db.add(account)
+        db.add(GmailDiscoveryState(user_id=user.id, provider="google", last_incremental_scan_at=NOW))
+        accounts.append(account)
+    db.commit()
+    return accounts
+
+
+def test_disconnected_accounts_do_not_starve_initial_history_creation(db, monkeypatch):
+    monkeypatch.setenv("TROTTER_ENABLE_AUTOMATIC_BACKFILL", "true")
+    monkeypatch.setenv("TROTTER_GMAIL_HISTORY_USER_IDS", "*")
+    accounts = _three_accounts_with_only_last_connected(db)
+
+    jobs = history.discover_history_jobs(db, now=NOW, limit=2)
+
+    row = db.query(GmailHistoryState).one()
+    assert jobs == [(row.id, accounts[2].user_id)]
+    assert row.state == "queued"
+    assert not db.query(GmailHistoryState).filter(GmailHistoryState.user_id.in_(
+        [account.user_id for account in accounts[:2]])).all()
+
+
+def test_disconnected_accounts_do_not_starve_reconnected_history(db, monkeypatch):
+    monkeypatch.setenv("TROTTER_ENABLE_AUTOMATIC_BACKFILL", "true")
+    monkeypatch.setenv("TROTTER_GMAIL_HISTORY_USER_IDS", "*")
+    accounts = _three_accounts_with_only_last_connected(db)
+    rows = []
+    for index, account in enumerate(accounts):
+        row = GmailHistoryState(user_id=account.user_id, state="paused", error_code="gmail_connection_required",
+                                pending_message_ids=[f"keep-{index}"], next_page_token=f"page-{index}",
+                                updated_at=NOW + timedelta(seconds=index), cursor_before=NOW)
+        db.add(row)
+        rows.append(row)
+    db.commit()
+
+    assert history.discover_history_jobs(db, now=NOW + timedelta(seconds=3), limit=2) == [
+        (rows[2].id, accounts[2].user_id)]
+
+    assert [row.state for row in rows] == ["paused", "paused", "queued"]
+    assert [row.pending_message_ids for row in rows] == [["keep-0"], ["keep-1"], ["keep-2"]]
+    assert [row.next_page_token for row in rows] == ["page-0", "page-1", "page-2"]
+
+
+@pytest.mark.parametrize("status,token,scopes,connected", [
+    (None, b"test", "https://www.googleapis.com/auth/gmail.readonly", True),
+    ("connected", b"test", "openid https://www.googleapis.com/auth/gmail.modify profile", True),
+    (None, b"test", "openid\thttps://mail.google.com/\nprofile", True),
+    ("needs_reconnect", b"test", "https://www.googleapis.com/auth/gmail.readonly", False),
+    ("connected", b"", "https://www.googleapis.com/auth/gmail.readonly", False),
+    (None, b"test", "openid profile", False),
+    (None, b"test", "https://www.googleapis.com/auth/gmail.readonly.extra", False),
+    (None, b"test", "prefixhttps://mail.google.com/", False),
+])
+def test_history_sql_connection_filter_matches_consent_rules(db, status, token, scopes, connected):
+    account = db.query(Account).one()
+    account.gmail_connection_status = status
+    account.refresh_token_encrypted = token
+    account.scopes = scopes
+    db.commit()
+
+    assert (history.connection_status(account) == "connected") is connected
+    assert bool(db.query(Account).filter(history._connected_account_filter()).all()) is connected

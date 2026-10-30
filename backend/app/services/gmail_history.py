@@ -4,12 +4,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import os
 
-from sqlalchemy import or_
+from sqlalchemy import and_, func, literal, or_
 from sqlalchemy.exc import IntegrityError
 
 from ..models import Account, GmailDiscoveryState, GmailHistoryState, User
 from .flight_query_v4 import BACKFILL_WINDOW_DAYS, _earliest_supported_datetime, _ensure_utc, _gmail_after_date, _gmail_date, _start_of_day
-from .gmail_connection import connection_status
+from .gmail_connection import READABLE_GMAIL_SCOPES, connection_status
 
 PAGE_SIZE = 50
 LEASE_SECONDS = 420
@@ -32,6 +32,22 @@ def user_enabled(user_id: int) -> bool:
     return enabled() and (allowed is None or user_id in allowed)
 
 
+def _connected_account_filter():
+    # Match connection_status before limiting a scheduler batch. Otherwise older
+    # disconnected accounts can occupy every slot forever. OAuth scopes are
+    # whitespace-separated tokens, so substring matches must not grant access.
+    scopes = func.coalesce(Account.scopes, "")
+    for separator in ("\t", "\r", "\n", "\v", "\f"):
+        scopes = func.replace(scopes, separator, " ")
+    scopes = literal(" ") + scopes + literal(" ")
+    return and_(
+        Account.provider == "google",
+        or_(Account.gmail_connection_status.is_(None), Account.gmail_connection_status != "needs_reconnect"),
+        func.length(Account.refresh_token_encrypted) > 0,
+        or_(*(scopes.contains(f" {scope} ") for scope in sorted(READABLE_GMAIL_SCOPES))),
+    )
+
+
 def discover_history_jobs(db, *, now=None, limit=2) -> list[tuple[int, int]]:
     if not enabled():
         return []
@@ -39,7 +55,11 @@ def discover_history_jobs(db, *, now=None, limit=2) -> list[tuple[int, int]]:
     if allowed == set():
         return []
     now = now or datetime.now(timezone.utc)
-    reconnect_query = db.query(GmailHistoryState).filter_by(state="paused", error_code="gmail_connection_required")
+    reconnect_query = (db.query(GmailHistoryState)
+                       .join(Account, Account.user_id == GmailHistoryState.user_id)
+                       .filter(GmailHistoryState.state == "paused",
+                               GmailHistoryState.error_code == "gmail_connection_required",
+                               _connected_account_filter()))
     if allowed is not None:
         reconnect_query = reconnect_query.filter(GmailHistoryState.user_id.in_(allowed))
     for row in reconnect_query.order_by(GmailHistoryState.updated_at).limit(limit).all():
@@ -52,7 +72,7 @@ def discover_history_jobs(db, *, now=None, limit=2) -> list[tuple[int, int]]:
     accounts_query = (db.query(Account).join(User, User.id == Account.user_id)
                 .join(GmailDiscoveryState, GmailDiscoveryState.user_id == Account.user_id)
                 .outerjoin(GmailHistoryState, GmailHistoryState.user_id == Account.user_id)
-                .filter(Account.provider == "google", GmailDiscoveryState.last_incremental_scan_at.is_not(None),
+                .filter(_connected_account_filter(), GmailDiscoveryState.last_incremental_scan_at.is_not(None),
                         GmailHistoryState.id.is_(None)))
     if allowed is not None:
         accounts_query = accounts_query.filter(Account.user_id.in_(allowed))
