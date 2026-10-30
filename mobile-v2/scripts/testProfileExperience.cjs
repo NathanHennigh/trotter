@@ -89,6 +89,15 @@ test('revoked Gmail offers reconnection beside its error without replacing the G
   const tree=host.render(host.exports.ProfileScreen,{active:'profile',onChange:noop});
   assert(button(tree,'Reconnect Gmail')); assert(!button(tree,'Scan Gmail for flights')); assert(find(tree,'AccountControls')); assert(text(tree).includes('Choose the same Google account.')); host.dispose();
 });
+
+test('reconnect remains actionable when older connected or scanning flags are still present',()=>{
+  let connections=0,scans=0;
+  const host=runtime('screens/ProfileScreen.tsx',{'../services/travelTrips':{getApiBaseUrl:()=> 'https://synthetic.example',useTravelTrips:()=>({profile:{name:'Alex'},trips:[],accountId:1,status:'syncing',gmailSyncStatus:'syncing',gmailConnected:true,gmailConnectionStatus:'needs_reconnect',connectGmail:()=>connections++,syncFromGmail:()=>scans++})}});
+  const tree=host.render(host.exports.ProfileScreen,{active:'profile',onChange:noop});
+  const action=button(tree,'Reconnect Gmail'); assert(action); assert(!action.props.disabled);
+  action.props.onPress(); assert.equal(connections,1); assert.equal(scans,0);
+  assert(!button(tree,'Scan Gmail for flights')); assert(!text(tree).includes('Your scan continues')); host.dispose();
+});
 test('Home airport persistence is isolated by account and server and rejects invalid input',async()=>{
   const storage=new Map(), host=runtime('utils/travelerIdentity.ts',{'@react-native-async-storage/async-storage':{getItem:async key=>storage.get(key),setItem:async(key,value)=>storage.set(key,value)}}),api=host.exports;
   await api.writeHomeAirport('prod/1','IAH');await api.writeHomeAirport('prod/2','LHR');await api.writeHomeAirport('dev/1','ACT');

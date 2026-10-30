@@ -35,9 +35,10 @@ export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInb
     .map(segment => [segment.id, segment])).values()], [trips]);
   const firstYear = profile.firstFlightDate?.match(/^\d{4}/)?.[0];
   const reconnect = gmailConnectionStatus === 'needs_reconnect';
-  const syncCopy = gmailConnecting ? 'Waiting for your permission…' : !gmailConnected ? reconnect ? 'Reconnect to import flights' : 'Optional · Import flight confirmations' : scanning ? 'Finding flight confirmations…' : gmailSyncStatus === 'error' ? 'Scan needs attention' : lastGmailSyncedAt ? `Last scan · ${formatUpdated(lastGmailSyncedAt)}` : 'Ready to scan for flights';
-  const gmailBusy = gmailConnecting || (gmailConnected && busy);
-  const gmailAction = gmailConnecting ? 'Connecting…' : gmailConnected ? scanning ? 'Scanning…' : 'Scan for flights' : reconnect ? 'Reconnect Gmail' : 'Connect Gmail';
+  const canScanGmail = gmailConnected && !reconnect;
+  const syncCopy = gmailConnecting ? 'Waiting for your permission…' : !canScanGmail ? reconnect ? 'Permission needed · Reconnect to scan' : 'Optional · Import flight confirmations' : scanning ? 'Finding flight confirmations…' : gmailSyncStatus === 'error' ? 'Scan needs attention' : lastGmailSyncedAt ? `Last scan · ${formatUpdated(lastGmailSyncedAt)}` : 'Ready to scan for flights';
+  const gmailBusy = gmailConnecting || (canScanGmail && busy);
+  const gmailAction = gmailConnecting ? 'Connecting…' : canScanGmail ? scanning ? 'Scanning…' : 'Scan for flights' : reconnect ? 'Reconnect Gmail' : 'Connect Gmail';
   return <View style={[s.screen, { paddingTop: insets.top }]}>
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + layout.bottomNavHeight + 22 }}
       refreshControl={<RefreshControl refreshing={status === 'refreshing'} onRefresh={() => void refresh()} tintColor={colors.blue} />}>
@@ -52,13 +53,13 @@ export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInb
           </View>
           <View style={[s.provider, large && s.providerLarge]}>
             <View style={s.providerCopy}><Text style={s.providerName}>Gmail</Text><Text style={s.secondary} accessibilityLiveRegion="polite">{syncCopy}</Text></View>
-            <PressFeedback accessibilityRole="button" accessibilityLabel={gmailConnected ? 'Scan Gmail for flights' : reconnect ? 'Reconnect Gmail' : 'Connect Gmail'} accessibilityState={{ disabled: gmailBusy, busy: scanning || gmailConnecting }} disabled={gmailBusy} onPress={() => void (gmailConnected ? syncFromGmail() : connectGmail())} style={[s.scan, large && s.scanLarge, gmailBusy && s.disabled]}>
-              {scanning || gmailConnecting ? <ActivityIndicator color={colors.blue} size="small" /> : gmailConnected ? <WWIcon name="sync" size={17} color={colors.blue} /> : null}
+            <PressFeedback accessibilityRole="button" accessibilityLabel={canScanGmail ? 'Scan Gmail for flights' : reconnect ? 'Reconnect Gmail' : 'Connect Gmail'} accessibilityState={{ disabled: gmailBusy, busy: canScanGmail && scanning || gmailConnecting }} disabled={gmailBusy} onPress={() => void (canScanGmail ? syncFromGmail() : connectGmail())} style={[s.scan, large && s.scanLarge, gmailBusy && s.disabled]}>
+              {canScanGmail && scanning || gmailConnecting ? <ActivityIndicator color={colors.blue} size="small" /> : canScanGmail ? <WWIcon name="sync" size={17} color={colors.blue} /> : null}
               <Text style={s.scanText}>{gmailAction}</Text>
             </PressFeedback>
           </View>
-          {scanning ? <Text style={s.note}>Your scan continues if you leave the app.</Text> : null}
-          {!gmailConnected ? <Text style={s.note}>Connect Gmail to automatically import flights. Read-only access; Dreams and Planner work without it.</Text> : null}
+          {canScanGmail && scanning ? <Text style={s.note}>Your scan continues if you leave the app.</Text> : null}
+          {!canScanGmail ? <Text style={s.note}>{reconnect ? 'Your saved trips stay here while you reconnect. Gmail access remains read-only.' : 'Connect Gmail to automatically import flights. Read-only access; Dreams and Planner work without it.'}</Text> : null}
           {gmailConnecting ? <PressFeedback accessibilityRole="button" accessibilityLabel="Cancel Gmail connection" onPress={cancelGmailConnection} style={s.signOut}><Text style={s.signOutText}>Cancel</Text></PressFeedback> : null}
           {gmailConnectionError ? <Text style={s.error} accessibilityRole="alert">{gmailConnectionError}</Text> : null}
           {gmailSyncError ? <Text style={s.error} accessibilityRole="alert">{gmailSyncError}</Text> : null}

@@ -292,7 +292,7 @@ function useTravelTripsState(): TravelTripsContextValue {
         if (accountRef.current && accountRef.current.user_id !== me.user_id) setTrips([]);
         accountRef.current = me;
         setAccount(me);
-        if (!me.gmail_connected) {
+        if (!me.gmail_connected || me.gmail_connection_status === 'needs_reconnect') {
           setGmailSyncStatus('unknown'); setGmailSyncError(undefined); setLastGmailSyncedAt(undefined);
         }
       }
@@ -452,6 +452,18 @@ function useTravelTripsState(): TravelTripsContextValue {
     return mapped;
   }, []);
 
+  const requireGmailReconnect = React.useCallback((revision: number, ownerId: number) => {
+    const owner = accountRef.current;
+    if (!current(revision) || owner?.user_id !== ownerId) return;
+    // A revoked permission is newer than an already in-flight account read.
+    // Keep that stale response from replacing the reconnect action with Scan.
+    appliedIdentityRead.current = ++identityReadSequence.current;
+    const disconnected = { ...owner, gmail_connected: false, gmail_connection_status: 'needs_reconnect' as const };
+    accountRef.current = disconnected; setAccount(disconnected);
+    setGmailSyncStatus('unknown'); setGmailSyncError(undefined); setError(undefined); setStatus('idle');
+    setGmailConnectionError('Gmail access has expired. Reconnect Gmail to import your flights.');
+  }, []);
+
   const observeGmailJob = React.useCallback(async (jobId: string, token: string, revision: number, saved: GmailRecovery) => {
     if (!current(revision) || syncRunning.current?.revision === revision) return;
     const running = { revision };
@@ -488,24 +500,29 @@ function useTravelTripsState(): TravelTripsContextValue {
         await clearAuthToken();
         if (mounted.current && !getStoredToken()) setError('Your session expired. Sign in with Google again.');
       } else {
-        const terminal = caught instanceof ImportObservationError && caught.terminal;
+        const reconnect = requiresGmailReconnect(caught);
+        const terminal = reconnect || caught instanceof ImportObservationError && caught.terminal;
         await persist({ ...saved, activeJobId: terminal ? undefined : jobId,
           activeStartedAt: terminal ? undefined : saved.activeStartedAt, outcome: 'error' });
         if (!current(revision)) return;
+        if (reconnect) { requireGmailReconnect(revision, saved.ownerId); return; }
         setGmailSyncStatus('error');
         setGmailSyncError(friendlyError(caught));
         setError(friendlyError(caught));
         setStatus('error');
       }
     } finally { if (syncRunning.current === running) syncRunning.current = undefined; }
-  }, [loadTrips]);
+  }, [loadTrips, requireGmailReconnect]);
 
   const syncFromGmail = React.useCallback(async () => {
     const token = getStoredToken();
     const revision = getAuthRevision();
     const owner = accountRef.current;
     if (syncRunning.current?.revision === revision || !token || !owner) return;
-    if (!owner.gmail_connected) { setGmailConnectionError('Connect Gmail to import your flights.'); return; }
+    if (!owner.gmail_connected || owner.gmail_connection_status === 'needs_reconnect') {
+      setGmailConnectionError(owner.gmail_connection_status === 'needs_reconnect'
+        ? 'Reconnect Gmail to import your flights.' : 'Connect Gmail to import your flights.'); return;
+    }
     // An interrupted observation resumes its exact existing job; it does not
     // create another import merely because the app restarted or lost network.
     const saved = recovery.current ?? await readGmailRecovery(getApiBaseUrl(), owner.user_id);
@@ -520,13 +537,7 @@ function useTravelTripsState(): TravelTripsContextValue {
       if (response.status === 401) throw new SessionExpired();
       const data = await readJson(response) as { job_id?: string; detail?: { code?: string; message?: string } | string };
       if (!current(revision)) return;
-      if (response.status === 409 && typeof data.detail === 'object' && data.detail?.code === 'gmail_connection_required') {
-        const disconnected = { ...owner, gmail_connected: false, gmail_connection_status: 'needs_reconnect' as const };
-        accountRef.current = disconnected; setAccount(disconnected);
-        setGmailSyncStatus('unknown'); setStatus('idle');
-        setGmailConnectionError(data.detail.message || 'Reconnect Gmail to import your flights.');
-        return;
-      }
+      if (!response.ok && requiresGmailReconnect(data)) throw new ImportObservationError('Reconnect Gmail to import your flights.', true);
       if (!response.ok || typeof data.job_id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(data.job_id)) throw new Error(readError(data, 'Gmail sync could not start. Please retry.'));
       if (syncRunning.current === starting) syncRunning.current = undefined;
       await observeGmailJob(data.job_id, token, revision, { version: 1, apiBaseUrl: getApiBaseUrl(), ownerId: owner.user_id,
@@ -541,14 +552,15 @@ function useTravelTripsState(): TravelTripsContextValue {
         recovery.current = failed;
         await writeGmailRecovery(failed).catch(() => undefined);
         if (!current(revision)) return;
+        if (requiresGmailReconnect(caught)) { requireGmailReconnect(revision, owner.user_id); return; }
         setGmailSyncStatus('error'); setGmailSyncError(friendlyError(caught)); setError(friendlyError(caught)); setStatus('error');
       }
     } finally { if (syncRunning.current === starting) syncRunning.current = undefined; }
-  }, [observeGmailJob]);
+  }, [observeGmailJob, requireGmailReconnect]);
 
   const connectGmail = React.useCallback(async () => {
     const token = getStoredToken(), revision = getAuthRevision(), owner = accountRef.current;
-    if (!token || !owner || gmailConnectRunning.current || owner.gmail_connected) return;
+    if (!token || !owner || gmailConnectRunning.current || owner.gmail_connected && owner.gmail_connection_status !== 'needs_reconnect') return;
     gmailConnectRunning.current = true;
     const attempt = ++gmailConnectAttempt.current;
     setGmailConnecting(true); setGmailConnectionError(undefined);
@@ -602,7 +614,7 @@ function useTravelTripsState(): TravelTripsContextValue {
 
   React.useEffect(() => {
     const ownerId = account?.user_id, token = getStoredToken(), revision = getAuthRevision();
-    if (!ownerId || !token || !account?.gmail_connected || recoveryRead.current === revision) return;
+    if (!ownerId || !token || !account?.gmail_connected || account.gmail_connection_status === 'needs_reconnect' || recoveryRead.current === revision) return;
     recoveryRead.current = revision;
     let live = true;
     void readGmailRecovery(getApiBaseUrl(), ownerId).then(saved => {
@@ -626,7 +638,7 @@ function useTravelTripsState(): TravelTripsContextValue {
 
   return { trips, profile: buildProfile(trips, account), source: 'api', status, authStatus,
     signOutPending, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt,
-    gmailConnected: account?.gmail_connected === true,
+    gmailConnected: account?.gmail_connected === true && account.gmail_connection_status !== 'needs_reconnect',
     gmailConnectionStatus: account?.gmail_connection_status ?? (account?.gmail_connected ? 'connected' : 'not_connected'),
     gmailConnecting, gmailConnectionError,
     error, accountId: account?.user_id, accountRevision, accountEmail: account?.email, accountName: account?.name ?? undefined, lastSyncedAt,
@@ -764,6 +776,12 @@ export async function hydrateStoredToken() {
 
 class SessionExpired extends Error {}
 class ImportObservationError extends Error { constructor(message: string, readonly terminal = false) { super(message); } }
+function requiresGmailReconnect(value: unknown): boolean {
+  if (typeof value === 'string') return /\b(?:gmail_connection_required|gmail_reconnect_required|invalid_grant)\b|\breconnect\s+(?:your\s+)?gmail\b|\btoken\b.*\b(?:expired or revoked|has been revoked)\b/i.test(value);
+  if (!value || typeof value !== 'object') return false;
+  return ['code', 'detail', 'error_message', 'message'].some(key => key in value
+    && requiresGmailReconnect((value as Record<string, unknown>)[key]));
+}
 async function authFetch(path: string, init: RequestInit | undefined, token: string) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
@@ -781,7 +799,10 @@ async function waitForImport(jobId: string, token: string, isCurrent: () => bool
     if (response.status === 401) throw new SessionExpired();
     const data = await readJson(response) as ImportJobStatus;
     if (!isCurrent()) return;
-    if (!response.ok) throw new ImportObservationError(readError(data, response.status === 404 ? 'This scan is no longer available. Check mail to start a new scan.' : 'Sync progress could not be loaded. Your import continues on the server.'), response.status === 404);
+    if (!response.ok) {
+      if (requiresGmailReconnect(data)) throw new ImportObservationError('Reconnect Gmail to import your flights.', true);
+      throw new ImportObservationError(readError(data, response.status === 404 ? 'This scan is no longer available. Check mail to start a new scan.' : 'Sync progress could not be loaded. Your import continues on the server.'), response.status === 404);
+    }
     if ((data.parsed_count ?? 0) > parsed || (data.segment_count ?? 0) > segments) {
       parsed = data.parsed_count ?? 0;
       segments = data.segment_count ?? 0;

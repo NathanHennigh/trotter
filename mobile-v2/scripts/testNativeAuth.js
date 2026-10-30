@@ -577,6 +577,47 @@ test('a server request to reconnect Gmail stays separate from login and ordinary
   assert.equal(state.trips.length, 2); assert.equal(env.travel.getAuthRevision(), revision); assert.match(state.gmailConnectionError, /Reconnect Gmail/); env.dispose();
 });
 
+test('failed and revoked scan results expose Gmail reconnect and discard only the failed job', async () => {
+  for (const failure of [response(200, { state: 'failed', error_message: 'Reconnect Gmail to import your flights.' }),
+    response(200, { state: 'failed', error_message: 'invalid_grant: Token has been expired or revoked.' }),
+    response(409, { detail: { code: 'gmail_connection_required' } })]) {
+    const env = await signedInArchive(), revision = env.travel.getAuthRevision();
+    env.fetcher(async url => url.endsWith('/ingest/gmail/import') ? response(200, { job_id: 'revoked-job' }) : failure);
+    await env.render().syncFromGmail();
+    const state = env.render();
+    assert.equal(state.gmailConnectionStatus, 'needs_reconnect'); assert.equal(state.gmailConnected, false);
+    assert.equal(state.authStatus, 'signed-in'); assert.equal(state.status, 'idle'); assert.equal(state.trips.length, 2);
+    assert.equal(state.error, undefined); assert.equal(state.gmailSyncError, undefined); assert.match(state.gmailConnectionError, /Reconnect Gmail/);
+    assert.equal(env.travel.getAuthRevision(), revision); assert.equal(JSON.parse(env.plain.get(recoveryKey())).activeJobId, undefined);
+    let connected = false;
+    env.fetcher(gmailConnectFetcher({ trips: [itinerary(1, 1), itinerary(2, 1)], connected: () => connected,
+      prepare: redirect => { connected = true; return response(200, { url: `https://accounts.google.com/consent?app_redirect_uri=${encodeURIComponent(redirect)}` }); } }));
+    await env.render().connectGmail(); await flush();
+    assert.equal(env.render().gmailConnected, true); assert.equal(env.render().gmailSyncStatus, 'synced');
+    assert.equal(env.calls.filter(call => call.url?.endsWith('/auth/google/gmail/start')).length, 1);
+    assert.equal(env.calls.filter(call => call.url?.endsWith('/ingest/gmail/import')).length, 2);
+    assert.equal(env.calls.filter(call => call.url?.endsWith('/ingest/jobs/revoked-job')).length, 1);
+    env.dispose();
+  }
+});
+
+test('legacy string scan-start errors also expose reconnect without signing out', async () => {
+  const env = await signedInArchive();
+  env.fetcher(async () => response(400, { detail: 'Reconnect Gmail to import your flights.' }));
+  await env.render().syncFromGmail();
+  assert.equal(env.render().gmailConnected, false); assert.equal(env.render().gmailConnectionStatus, 'needs_reconnect');
+  assert.equal(env.render().authStatus, 'signed-in'); assert.equal(env.render().trips.length, 2); env.dispose();
+});
+
+test('a stale account refresh cannot hide the reconnect action after scan revocation', async () => {
+  const env = await signedInArchive(), oldIdentity = deferred();
+  env.fetcher(async url => url.endsWith('/auth/me') ? oldIdentity.promise : url.endsWith('/trips') ? response(200, [itinerary(1, 1)])
+    : url.endsWith('/ingest/gmail/import') ? response(200, { job_id: 'expired' }) : response(200, { state: 'failed', error_message: 'invalid_grant' }));
+  const refresh = env.render().refresh(); await env.render().syncFromGmail();
+  oldIdentity.resolve(identityResponse()); await refresh;
+  assert.equal(env.render().gmailConnected, false); assert.equal(env.render().gmailConnectionStatus, 'needs_reconnect'); env.dispose();
+});
+
 test('auth retry repeats Google only without a token and verifies an existing token directly', async () => {
   const env=environment();await settleRecovery(env);
   env.browserResult({type:'success',url:'trotterv2://oauthredirect?attempt=test-attempt'});
