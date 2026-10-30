@@ -129,6 +129,7 @@ class BuildSegmentsResult:
     blocked_cancellation: int = 0
     removed_other: int = 0
     affected_segment_ids: set[int] = field(default_factory=set)
+    review_reasons: list[str] = field(default_factory=list)
 
 
 # ──────────────────────────── geometry helpers ───────────────────────────────
@@ -228,6 +229,14 @@ def build_segments_and_trips_detailed(
                 result.inserted += 1
             elif action == "updated":
                 result.updated += 1
+            elif action in {"held_legacy_identity", "held_legacy_protection"}:
+                result.held += 1
+                result.held_unknown += 1
+                result.skipped += 1
+                reason = ("legacy_booking_protected" if action == "held_legacy_protection"
+                          else "legacy_flight_identity_conflict")
+                if reason not in result.review_reasons:
+                    result.review_reasons.append(reason)
             else:
                 result.skipped += 1
 
@@ -1925,7 +1934,31 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     if arr_time and dep_time and arr_time <= dep_time:
         return "skipped"
 
+    # Validate any declared recovery/schedule links before either matching path
+    # can mutate an existing segment. This lookup itself does not change clocks.
     existing = _find_same_source_segment(db, user_id, flight)
+    if existing is not None and _existing_primary_is_protected(db, user_id, existing, flight):
+        return "held_legacy_protection"
+    legacy, legacy_review = _find_legacy_local_clock_segment(db, user_id, flight)
+    if legacy_review == "protected":
+        # A source link can disambiguate identity, but cannot overrule a user's
+        # negative decision or cancellation under the legacy primary reference.
+        return "held_legacy_protection"
+    if legacy is not None:
+        # Both original wall clocks agree exactly. This only changes their
+        # representation to verified UTC; an older receipt must not replace
+        # newer booking/source facts merely because the times were unmarked.
+        # This also applies to linked legacy rows before chronology checks:
+        # correcting the time basis does not introduce a different schedule.
+        if not _refresh_existing_segment(db, legacy, flight, user_id=user_id, allow_overwrite=False):
+            return "held_legacy_protection"
+        legacy.dep_time, legacy.arr_time = dep_time, arr_time
+        meta = dict(legacy.meta_json or {})
+        meta["time_provenance"] = getattr(flight, "time_provenance")
+        legacy.meta_json = meta
+        return "updated"
+    if existing is None and legacy_review:
+        return "held_legacy_identity"
     if existing is None:
         existing = _find_supersedable_segment(db, user_id, flight)
     if existing is None:
@@ -1938,7 +1971,8 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
             else:
                 allow_overwrite = False
         if existing:
-            _refresh_existing_segment(db, existing, flight, allow_overwrite=allow_overwrite)
+            if not _refresh_existing_segment(db, existing, flight, user_id=user_id, allow_overwrite=allow_overwrite):
+                return "held_legacy_protection"
             return "updated"
 
     q = db.query(Segment).join(Trip).filter(
@@ -1958,7 +1992,8 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
 
     existing = q.first()
     if existing:
-        _refresh_existing_segment(db, existing, flight)
+        if not _refresh_existing_segment(db, existing, flight, user_id=user_id):
+            return "held_legacy_protection"
         return "updated"
 
     existing = _find_unique_trip_flight_segment(
@@ -1969,12 +2004,14 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
         flight_number=flight_number,
     )
     if existing:
-        _refresh_existing_segment(
+        if not _refresh_existing_segment(
             db,
             existing,
             flight,
+            user_id=user_id,
             allow_overwrite=not _segment_has_nonstop_evidence(existing),
-        )
+        ):
+            return "held_legacy_protection"
         return "updated"
 
     distance_km, geom = _segment_geometry(db, flight.dep_airport, flight.arr_airport)
@@ -1997,6 +2034,88 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     db.add(seg)
     db.flush()
     return "inserted"
+
+
+def _find_legacy_local_clock_segment(db: Session, user_id: int, flight):
+    """Recognize an unmarked legacy wall-clock leg without using UTC dates.
+
+    Both airport-local clocks, route and flight number must agree. A proven
+    common booking reference permits normalization in place. An exact physical
+    leg with conflicting references is held instead of making a duplicate or
+    silently joining two bookings. Existing normalized/manual rows are excluded.
+    """
+    provenance = getattr(flight, "time_provenance", None) or {}
+    if (provenance.get("version") != 1 or provenance.get("status") != "normalized"
+            or getattr(flight, "ownership", None) != "self"
+            or not getattr(flight, "source_message_id", None)
+            or getattr(flight, "force_review", False)):
+        return None, False
+    number = _normalize_flight_number(flight.flight_number)
+    code = _normalize_pnr(flight.pnr)
+    if not number or not code:
+        return None, False
+    original = {}
+    for endpoint, airport, value in (("departure", flight.dep_airport, flight.dep_time),
+                                     ("arrival", flight.arr_airport, flight.arr_time)):
+        detail = provenance.get(endpoint) or {}
+        if detail.get("basis") != "airport_local" or detail.get("airport") != airport:
+            return None, False
+        try:
+            local = datetime.fromisoformat(detail["local"])
+            previous = datetime.fromisoformat(detail["original"].replace("Z", "+00:00"))
+            normalized = datetime.fromisoformat(detail["utc"].replace("Z", "+00:00"))
+        except (KeyError, TypeError, ValueError):
+            return None, False
+        if (local.tzinfo is not None or previous.replace(tzinfo=None) != local
+                or _db_datetime(normalized) != _db_datetime(value)):
+            return None, False
+        original[endpoint] = local
+    if provenance.get("departure_local_date") != original["departure"].date().isoformat():
+        return None, False
+    candidates = []
+    for segment in db.query(Segment).join(Trip).filter(Trip.user_id == user_id,
+            Segment.dep_airport == flight.dep_airport, Segment.arr_airport == flight.arr_airport).all():
+        meta = segment.meta_json or {}
+        if (meta.get("time_provenance") or meta.get("source") in {"manual", "accepted_flight_share", "jsonld", "ics"}
+                or _normalize_flight_number(segment.flight_number) != number):
+            continue
+        if (_db_datetime(segment.dep_time) == original["departure"]
+                and _db_datetime(segment.arr_time) == original["arrival"]):
+            candidates.append(segment)
+    if not candidates:
+        return None, False
+    if any(_existing_primary_is_protected(db, user_id, segment, flight) for segment in candidates):
+        return None, "protected"
+    if len(candidates) != 1:
+        return None, "ambiguous"
+    segment = candidates[0]
+    incoming_codes = {code, *(_normalize_pnr(value) for value in getattr(flight, "pnr_aliases", None) or [])} - {None}
+    if not incoming_codes.intersection(_segment_pnr_set(segment)):
+        return None, "ambiguous"
+    return segment, False
+
+
+def _existing_primary_is_protected(db: Session, user_id: int, segment: Segment, flight) -> bool:
+    """Neither a new code nor route can overwrite a protected saved leg."""
+    from .booking_ledger import user_decision_for_flight
+    for scope in (flight, segment):
+        decision = user_decision_for_flight(db, user_id, scope, pnr=segment.pnr)
+        if decision and (decision.get("status") in {"canceled", "hold"} or decision.get("ownership") == "other"):
+            return True
+        # The saved scope can differ after a schedule/route change, but the
+        # incoming event's time still controls whether it postdates a cancel.
+        if cancellation_blocks_flight(db, user_id, scope, pnr=segment.pnr,
+                                      source_event_at=getattr(flight, "source_received_at", None)):
+            return True
+    return False
+
+
+def _local_service_day(value):
+    provenance = (getattr(value, "time_provenance", None)
+                  or (getattr(value, "meta_json", None) or {}).get("time_provenance") or {})
+    if provenance.get("status") == "normalized" and provenance.get("departure_local_date"):
+        return provenance["departure_local_date"]
+    return _db_datetime(value.dep_time).date().isoformat()
 
 
 def _find_same_source_segment(db: Session, user_id: int, flight) -> Optional[Segment]:
@@ -2118,7 +2237,7 @@ def _find_supersedable_segment(db: Session, user_id: int, flight) -> Optional[Se
     incoming_dep = _db_datetime(flight.dep_time)
     candidates = [segment for segment in q.all()
                   if (
-                      _db_datetime(segment.dep_time).date() == incoming_dep.date()
+                      _local_service_day(segment) == _local_service_day(flight)
                       if getattr(flight, "source_message_id", None)
                       else abs(_db_datetime(segment.dep_time) - incoming_dep) <= timedelta(hours=36)
                   )]
@@ -2199,7 +2318,12 @@ def _segment_source_received_at(segment: Segment):
         return None
 
 
-def _refresh_existing_segment(db: Session, segment: Segment, flight, *, allow_overwrite: bool = False) -> None:
+def _refresh_existing_segment(db: Session, segment: Segment, flight, *, user_id: int,
+                              allow_overwrite: bool = False) -> bool:
+    # Every matching fallback shares this guard before any alias, clock, route,
+    # or provenance mutation. A held leg must remain intact as one atomic unit.
+    if _existing_primary_is_protected(db, user_id, segment, flight):
+        return False
     incoming_pnr = _normalize_pnr(flight.pnr)
     if incoming_pnr and not segment.pnr:
         segment.pnr = incoming_pnr
@@ -2253,6 +2377,7 @@ def _refresh_existing_segment(db: Session, segment: Segment, flight, *, allow_ov
     for alias in getattr(flight, "pnr_aliases", []) or []:
         _add_pnr_alias(segment, alias, reason="source_message_alias")
     enrich_segment(segment, include_weather=False)
+    return True
 
 
 def _db_datetime(value):

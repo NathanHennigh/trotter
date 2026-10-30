@@ -278,6 +278,8 @@ def apply_booking_message(db, user_id: int, parsed, *, source_message_id: str,
         db, user_id, flights, source_message_id=source_message_id,
         source_event_at=event_at,
     ) if flights else BuildSegmentsResult()
+    if not review_reason and result.review_reasons:
+        review_reason = result.review_reasons[0]
     return AppliedBooking(result, canceled, cancellation, review_reason)
 
 
