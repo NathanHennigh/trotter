@@ -241,8 +241,9 @@ class TestHeuristicParser:
         assert flight.arr_airport == "ATL"
         assert flight.flight_number == "DL343"
         assert flight.dep_time.year == 2020
-        assert flight.dep_time.hour == 18
-        assert flight.arr_time.hour == 20
+        assert flight.dep_time.isoformat() == "2020-04-27T22:20:00+00:00"
+        assert flight.arr_time.isoformat() == "2020-04-28T00:53:00+00:00"
+        assert flight.time_provenance["departure"]["local"] == "2020-04-27T18:20:00"
 
     def test_aa_trip_confirmation_rows(self):
         from app.services.parser import parse_email
@@ -1448,8 +1449,8 @@ class TestAirportExtraction:
         flight = result.flights[0]
         assert (flight.dep_airport, flight.arr_airport) == ("DFW", "BNA")
         assert flight.airline == "AA"
-        assert flight.dep_time.hour == 19
-        assert flight.arr_time.hour == 21
+        assert flight.dep_time.isoformat() == "2023-09-28T00:21:00+00:00"
+        assert flight.arr_time.isoformat() == "2023-09-28T02:19:00+00:00"
 
     def test_frontier_departing_row_parses_without_confirmation_shell(self):
         from app.services.parser import parse_email

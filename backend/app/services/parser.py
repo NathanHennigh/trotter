@@ -24,7 +24,7 @@ from .passenger_identity import (
 )
 
 logger = logging.getLogger(__name__)
-PARSER_VERSION = 25
+PARSER_VERSION = 26
 
 # ──────────────────────────── regex patterns ────────────────────────────────
 
@@ -60,12 +60,12 @@ _CAPITAL_ONE_AIRLINE_CONFIRMATION = re.compile(
     \b
     (?:
         confirmation\s+codes?\s+
-        (?:American\s+Airlines|United|ANA|EVA\s+Air|Iberia|Southwest|AirAsia|Volaris|Aeromexico)
+        (?:American\s+Airlines|United|ANA|EVA\s+Air|Iberia|Southwest|AirAsia|Volaris|Aeromexico|Frontier|Spirit|Delta)
         |
-        (?:American\s+Airlines|United|ANA|EVA\s+Air|Iberia|Southwest|AirAsia|Volaris|Aeromexico)
+        (?:American\s+Airlines|United|ANA|EVA\s+Air|Iberia|Southwest|AirAsia|Volaris|Aeromexico|Frontier|Spirit|Delta)
         \s+confirmation\s+code
     )
-    \s*[:#-]?\s*
+    [\s:#*\-]*
     ([A-Z0-9]{5,8})
     \b
     """,
@@ -116,7 +116,7 @@ _PNR_STOPWORDS = _NOT_AIRPORTS | {
     "PLEASE", "TRAVEL", "ONLINE", "UNITED", "THANKS", "RECEIPT", "TICKET",
     "FLIGHT", "CHANGE", "CANCEL", "REWARD", "MOBILE", "EMAILS", "NOTICE",
     "CODES", "BELOW", "NUMBER", "CHECK", "AMERICAN", "AIRLINES", "CAPITAL",
-    "DENVER", "MANAGUA", "CONFIRMED", "CONFIMED", "EMAIL", "LETTER", "POLICY", "FORYOUR",
+    "DENVER", "MANAGUA", "CONFIRMED", "CONFIMED", "EMAIL", "LETTER", "POLICY", "FORYOUR", "WITHIN",
 }
 
 # Valid IATA airport codes from airportsdata — the primary whitelist.
@@ -1169,6 +1169,7 @@ class ParsedFlight:
     passenger_names: list[str] = field(default_factory=list)
     passenger_evidence: list[dict] = field(default_factory=list)
     ownership: str = "unknown"
+    time_provenance: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -1238,10 +1239,14 @@ def parse_email(
     apply_passenger_identity(
         result.flights, html=html, plain_text=plain_text, user_name=user_name, aliases=aliases,
     )
+    from .flight_times import normalize_flight_times
+    for flight in result.flights:
+        normalize_flight_times(flight)
     result.passenger_name = result.flights[0].passenger_name if result.flights else None
     result.status = (
         MessageStatus.ACCEPTED
-        if result.flights and all(flight.ownership == "self" for flight in result.flights)
+        if result.flights and all(flight.ownership == "self" and not getattr(flight, "force_review", False)
+                                  for flight in result.flights)
         else MessageStatus.REVIEW_REQUIRED
     )
     return result
@@ -1736,6 +1741,10 @@ def _reservation_to_flight(item: dict) -> Optional[ParsedFlight]:
         passenger_names=passenger_names,
         passenger_evidence=passenger_evidence,
         source="jsonld",
+        time_provenance={
+            "departure": {"basis": "absolute" if dep_time.tzinfo else "airport_local"},
+            "arrival": {"basis": "absolute" if arr_time.tzinfo else "airport_local"},
+        },
     )
 
 
@@ -1776,13 +1785,13 @@ def _vevent_to_flight(vevent) -> Optional[ParsedFlight]:
     arr_time = dtend.dt
 
     # Require datetime (not date-only)
-    if not isinstance(dep_time, datetime):
+    if not isinstance(dep_time, datetime) or not isinstance(arr_time, datetime):
         return None
 
-    if dep_time.tzinfo is None:
-        dep_time = dep_time.replace(tzinfo=timezone.utc)
-    if arr_time.tzinfo is None:
-        arr_time = arr_time.replace(tzinfo=timezone.utc)
+    time_provenance = {
+        "departure": {"basis": "absolute" if dep_time.tzinfo else "airport_local"},
+        "arrival": {"basis": "absolute" if arr_time.tzinfo else "airport_local"},
+    }
 
     # Prefer structured fields (summary then location) to avoid noise in description
     airports = _extract_airports(summary.upper())
@@ -1815,6 +1824,7 @@ def _vevent_to_flight(vevent) -> Optional[ParsedFlight]:
         airline=airline,
         flight_number=flight_number,
         source="ics",
+        time_provenance=time_provenance,
     )
 
 
@@ -1882,6 +1892,10 @@ def extract_heuristic_flights(text: str, received_at: Optional[datetime] = None)
             flight_number=flight_number,
             pnr=pnr,
             source="heuristic",
+            time_provenance={
+                "departure": {"basis": "absolute" if dep_time.tzinfo else "airport_local"},
+                "arrival": {"basis": "absolute" if arr_time.tzinfo else "airport_local"},
+            },
         ))
 
     return flights
@@ -1922,6 +1936,9 @@ def extract_shape_flights(
     flights.extend(_shape_column_itinerary_table(text, pnr=pnr, received_at=received_at))
     flights.extend(_shape_airline_receipt_vertical_rows(text, pnr=pnr))
     flights.extend(_shape_checkin_route_blocks(text, pnr=pnr))
+    flights.extend(_shape_boarding_pass_local_table(text, pnr=pnr))
+    flights.extend(_shape_pdf_ticket_itinerary(text, pnr=pnr))
+    flights.extend(_shape_schedule_delay_table(text, pnr=pnr))
     flights.extend(_shape_vertical_route_date_time_blocks(text, pnr=pnr))
     flights.extend(_shape_labeled_depart_arrive_segments(text, pnr=pnr))
     flights.extend(_shape_ota_vertical_itinerary(text, pnr=pnr))
@@ -1936,6 +1953,134 @@ def extract_shape_flights(
     flights.extend(_shape_vertical_itinerary_lines(text, pnr=pnr, received_at=received_at))
     flights.extend(_shape_ota_multi_confirmation(text, fallback_pnr=pnr, received_at=received_at))
     return _dedupe_flights(flights)
+
+
+def _shape_boarding_pass_local_table(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    """A checked-in traveler and a complete, explicitly local endpoint table."""
+    if not re.search(r"check-in\s+information", text, re.I):
+        return []
+    text = text.replace("：", ":")
+    headers = list(re.finditer(r"Check-in\s+Information", text, re.I))
+    if len(headers) > 1:
+        # Forwarded bundles can contain boarding passes for different people.
+        # Each name applies only to its own bounded boarding-pass table.
+        return [flight for index, marker in enumerate(headers)
+                for flight in _shape_boarding_pass_local_table(
+                    text[marker.start():headers[index + 1].start() if index + 1 < len(headers) else len(text)], pnr=pnr)]
+    header = re.search(r"Check-in\s+Information\s*:\s*Booking\s+Reference\s*:\s*"
+                       r"(?P<pnr>[A-Z0-9]{5,8})\s+Name\s*:\s*(?P<name>[^\n|]{2,100}?)"
+                       r"\s*(?=Segment(?:\s|\|)|\n|\||$)", text, re.I)
+    if not header or not re.search(r"Departure\s*\(Local Time\)\s*\|?\s*Arrival\s*\(Local Time\)", text, re.I):
+        return []
+    people = jsonld_passenger_evidence({"underName": header.group("name").strip()})
+    if not people:
+        return []
+    pattern = re.compile(
+        r"(?P<dep>[A-Z][A-Z ()'-]{2,60}?)\s+-\s+(?P<arr>[A-Z][A-Z ()'-]{2,60}?)\s*\|?\s*"
+        r"(?P<airline>[A-Z0-9]{2})(?P<number>\d{1,4})\s*\|?\s*"
+        r"(?P<dep_dt>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s*\|?\s*"
+        r"(?P<arr_dt>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})", re.I)
+    flights = []
+    for match in pattern.finditer(text):
+        dep = _airport_code_from_place_fragment(match.group("dep"))
+        arr = _airport_code_from_place_fragment(match.group("arr"))
+        airline = match.group("airline").upper()
+        if not dep or not arr or not _valid_route(dep, arr) or airline not in _KNOWN_AIRLINES:
+            continue
+        number = _format_flight_number(airline, match.group("number"))
+        try:
+            dep_time = datetime.strptime(match.group("dep_dt"), "%Y/%m/%d %H:%M").replace(tzinfo=timezone.utc)
+            arr_time = datetime.strptime(match.group("arr_dt"), "%Y/%m/%d %H:%M").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        flights.append(ParsedFlight(
+            dep_airport=dep, arr_airport=arr,
+            dep_time=dep_time, arr_time=arr_time,
+            airline=airline, flight_number=number, pnr=header.group("pnr").upper(),
+            passenger_evidence=[dict(name=people[0]["name"], source="boarding_pass_traveler",
+                role="traveler", complete=True, scope={"flight_number": number, "dep_airport": dep,
+                    "arr_airport": arr, "pnr": header.group("pnr").upper()})],
+            source="shape_boarding_pass_local_table", confidence=98,
+        ))
+    return flights
+
+
+def _shape_pdf_ticket_itinerary(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    """Ticket PDFs with explicit passenger and itinerary tables, e.g. Qantas."""
+    if not re.search(r"Passenger Ticket Information", text, re.I):
+        return []
+    header = re.search(r"Your Itinerary\s+Date Flight Number Departing Arriving Status Flight Information", text, re.I)
+    if not header:
+        return []
+    manifest = text[text.lower().index("passenger ticket information"):header.start()]
+    # Titles delimit these issued-ticket rows. Membership/account paragraphs
+    # elsewhere in the PDF are not passenger evidence.
+    names = re.findall(r"\b((?:Mr|Mrs|Ms|Miss|Dr)\.?\s+[A-Za-zÀ-ž'’ -]{2,100}?)\s+"
+                       r"(?:[A-Z]{2}\s+\d{5,}|\d{3}-\d{10}\b)", manifest)
+    pattern = re.compile(
+        r"(?P<date>\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})\s+"
+        r"(?P<airline>[A-Z0-9]{2})\s+(?P<number>\d{1,4})\s+"
+        r"(?P<dep_place>[A-Za-z .'’()-]{2,80}(?:\n[A-Za-z .'’()-]{2,60})?)\s+"
+        r"(?P<dep_time>\d{1,2}:\d{2}\s*(?:AM|PM))\s+"
+        r"(?:Terminal\s+\S+\s+)?(?P<arr_place>[A-Za-z .'’()-]{2,80})\s+"
+        r"(?P<arr_time>\d{1,2}:\d{2}\s*(?:AM|PM))\s+"
+        r"(?P<arr_date>\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})", re.I)
+    flights = []
+    section = re.split(r"Payment Details|Your Receipt Details", text[header.end():], maxsplit=1, flags=re.I)[0]
+    for match in pattern.finditer(section):
+        dep = _airport_code_from_place_fragment(re.sub(r"\s+", " ", match.group("dep_place")))
+        arr = _airport_code_from_place_fragment(match.group("arr_place"))
+        airline = match.group("airline").upper()
+        if not dep or not arr or not _valid_route(dep, arr) or airline not in _KNOWN_AIRLINES:
+            continue
+        def local(date, clock):
+            year = "%Y" if len(date.split()[-1]) == 4 else "%y"
+            return datetime.strptime(date + " " + re.sub(r"\s+", "", clock), "%d %b " + year + " %I:%M%p").replace(tzinfo=timezone.utc)
+        try:
+            dep_time, arr_time = local(match.group("date"), match.group("dep_time")), local(match.group("arr_date"), match.group("arr_time"))
+        except ValueError:
+            continue
+        number = _format_flight_number(airline, match.group("number"))
+        flights.append(ParsedFlight(dep_airport=dep, arr_airport=arr, dep_time=dep_time, arr_time=arr_time,
+            airline=airline, flight_number=number, pnr=pnr, source="shape_pdf_ticket_itinerary", confidence=98,
+            passenger_evidence=[dict(name=name.strip(), source="pdf_ticket_passenger", role="traveler",
+                complete=True, scope={"flight_number": number, "pnr": pnr} if pnr else {"flight_number": number})
+                for name in names]))
+    return flights
+
+
+def _shape_schedule_delay_table(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    """Operational delay tables put updated clocks before struck-out old ones.
+
+    Keep these as unknown ownership unless independent traveler evidence is
+    present. 'Dear ...' and a CANCEL FLIGHT action are neither ownership nor
+    cancellation evidence.
+    """
+    if not re.search(r"Flight Delayed", text, re.I) or not pnr:
+        return []
+    # The shape is emitted only when the preprocessing layer retains an
+    # unambiguous updated/old clock order for this provider's delay notices.
+    if "sun country" not in text.lower() and "suncountry.com" not in text.lower():
+        return []
+    pattern = re.compile(
+        r"\b(?P<airline>SY)(?P<number>\d{1,4})\s*\|?\s*Flight Delayed\s+.{0,45}?Nonstop\s+"
+        r"(?P<dep_time>\d{1,2}:\d{2}\s*(?:AM|PM))\s+(?:\d{1,2}:\d{2}\s*(?:AM|PM)\s+)?"
+        r"[A-Za-z /.'()-]{2,90}\((?P<dep>[A-Z]{3})\)\s+"
+        r"(?P<dep_date>[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})\s+[| \n\r\t]*\d+h\s*\d+m\s+"
+        r"(?P<arr_time>\d{1,2}:\d{2}\s*(?:AM|PM))\s+(?:\d{1,2}:\d{2}\s*(?:AM|PM)\s+)?"
+        r"[A-Za-z /.'()-]{2,90}\((?P<arr>[A-Z]{3})\)\s+"
+        r"(?P<arr_date>[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})", re.I | re.S)
+    flights = []
+    for match in pattern.finditer(text):
+        dep, arr = match.group("dep").upper(), match.group("arr").upper()
+        dep_time = _parse_date_time(match.group("dep_date"), match.group("dep_time"))
+        arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
+        if not dep_time or not arr_time or not _valid_route(dep, arr):
+            continue
+        flights.append(ParsedFlight(dep_airport=dep, arr_airport=arr, dep_time=dep_time, arr_time=arr_time,
+            airline="SY", flight_number="SY" + match.group("number"), pnr=pnr,
+            source="shape_schedule_delay_table", confidence=96))
+    return flights
 
 
 def _shape_dated_flight_cards(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
@@ -2099,8 +2244,7 @@ def _shape_labeled_route_time_blocks(
         arr_dt = _parse_partial_dow_month_day_time(match.group("arr_date"), match.group("arr_time"), received_at)
         if not dep_dt or not arr_dt:
             continue
-        if arr_dt <= dep_dt:
-            arr_dt += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flight_number = re.sub(r"\s+", "", match.group("flight").upper())
         flights.append(
             ParsedFlight(
@@ -2617,8 +2761,7 @@ def _shape_vertical_route_date_time_blocks(text: str, *, pnr: Optional[str]) -> 
         arr_time = _parse_date_time(arr_date_match.group("arr_date"), arr_time_match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -2748,8 +2891,7 @@ def _shape_compact_airline_flight_rows(
         arr_dt = _parse_partial_dow_month_day_time(match.group("arr_date"), match.group("arr_time"), received_at)
         if not dep_dt or not arr_dt:
             continue
-        if arr_dt <= dep_dt:
-            arr_dt += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -3436,8 +3578,7 @@ def _shape_lifemiles_flight_details(text: str, *, pnr: Optional[str]) -> list[Pa
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         airline = match.group("airline").upper()
         flights.append(
             ParsedFlight(
@@ -4765,8 +4906,7 @@ def _v5_legacy_terminal_itinerary_rows(
         )
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
 
         airline = _infer_airline_from_context(match.group("head")) or "UA"
         flight_number = _legacy_terminal_flight_number(match.group("head"), airline)
@@ -4805,6 +4945,12 @@ def _v5_ba_eticket_rows(text: str) -> list[_FlightEvidence]:
     rows: list[_FlightEvidence] = []
     for match in _V5_BA_ETICKET_ITINERARY.finditer(text):
         airline = _airline_code_from_name(match.group("airline_name"))
+        # The itinerary's immediately preceding flight identifier belongs to
+        # this row. Do not scan earlier receipts or an unrelated return leg.
+        prefix = text[match.start():match.start("airline_name")]
+        number = re.search(r"\b([A-Z0-9]{2})\s*(\d{1,4}[A-Z]?)\s*$", prefix, re.I)
+        flight_number = (number.group(1).upper() + number.group(2).upper()
+                         if number and number.group(1).upper() == airline else None)
         dep_airport = _airport_code_from_place_fragment(match.group("dep_place"))
         arr_airport = _airport_code_from_place_fragment(match.group("arr_place"))
         if not dep_airport or not arr_airport or not _valid_route(dep_airport, arr_airport):
@@ -4813,8 +4959,7 @@ def _v5_ba_eticket_rows(text: str) -> list[_FlightEvidence]:
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         rows.append(
             _FlightEvidence(
                 dep_airport=dep_airport,
@@ -4822,7 +4967,7 @@ def _v5_ba_eticket_rows(text: str) -> list[_FlightEvidence]:
                 dep_time=dep_time,
                 arr_time=arr_time,
                 airline=airline,
-                flight_number=None,
+                flight_number=flight_number,
                 score=8,
                 source="v5_ba_eticket",
             )
@@ -5007,8 +5152,7 @@ def _extract_delta_trip_details_flights(
         arr_time = _parse_short_date_time(match.group("arr_date"), match.group("arr_time"), received_at)
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -5094,8 +5238,7 @@ def _extract_frontier_confirmation_flights(text: str, pnr: Optional[str]) -> lis
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -5123,8 +5266,7 @@ def _extract_airline_departs_arrives_flights(text: str, pnr: Optional[str]) -> l
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -5152,8 +5294,7 @@ def _extract_labeled_route_time_flights(text: str, pnr: Optional[str]) -> list[P
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -5289,8 +5430,7 @@ def _extract_priceline_alert_flights(text: str, pnr: Optional[str]) -> list[Pars
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -5381,8 +5521,7 @@ def _extract_aa_text_itinerary_flights(text: str, pnr: Optional[str]) -> list[Pa
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -5442,8 +5581,7 @@ def _extract_alaska_partner_confirmation_flights(
                 )
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -5514,8 +5652,7 @@ def _extract_delta_forwarded_itinerary_flights(text: str, pnr: Optional[str]) ->
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -5573,8 +5710,7 @@ def _extract_sun_country_trip_flights(text: str, pnr: Optional[str]) -> list[Par
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -5757,8 +5893,7 @@ def _extract_ba_eticket_itinerary_flights(text: str, pnr: Optional[str]) -> list
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -5798,8 +5933,7 @@ def _extract_lifemiles_flights(text: str, pnr: Optional[str]) -> list[ParsedFlig
         arr_time = _parse_date_time(match.group("arr_date"), match.group("arr_time"))
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -6105,8 +6239,7 @@ def _extract_aa_hold_table_flights(
         arr_time = _parse_short_date_time(match.group("arr_date"), match.group("arr_time"), received_at)
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -6141,8 +6274,7 @@ def _extract_partner_award_flights(
         arr_time = _parse_short_date_time(match.group("arr_date"), match.group("arr_time"), received_at)
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -6176,8 +6308,7 @@ def _extract_airline_route_flight_flights(
         arr_time = _parse_short_date_time(match.group("arr_date"), match.group("arr_time"), received_at)
         if not dep_time or not arr_time:
             continue
-        if arr_time <= dep_time:
-            arr_time += timedelta(days=1)
+        # Both calendar dates are explicit; airport-local clocks can run backwards.
         flights.append(
             ParsedFlight(
                 dep_airport=dep_airport,
@@ -7060,11 +7191,11 @@ def _parse_iso(dt_str: str) -> datetime:
 # ISO and "Month DD, YYYY HH:MM AM/PM" patterns
 _DT_PATTERNS = [
     re.compile(
-        r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:?\d{2}|Z)?",
+        r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:?\d{2}|Z|\s*(?:UTC|GMT))?",
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{1,2},?\s+\d{4}\s+\d{1,2}:\d{2}\s*(?:AM|PM)?",
+        r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\.?\s+\d{1,2},?\s+\d{4}\s+\d{1,2}:\d{2}\s*(?:AM|PM)?(?:\s*(?:UTC|GMT))?",
         re.IGNORECASE,
     ),
 ]
@@ -7072,6 +7203,8 @@ _DT_PATTERNS = [
 _DT_FORMATS = [
     "%Y-%m-%dT%H:%M:%S%z",
     "%Y-%m-%dT%H:%M%z",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M",
     "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d %H:%M",
     "%B %d, %Y %I:%M %p",
@@ -7083,14 +7216,15 @@ _DT_FORMATS = [
 
 def _parse_flexible(s: str) -> Optional[datetime]:
     s = s.strip()
+    named_utc = bool(re.search(r"\s*(?:UTC|GMT)$", s, re.I))
+    if named_utc:
+        s = re.sub(r"\s*(?:UTC|GMT)$", "", s, flags=re.I)
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
     for fmt in _DT_FORMATS:
         try:
             dt = datetime.strptime(s, fmt)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
+            return dt.replace(tzinfo=timezone.utc) if named_utc else dt
         except ValueError:
             pass
     return None

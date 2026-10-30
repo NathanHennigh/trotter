@@ -32,6 +32,7 @@ x-backend-environment: &backend-environment
   TROTTER_DOMAINS_CSV: /app/domains.csv
   TROTTER_PARSE_WORKERS: ${TROTTER_PARSE_WORKERS:-4}
   TROTTER_ENABLE_AUTOMATIC_BACKFILL: ${TROTTER_ENABLE_AUTOMATIC_BACKFILL:-true}
+  TROTTER_GMAIL_HISTORY_USER_IDS: ${TROTTER_GMAIL_HISTORY_USER_IDS:-}
   TROTTER_ENABLE_RECALL_DISCOVERY_TIERS: ${TROTTER_ENABLE_RECALL_DISCOVERY_TIERS:-true}
   TROTTER_GMAIL_NETWORK_RETRY_SECONDS: ${TROTTER_GMAIL_NETWORK_RETRY_SECONDS:-1800}
   TROTTER_GMAIL_NETWORK_RETRY_INTERVAL_SECONDS: ${TROTTER_GMAIL_NETWORK_RETRY_INTERVAL_SECONDS:-30}
@@ -204,6 +205,24 @@ services:
       redis:
         condition: service_healthy
     stop_grace_period: 2m
+    logging: *default-logging
+
+  worker-history:
+    image: trotter-backend:local
+    restart: unless-stopped
+    environment: *backend-environment
+    secrets: *backend-secrets
+    command: ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=INFO", "--queues=gmail_history", "--concurrency=1", "--prefetch-multiplier=1", "--hostname=history@%h"]
+    cpus: "0.50"
+    mem_limit: 1g
+    volumes:
+      - trotter_data:/var/lib/trotter
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    stop_grace_period: 6m
     logging: *default-logging
 
   worker-locations:

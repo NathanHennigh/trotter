@@ -61,6 +61,7 @@ def _observation_flight(observation):
         confidence=facts.get("confidence"), nonstop=bool(facts.get("nonstop")), aircraft=facts.get("aircraft"),
         ownership=observation.ownership, passenger_names=facts.get("passenger_names") or [],
         passenger_evidence=facts.get("passenger_evidence") or [], force_review=False,
+        time_provenance=facts.get("time_provenance"),
     )
 
 
@@ -173,7 +174,7 @@ def decide_booking_observation(
                     Segment.dep_airport == flight.dep_airport, Segment.arr_airport == flight.arr_airport,
                 ).all()
                 matching = [segment for segment in candidates
-                            if event_time(segment.dep_time).date() == flight.dep_time.date()
+                            if flight_scope(segment)['travel_date'] == flight_scope(flight)['travel_date']
                             and _normalize_flight_number(segment.flight_number) == flight.flight_number]
                 trip_ids = {segment.trip_id for segment in matching}
                 affected_ids = {segment.id for segment in matching}

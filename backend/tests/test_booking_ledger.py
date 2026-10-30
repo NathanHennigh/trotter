@@ -219,6 +219,31 @@ def test_sourced_import_and_cancel_leave_unrelated_legacy_rows_exactly_unchanged
     assert not canceled_history_ids.intersection(old_segments)
 
 
+@pytest.mark.parametrize('reverse', [False, True])
+@pytest.mark.parametrize('arrival,return_airport', [('DCA', 'IAD'), ('JFK', 'LGA')])
+def test_incremental_import_joins_verified_return_from_same_metro(db_user, reverse, arrival, return_airport):
+    db, user = db_user
+    outbound = flight(number='UA100', pnr='OUT001', dep='IAH', arr=arrival, day='2025-02-18')
+    inbound = flight(number='UA200', pnr='RET001', dep=return_airport, arr='IAH', day='2025-02-23')
+    legs = [outbound, inbound]
+    for item in reversed(legs) if reverse else legs:
+        ingest(db, user, [item], item.pnr)
+    assert db.query(Segment).count() == 2
+    assert db.query(Trip).count() == 1
+    assert len({row.trip_id for row in db.query(Segment)}) == 1
+
+
+def test_incremental_metro_join_does_not_cross_home_airport_change(db_user, monkeypatch):
+    from app.services import builder
+    monkeypatch.setattr(builder, '_infer_home_airport', lambda segments: 'IAH')
+    db, user = db_user
+    first = flight(number='UA100', pnr='HOME01', dep='DCA', arr='IAH', day='2025-02-18')
+    second = flight(number='WN200', pnr='HOME02', dep='HOU', arr='DEN', day='2025-02-23')
+    for item in [first, second]:
+        ingest(db, user, [item], item.pnr)
+    assert db.query(Segment).count() == 2 and db.query(Trip).count() == 2
+
+
 def test_explicit_user_other_decision_can_correct_previously_verified_self(db_user):
     db, user = db_user
     fact = flight()

@@ -24,11 +24,11 @@ _NON_NAME = set(
     "departure arrival date meals baggage terminal receipt email phone contact address reservation "
     "status confirmed airline miles points boarding confirmation record locator itinerary customer "
     "support taxes amount service document document(s) your complete return departing arriving "
-    "facility charge security fee fees rights disabilities who subtotal bundle bundles bags services none na".split()
+    "facility charge security fee fees rights notices disabilities who subtotal bundle bundles bags services none na".split()
 )
 _LABEL = re.compile(
     r"^\s*(?:passenger(?:\(s\)|s)?|travel(?:l?er)(?:\(s\)|s)?|guests?)"
-    r"(?:\s+(?:names?|information|details))?"
+    r"(?:\s+(?:name(?:\(s\)|s)?|information|details))?"
     r"(?:\s*[#(]?\s*(?P<count>\d+)\s*\)?)?\s*(?::|\||\s|$)\s*(?P<value>.*)$",
     re.I,
 )
@@ -65,8 +65,8 @@ def names_match(passenger: str, candidate: str) -> bool:
     # Airlines often print FAMILY/GIVENMIDDLE. Only exact concatenation of
     # explicitly supplied names is safe: ELISHA must not match ELISHABETH.
     for printed, full in ((passenger, b), (candidate, a)):
-        if printed.count("/") == 1 and len(full) >= 2:
-            family, given = printed.split("/")
+        if len(re.findall(r"[/,]", printed)) == 1 and len(full) >= 2:
+            family, given = re.split(r"[/,]", printed)
             if (_tokens(family) == [full[-1]] and full[-1] not in _SUFFIX
                     and "".join(_tokens(given)) == "".join(full[:-1])):
                 return True
@@ -107,7 +107,7 @@ def full_names_match(passenger: str, candidate: str) -> bool:
 
 
 def _name(value: str) -> str | None:
-    value = re.sub(r"^\s*(?:\d+[.)-]?\s+)", "", value).strip(" \t:*|-")
+    value = re.sub(r"^\s*\d+\s*[.)-]?\s+", "", value).strip(" \t:*|-")
     value = re.sub(r"\s+Not\s+a\s+.{0,80}?Member\b.*$", "", value, flags=re.I)
     value = re.sub(r"\s*\((?:adult|child|infant|adt|chd|inf)\)\s*", " ", value, flags=re.I)
     value = re.sub(r"\s+", " ", value).strip()
@@ -117,6 +117,8 @@ def _name(value: str) -> str | None:
     if any(p in _NON_NAME or not p.isalpha() for p in parts):
         return None
     if any(c in value for c in "@<>:="):
+        return None
+    if re.fullmatch(r"[A-Z]{3}\s+(?:to|[-–→])\s+[A-Z]{3}", value, re.I):
         return None
     return value
 
@@ -221,11 +223,23 @@ def _text_evidence(text: str, source: str, flights: list) -> list[dict]:
             continue
         raw = match.group("value").strip()
         names = _names(raw) if raw else []
+        if re.match(r"passenger\s+(?:notices|rights|service charge|facility charge)\b", line, re.I):
+            continue
         complete = not (names and any(not _name(part) for part in raw.split(";") if part.strip()))
         end = index
         # An explicit header may be followed by column labels before names.
-        for follow in range(index + 1, min(len(lines), index + 25)):
+        for follow in range(index + 1, min(len(lines), index + 40)):
             current = lines[follow]
+            if not names and re.fullmatch(r"Subtotal\s*:\s*[$£€]?\d[\d,.]*", current, re.I):
+                continue
+            # These are metadata *inside* a passenger list, never evidence of
+            # a person. Stop at every other section boundary as before.
+            if names and re.fullmatch(r"Seat\s*:[^|\n]{0,30}\s+Class\s*:[^|\n]{1,40}", current, re.I):
+                continue
+            if names and re.match(r"Not a FRONTIER Miles\w* Member\?", current, re.I):
+                continue
+            if names and re.match(r"(?:<?https?://|<\[link\])", current, re.I):
+                continue
             if _LABEL.match(current) or _BOUNDARY.match(current):
                 break
             if re.fullmatch(r"(?:adult|child|infant)(?:\(s\)|s)?", current, re.I):
@@ -305,31 +319,48 @@ def _fare_ticket_evidence(lines: list[str], source: str, flights: list) -> list[
     for index, line in enumerate(lines):
         if re.fullmatch(r"(?:your\s+)?confirmation codes", line, re.I):
             for entry in lines[index + 1:index + 9]:
-                if "|" in entry:
-                    code = entry.split("|")[-1].strip().upper()
-                    if code in pnrs:
-                        listed_codes.add(code)
+                code = entry.split("|")[-1].strip().upper()
+                if code in pnrs:
+                    listed_codes.add(code)
     evidence = []
     for start in starts:
         person: str | None = None
-        for line in lines[start + 1:start + 30]:
+        tickets: list[str] = []
+        fare = taxes = False
+
+        def flush() -> None:
+            if not person or not (tickets or (fare and taxes)):
+                return
+            multiple = len(pnrs) > 1
+            combined = (len(starts) == 1 and listed_codes == pnrs
+                        and (not tickets or len(tickets) >= len(pnrs)))
+            # A combined, named fare table identifies its travelers even when
+            # a low-cost airline has no 13-digit ticket number. All booking
+            # codes must be explicitly listed; arbitrary adjacent bookings
+            # never inherit a traveler from this section.
+            scope = {"pnrs": sorted(pnrs)} if pnrs and (not multiple or combined) else {}
+            evidence.append(dict(name=person,
+                source=source + ("_fare_ticket_holder" if tickets else "_named_fare_holder"),
+                role="traveler", complete=True, scope=scope,
+                scope_ambiguous=multiple and not combined, ticket_count=len(tickets)))
+
+        for line in lines[start + 1:start + 60]:
             if re.match(r"(?:payment|card payment|travel credits|total|airline fare rules|helpful links)\b", line, re.I):
                 break
             name = _name(line)
-            if name:
-                person = name
+            if name and len(_tokens(name)) >= 2:
+                flush()
+                person, tickets, fare, taxes = name, [], False, False
                 continue
-            if person and re.search(r"\bticket\s*(?:#|number|no\.)", line, re.I):
-                tickets = re.findall(r"\b\d{13}\b", line)
-                if not tickets:
-                    continue
-                multiple = len(pnrs) > 1
-                combined = len(starts) == 1 and listed_codes == pnrs and len(tickets) >= len(pnrs)
-                scope = {"pnrs": sorted(pnrs)} if pnrs and (not multiple or combined) else {}
-                evidence.append(dict(name=person, source=source + "_fare_ticket_holder", role="traveler",
-                                     complete=True, scope=scope, scope_ambiguous=multiple and not combined,
-                                     ticket_count=len(tickets)))
-                person = None
+            if not person:
+                continue
+            if re.search(r"\bticket\s*(?:#|number|no\.)", line, re.I):
+                tickets.extend(re.findall(r"\b\d{13}\b", line))
+            if re.match(r"Base Fare\s*:", line, re.I) and re.search(r"\d[.,]\d{2}", line):
+                fare = True
+            if re.match(r"Taxes (?:and|&) Fees\s*:", line, re.I) and re.search(r"\d[.,]\d{2}", line):
+                taxes = True
+        flush()
     return evidence
 
 

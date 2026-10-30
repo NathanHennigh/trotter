@@ -18,7 +18,8 @@ from .booking_ledger import booking_code, event_time, user_decision_for_flight
 from .builder import _normalize_flight_number, build_segments_and_trips_detailed
 from .import_lock import ImportAlreadyRunning, user_import_lock
 from .passenger_identity import full_names_match
-from .travel_inbox import _cancellation_state, _source_order, observation_flight_key
+from .travel_inbox import _cancellation_state
+from .booking_reconciliation import observation_groups, resolve_group, current_document_versions
 
 
 def now():
@@ -72,7 +73,7 @@ def queue_recovery(db, user, *, force=False):
 def original_source(observation):
     facts = observation.facts or {}
     return (not facts.get("user_decision")
-            and facts.get("source") not in {"user_review", "travel_name_recovery", "flight_share", "accepted_flight_share"})
+            and facts.get("source") not in {"user_review", "travel_name_recovery", "booking_repair_reconciliation", "flight_share", "accepted_flight_share"})
 
 
 def matching_evidence(observation, names):
@@ -96,7 +97,9 @@ def flight_from(observation):
         source="travel_name_recovery", source_received_at=event_time(observation.source_event_at),
         confidence=facts.get("confidence"), nonstop=bool(facts.get("nonstop")), aircraft=facts.get("aircraft"),
         ownership="self", passenger_names=facts.get("passenger_names") or [],
-        passenger_evidence=facts.get("passenger_evidence") or [], force_review=bool(facts.get("force_review")))
+        passenger_evidence=facts.get("passenger_evidence") or [], force_review=bool(facts.get("force_review")),
+        **{key: facts.get(key) for key in ('time_provenance', 'source_time_provenance', 'parser_version',
+            'recovery_observation_ids', 'reconciles_observation_ids', 'document_provenance', 'mail_received_at')})
 
 
 def active_shares_for_item(db, user_id, item_id):
@@ -133,34 +136,36 @@ def recover_batch(db, job, *, batch_size=75):
     rows = db.query(BookingObservation).filter(
         BookingObservation.user_id == job.user_id, BookingObservation.id > job.cursor,
         BookingObservation.id <= job.max_observation_id).order_by(BookingObservation.id).limit(batch_size).all()
+    original_rows = db.query(BookingObservation).filter(BookingObservation.user_id == job.user_id,
+        BookingObservation.id <= job.max_observation_id).order_by(BookingObservation.id).all()
+    groups = observation_groups(original_rows)
+    groups_by_anchor = {max(row.id for row in group): group for group in groups}
     job.state = "running"
     for observation in rows:
         job.cursor = observation.id
         if not original_source(observation):
             continue
         job.checked += 1
-        if not matching_evidence(observation, job.names):
+        group = groups_by_anchor.get(observation.id)
+        if not group or not any(matching_evidence(row, job.names) for row in current_document_versions(group)):
             continue
-        siblings = db.query(BookingObservation).filter_by(user_id=job.user_id, pnr=observation.pnr,
-            travel_date=observation.travel_date, dep_airport=observation.dep_airport,
-            arr_airport=observation.arr_airport).all()
-        latest = max((row for row in siblings if original_source(row)
-                      and observation_flight_key(row) == observation_flight_key(observation)), key=_source_order)
-        if latest.id != observation.id:
-            if not matching_evidence(latest, job.names):
-                job.needs_review += 1
-            continue
-        matches = matching_evidence(observation, job.names)
-        if any(not full_names_match(left["name"], right["name"]) for left in matches for right in matches):
+        resolved = resolve_group(group, job.names)
+        if resolved.review_reason:
             job.needs_review += 1
             continue
-        flight = flight_from(observation)
-        if recovery_blocked(db, job.user_id, observation, flight, job.names):
+        if not resolved.schedule:
+            continue
+        flight = flight_from(resolved.schedule)
+        flight.passenger_evidence = resolved.passenger_evidence
+        flight.passenger_names = list(dict.fromkeys(entry['name'] for entry in resolved.passenger_evidence))
+        flight.recovery_observation_ids = sorted(row.id for row in group)
+        protected_sources = [row for row in group if row.id in resolved.source_ids]
+        if any(recovery_blocked(db, job.user_id, row, flight_from(row), job.names) for row in protected_sources):
             job.needs_review += 1
             continue
         result = build_segments_and_trips_detailed(db, job.user_id, [flight],
             source_message_id=f"travel-name:{observation.id}:{job.fingerprint}",
-            source_event_at=event_time(observation.source_event_at))
+            source_event_at=event_time(resolved.schedule.source_event_at))
         job.added += result.inserted
         job.existing += 1 if not result.inserted and not result.held else 0
         job.needs_review += 1 if result.held else 0

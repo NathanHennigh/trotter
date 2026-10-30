@@ -16,10 +16,10 @@ BODY = (Path(__file__).parent / "fixtures/bilt-confirmation-evidence.txt").read_
 
 
 @pytest.mark.parametrize("mode,version,force,discover,valid_itinerary", [
-    ("sync", 24, False, False, True),  # Older receipt outside the incremental Gmail window.
+    ("reparse", 24, False, False, True),  # Explicit recovery of receipts outside the incremental window.
     ("reparse", 25, True, False, True),  # Explicit repair of a current-version ignored row.
     ("sync", 25, True, True, True),  # Current row discovered before the recovery loop.
-    ("sync", 24, False, False, False),  # Matching headers alone must not unignore mail.
+    ("reparse", 24, False, False, False),  # Matching headers alone must not unignore mail.
 ])
 def test_worker_recovers_ignored_bilt_without_claiming_an_unnamed_passenger(tmp_path, monkeypatch, mode, version, force, discover, valid_itinerary):
     engine = create_engine(f"sqlite:///{tmp_path / 'recovery.sqlite'}")

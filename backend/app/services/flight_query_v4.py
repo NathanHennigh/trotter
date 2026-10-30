@@ -183,8 +183,7 @@ def build_discovery_plan(
             for query in build_broad_queries(since=_gmail_after_date(broad_start))
         )
 
-    if ENABLE_AUTOMATIC_BACKFILL and not state.backfill_complete:
-        plan.extend(_build_backfill_windows(state, now, max_backfill_windows=max_backfill_windows))
+    # Historical pages run in a separate bounded background lane.
 
     return plan
 
@@ -266,11 +265,6 @@ def mark_discovery_plan_success(
 ) -> None:
     """Persist successful incremental and backfill progress."""
     state.last_incremental_scan_at = _ensure_utc(scan_started_at)
-    if not ENABLE_AUTOMATIC_BACKFILL:
-        state.backfill_complete = True
-        state.backfill_cursor_before = _ensure_utc(scan_started_at)
-        state.updated_at = datetime.now(timezone.utc)
-        return
     backfill_items = [item for item in plan if item.tier == "exhaustive_backfill"]
     if backfill_items:
         oldest_start = min(item.window_start for item in backfill_items if item.window_start)

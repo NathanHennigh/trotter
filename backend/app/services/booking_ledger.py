@@ -52,8 +52,9 @@ def booking_code(value):
 
 def flight_scope(flight):
     departure = event_time(getattr(flight, "dep_time", None))
+    local_date = (getattr(flight, "time_provenance", None) or (getattr(flight, "meta_json", None) or {}).get('time_provenance') or {}).get("departure_local_date")
     return {
-        "travel_date": departure.date().isoformat() if departure else None,
+        "travel_date": local_date or (departure.date().isoformat() if departure else None),
         "dep_airport": getattr(flight, "dep_airport", None),
         "arr_airport": getattr(flight, "arr_airport", None),
         "flight_number": str(getattr(flight, "flight_number", None) or "").replace(" ", "").upper() or None,
@@ -74,6 +75,9 @@ def flight_facts(flight):
         "dep_airport", "arr_airport", "dep_time", "arr_time", "airline", "flight_number",
         "pnr", "pnr_aliases", "source", "source_received_at", "confidence", "nonstop", "aircraft",
         "ownership", "passenger_names", "passenger_evidence", "force_review",
+        "time_provenance", "source_time_provenance", "parser_version", "recovery_observation_ids",
+        "reconciles_observation_ids", "mail_received_at",
+        "document_provenance",
     )
     return {name: _json_value(getattr(flight, name, None)) for name in names}
 

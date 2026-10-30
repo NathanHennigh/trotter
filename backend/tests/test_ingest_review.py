@@ -149,6 +149,27 @@ def test_missing_pnr_removal_returns_actionable_422_without_mutation(api):
     assert api.db.query(Segment).count() == 0
 
 
+def test_cancellation_review_uses_local_date_across_legacy_and_normalized_evidence(api):
+    target = fact(ownership='self')
+    target.dep_time = datetime(2025, 2, 19, 5, 30)
+    target.arr_time = datetime(2025, 2, 19, 8, 20)
+    target.time_provenance = {'version': 1, 'status': 'normalized', 'departure_local_date': '2025-02-18'}
+    seed(api, [target], message='normalized')
+    # An existing older receipt still has wall-clock times tagged UTC, but the
+    # review refers to the same airport-local day and must remove that leg only.
+    from app.services.booking_ledger import record_flight_observations
+    legacy = fact(ownership='self'); legacy.dep_time = datetime(2025, 2, 18, 23, 30)
+    legacy.arr_time = datetime(2025, 2, 19, 3, 20)
+    record_flight_observations(api.db, api.user.id, [legacy], source_message_id='legacy')
+    api.db.commit()
+    observation = api.db.query(BookingObservation).filter_by(source_message_id='legacy').one()
+    response = api.client.post(f'/ingest/booking-observations/{observation.id}/decision', json={'decision': 'canceled'})
+    assert response.status_code == 200, response.text
+    assert response.json()['removed'] == 1
+    api.db.expire_all()
+    assert api.db.query(Segment).count() == 0
+
+
 def test_one_decision_does_not_resolve_other_ambiguous_legs(api):
     observations = seed(api, [fact(), fact(day="2025-02-19")])
     first = api.client.post(f"/ingest/booking-observations/{observations[0].id}/decision", json={"decision": "self"})

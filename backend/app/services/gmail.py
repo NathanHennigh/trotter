@@ -164,6 +164,7 @@ def list_messages(
     service,
     query: Optional[str] = None,
     page_token: Optional[str] = None,
+    max_results: int = 500,
 ) -> tuple[list[dict], Optional[str]]:
     """Fetch one page of message stubs. Returns (messages, next_page_token)."""
     if query is None:
@@ -171,7 +172,7 @@ def list_messages(
         query = build_gmail_query()
 
     def _call():
-        params: dict = {"userId": "me", "maxResults": 500}
+        params: dict = {"userId": "me", "maxResults": min(500, max(1, max_results))}
         if query:
             params["q"] = query
         if page_token:

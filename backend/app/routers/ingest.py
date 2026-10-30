@@ -33,6 +33,7 @@ class JobStatusResponse(BaseModel):
     started_at: Optional[datetime]
     updated_at: Optional[datetime]
     error_message: Optional[str] = None
+    history: Optional[dict] = None
 
 
 class UnparsedCandidateOut(BaseModel):
@@ -123,7 +124,18 @@ def get_job_status(
         started_at=job.started_at,
         updated_at=job.updated_at,
         error_message=job.error_message,
+        history=_history_progress(db, current_user.id),
     )
+
+
+def _history_progress(db, user_id: int) -> dict:
+    from ..services.gmail_history import history_progress
+    return history_progress(db, user_id)
+
+
+@router.get("/gmail/history")
+def get_gmail_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    return _history_progress(db, current_user.id)
 
 
 @router.get("/unparsed-candidates", response_model=UnparsedCandidateListResponse)

@@ -8,7 +8,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from hashlib import sha256
 
@@ -458,7 +458,7 @@ def _ignored_bilt_confirmation_filter():
 
 
 @celery_app.task(name="gmail.import")
-def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: str | None = None) -> dict:
+def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: str | None = None, message_ids: list[str] | None = None, history_state_id: int | None = None) -> dict:
     """Fetch and parse all flight-related Gmail messages for a user."""
     global _ACTIVE_PROGRESS_PHASE
     _ACTIVE_PROGRESS_PHASE = None
@@ -490,10 +490,16 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
 
     from app.services.flight_query_v2 import looks_like_flight_email
     from app.services.flight_evidence import assess_flight_evidence
+    from app.services.flight_message import message_internal_time
 
     db = SessionLocal()
     import_mode = (mode or "sync").lower()
-    reparse_only = import_mode in {"reparse", "repair", "stale_reparse"}
+    history_only = import_mode == "history"
+    exact_only = import_mode == "exact_reprocess"
+    reparse_only = import_mode in {"reparse", "repair", "stale_reparse"} or history_only or exact_only
+    failed_message_ids: set[str] = set()
+    history_started = time.monotonic()
+    history_deferred = False
     total_estimate = 0
     if limit == 0:
         sync_limit = None
@@ -514,7 +520,25 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             logger.error("SyncJob %s not found", job_id)
             return {"error": "job_not_found"}
 
-        import_guards.enter_context(user_import_lock(db.get_bind(), user_id))
+        try:
+            import_guards.enter_context(user_import_lock(db.get_bind(), user_id))
+        except Exception as exc:
+            from app.services.import_lock import ImportAlreadyRunning
+            from app.models import GmailHistoryState
+            # Recent scans keep their existing job while the historical lane
+            # cooperatively yields; never fail the user's request just for this.
+            history_running = (not reparse_only and isinstance(exc, ImportAlreadyRunning)
+                and db.query(GmailHistoryState.id).filter_by(user_id=user_id, state="running").first())
+            if not history_running:
+                raise
+            if celery_app.conf.task_always_eager:
+                # Eager execution ignores countdown and would recurse while the
+                # same OS lock is held. Local callers can retry after it finishes.
+                raise ImportAlreadyRunning("Historical import is finishing. Retry the recent scan shortly.")
+            job.state, job.updated_at = "pending", datetime.now(timezone.utc)
+            db.commit()
+            run_gmail_import.apply_async(kwargs={"job_id": job_id, "user_id": user_id, "limit": limit, "mode": mode}, countdown=3, retry=False)
+            return {"job_id": job_id, "state": "pending", "waiting_for_history": True}
 
         job.state = "running"
         job.started_at = datetime.now(timezone.utc)
@@ -543,6 +567,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
         aliases = list(getattr(user, "travel_name_aliases", None) or []) if user else []
         fetch_batch_size = _env_int("TROTTER_GMAIL_BATCH_SIZE", 50) or 50
         parse_workers = _env_int("TROTTER_PARSE_WORKERS", 4) or 4
+        if history_only:
+            fetch_batch_size = parse_workers = 1
 
         used_gmail_token = account.refresh_token_encrypted
         service = build_gmail_service(used_gmail_token)
@@ -577,102 +603,39 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
         db.commit()
 
         processed_msg_ids: set[str] = set()
-        force_reparse_ids = _env_message_ids("TROTTER_REPARSE_MESSAGE_IDS")
+        force_reparse_ids = set(message_ids or ()) if exact_only else _env_message_ids("TROTTER_REPARSE_MESSAGE_IDS")
         phase_labels = _tier_phase_labels(discovery_plan)
         current_tier: str | None = None
 
         def parse_full_message(candidate, full_msg: dict) -> dict:
-            msg_id = candidate.msg["id"]
-            headers = extract_headers(full_msg)
-            plain_text, html = extract_message_body(full_msg)
-            attachments = extract_attachments(full_msg)
-            subject = headers.get("subject", "")
-            from_email = headers.get("from", "")
-            body_for_filter = plain_text if plain_text.strip() else html
-            flight_like_candidate = False
-            evidence = assess_flight_evidence(
-                subject=subject,
-                sender=from_email,
-                body=body_for_filter,
+            from app.services.flight_message import prepare_flight_message
+            started = time.perf_counter()
+            payload = prepare_flight_message(
+                full_msg, user_name=user_name, aliases=aliases,
+                documents=full_msg.get("_trotter_documents", ()),
+                force_parse=(candidate.msg["id"] in force_reparse_ids
+                             or candidate.tier == "stale_reparse" and candidate.msg["id"] in _targeted_reparse_message_ids()),
             )
-            pnr = _extract_pnr(f"{subject}\n{body_for_filter}".upper())
-            if _should_skip_expensive_parse(
-                tier=candidate.tier,
-                prefilter=candidate.prefilter,
-                evidence=evidence,
-                force_parse=msg_id in force_reparse_ids,
-            ):
-                return {
-                    "candidate": candidate,
-                    "msg_id": msg_id,
-                    "full_msg": full_msg,
-                    "headers": headers,
-                    "subject": subject,
-                    "from_email": from_email,
-                    "body_for_filter": body_for_filter,
-                    "evidence": evidence,
-                    "flight_like_candidate": False,
-                    "prefilter_skipped": False,
-                    "evidence_skipped": True,
-                    "parse_result": None,
-                    "parse_seconds": None,
-                    "pnr": pnr,
-                }
+            payload.update(candidate=candidate, parse_seconds=time.perf_counter() - started,
+                           document_errors=full_msg.get("_trotter_document_errors", []))
+            return payload
 
-            if looks_like_flight_email:
-                flight_like_candidate = looks_like_flight_email(
-                    subject=subject,
-                    sender=from_email,
-                    body=body_for_filter,
-                )
-                if candidate.prefilter and not flight_like_candidate and msg_id not in force_reparse_ids:
-                    return {
-                        "candidate": candidate,
-                        "msg_id": msg_id,
-                        "full_msg": full_msg,
-                        "headers": headers,
-                        "subject": subject,
-                        "from_email": from_email,
-                        "body_for_filter": body_for_filter,
-                        "evidence": evidence,
-                        "flight_like_candidate": False,
-                        "prefilter_skipped": True,
-                        "evidence_skipped": False,
-                        "parse_result": None,
-                        "parse_seconds": None,
-                        "pnr": None,
-                    }
-
-            parse_started = time.perf_counter()
-            parse_result = parse_email(
-                html=html,
-                plain_text=plain_text,
-                attachments=attachments,
-                user_name=user_name,
-                aliases=aliases,
-                received_at=headers.get("date"),
-                subject=headers.get("subject"),
-                from_email=headers.get("from"),
-            )
-            parse_seconds = time.perf_counter() - parse_started
-            return {
-                "candidate": candidate,
-                "msg_id": msg_id,
-                "full_msg": full_msg,
-                "headers": headers,
-                "subject": subject,
-                "from_email": from_email,
-                "body_for_filter": body_for_filter,
-                "evidence": evidence,
-                "flight_like_candidate": flight_like_candidate,
-                "prefilter_skipped": False,
-                "evidence_skipped": False,
-                "parse_result": parse_result,
-                "parse_seconds": parse_seconds,
-                "pnr": pnr,
-                "plain_text": plain_text,
-                "html": html,
-            }
+        def prepare_attachments(payload: dict) -> dict:
+            # First parse body facts. Complete city-name itineraries do not need
+            # their duplicate boarding PDF downloaded just to prove completeness.
+            from app.services.flight_documents import attachment_manifest, needs_ticket_documents, load_ticket_documents
+            full_msg = payload["full_msg"]
+            if not attachment_manifest(full_msg):
+                return payload
+            if needs_ticket_documents(full_msg, subject=payload["subject"], body=payload["body_for_filter"],
+                                      evidence=payload["evidence"], parsed_result=payload["parse_result"], body_parse_checked=True):
+                # Gmail's client is not thread safe: attachment I/O stays serial.
+                documents, errors = load_ticket_documents(service, full_msg)
+                if documents:
+                    full_msg["_trotter_documents"] = documents
+                    payload = parse_full_message(payload["candidate"], full_msg)
+                payload["document_errors"] = errors
+            return payload
 
         def mark_resolved_ignored(
             *,
@@ -693,7 +656,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     db,
                     user_id,
                     msg_id,
-                    internal_ts=datetime.fromtimestamp(int(full_msg.get("internalDate", 0)) / 1000, tz=timezone.utc),
+                    internal_ts=message_internal_time(full_msg),
                     from_email=from_email[:320] or None,
                     from_domain_hash=from_domain_hash,
                     subject=subject,
@@ -733,7 +696,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     db,
                     user_id,
                     msg_id,
-                    internal_ts=datetime.fromtimestamp(int(full_msg.get("internalDate", 0)) / 1000, tz=timezone.utc),
+                    internal_ts=message_internal_time(full_msg),
                     from_email=from_email[:320] or None,
                     from_domain_hash=from_domain_hash,
                     subject=subject,
@@ -753,6 +716,22 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             return existing_msg
 
         def process_payload(payload: dict, existing_msg: Message | None) -> None:
+            _process_payload(payload, existing_msg)
+            provenance = payload.get("document_provenance") or []
+            errors = payload.get("document_errors") or []
+            if provenance or errors:
+                row = db.query(Message).filter_by(user_id=user_id, provider_msg_id=payload["msg_id"]).first()
+                if row is not None:
+                    row.parse_evidence = {**(row.parse_evidence or {}), "documents": provenance, "document_errors": errors}
+                    if errors or not (payload.get("parse_result") and payload["parse_result"].flights):
+                        row.status, row.ignored = MessageStatus.REVIEW_REQUIRED, False
+                        row.parse_error = "ticket_attachment_needs_review"
+                        row.parse_evidence = {**row.parse_evidence, "resolved": False}
+                    db.commit()
+            if "pdf_fetch_failed" in errors:
+                failed_message_ids.add(payload["msg_id"])
+
+        def _process_payload(payload: dict, existing_msg: Message | None) -> None:
             nonlocal canceled_segments, skipped_segments, updated_segments
             candidate = payload["candidate"]
             msg_id = payload["msg_id"]
@@ -764,6 +743,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             flight_like_candidate = payload["flight_like_candidate"]
             parse_result = payload["parse_result"]
             pnr = payload["pnr"]
+            if existing_msg and payload.get("internal_ts"):
+                existing_msg.internal_ts = payload["internal_ts"]
 
             if payload.get("evidence_skipped"):
                 parse_miss = assess_parse_miss(
@@ -805,7 +786,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             applied = apply_booking_message(
                 db, user_id, parse_result, source_message_id=msg_id,
                 subject=subject, plain_text=payload.get("plain_text", ""),
-                html=payload.get("html", ""), received_at=headers.get("date"),
+                html=payload.get("html", ""), received_at=payload["received_at"],
             )
             touched_segment_ids.update(applied.build.affected_segment_ids)
             if applied.is_cancellation:
@@ -820,6 +801,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                         db,
                         user_id,
                         msg_id,
+                        internal_ts=message_internal_time(full_msg),
                         from_email=from_email[:320] or None,
                         from_domain_hash=from_domain_hash,
                         subject=subject,
@@ -865,7 +847,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                             db,
                             user_id,
                             msg_id,
-                            internal_ts=datetime.fromtimestamp(int(full_msg.get("internalDate", 0)) / 1000, tz=timezone.utc),
+                            internal_ts=message_internal_time(full_msg),
                             from_email=from_email[:320] or None,
                             from_domain_hash=from_domain_hash,
                             subject=subject,
@@ -908,6 +890,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
                     return
                 if existing_msg and existing_msg.status != MessageStatus.PENDING:
+                    existing_msg.status = MessageStatus.REVIEW_REQUIRED
+                    existing_msg.ignored = False
                     existing_msg.parse_version = PARSER_VERSION
                     existing_msg.parse_error = parse_miss.reason
                     existing_msg.parse_evidence = {
@@ -925,6 +909,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                         db,
                         user_id,
                         msg_id,
+                        internal_ts=message_internal_time(full_msg),
                         from_email=from_email[:320] or None,
                         from_domain_hash=from_domain_hash,
                         subject=subject,
@@ -967,6 +952,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     db,
                     user_id,
                     msg_id,
+                    internal_ts=message_internal_time(full_msg),
                     from_email=from_email[:320] or None,
                     from_domain_hash=from_domain_hash,
                     subject=headers.get("subject"),
@@ -1018,9 +1004,17 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
 
         def process_candidate_batch(candidate_batch: list) -> None:
-            nonlocal limit_reached
+            nonlocal limit_reached, history_deferred
             if not candidate_batch:
                 return
+            if history_only:
+                recent_waiting = db.query(SyncJob.id).filter(
+                    SyncJob.user_id == user_id, SyncJob.id != job_id, SyncJob.state == "pending",
+                    SyncJob.updated_at >= datetime.now(timezone.utc) - timedelta(minutes=5),
+                ).first()
+                if recent_waiting or time.monotonic() - history_started >= 20:
+                    limit_reached = history_deferred = True
+                    return
 
             msg_ids = [candidate.msg["id"] for candidate in candidate_batch]
             existing_messages = (
@@ -1095,10 +1089,15 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 service,
                 [candidate.msg["id"] for candidate in fetch_candidates],
             )
-            for msg_id, exc in fetch_errors.items():
-                if is_gmail_authorization_error(exc):
+            missing_ids = set(fetch_tiers) - set(full_messages)
+            for msg_id in missing_ids:
+                exc = fetch_errors.get(msg_id)
+                if exc and is_gmail_authorization_error(exc):
                     raise exc
-                logger.warning("Failed to fetch message %s: %s", msg_id, exc)
+                # Deleted Gmail messages are terminal; transient failures retain coverage.
+                if getattr(getattr(exc, "resp", None), "status", None) != 404:
+                    failed_message_ids.add(msg_id)
+                logger.warning("Failed to fetch message %s", msg_id)
             if fetch_errors:
                 for msg_id in fetch_errors:
                     reporter.count(fetch_tiers.get(msg_id), "fetch_error")
@@ -1128,6 +1127,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 payloads = [parse_full_message(candidate, full_msg) for candidate, full_msg in parse_inputs]
 
             for payload in payloads:
+                payload = prepare_attachments(payload)
                 reporter.evidence(payload["candidate"].tier, payload["evidence"].verdict)
                 if payload.get("evidence_skipped"):
                     process_payload(payload, existing_by_id.get(payload["msg_id"]))
@@ -1153,8 +1153,17 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     continue
                 process_payload(payload, existing_by_id.get(payload["msg_id"]))
 
+        from app.services.flight_query_v4 import DiscoveryCandidate
+        if history_only:
+            from app.services.gmail_history import prepare_history_page
+            history_row, history_ids = prepare_history_page(db, user_id, history_state_id, service)
+            candidates = [DiscoveryCandidate({"id": mid}, "exhaustive_backfill", "", False) for mid in history_ids]
+        elif exact_only:
+            candidates = [DiscoveryCandidate({"id": mid}, "exact_reprocess", "", False) for mid in dict.fromkeys(message_ids or ())]
+        else:
+            candidates = iter_discovery_messages(service, discovery_plan)
         candidate_batch: list = []
-        for candidate in iter_discovery_messages(service, discovery_plan):
+        for candidate in candidates:
             if candidate.tier != current_tier:
                 process_candidate_batch(candidate_batch)
                 candidate_batch = []
@@ -1176,254 +1185,9 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     break
         process_candidate_batch(candidate_batch)
 
-        for candidate in ():
-            if candidate.tier != current_tier:
-                current_tier = candidate.tier
-                _ACTIVE_PROGRESS_PHASE = phase_labels.get(candidate.tier, candidate.tier)
-                _print_phase(
-                    _ACTIVE_PROGRESS_PHASE,
-                    "prefiltered Gmail search" if candidate.prefilter else "exhaustive backfill window",
-                )
-            if sync_limit and job.scanned_count >= sync_limit:
-                limit_reached = True
-                print(f"\n{DIM}Sync limit reached at {sync_limit} messages; stopping this dev run.{RESET}")
-                break
-            msg_stub = candidate.msg
-            msg_id: str = msg_stub["id"]
-            processed_msg_ids.add(msg_id)
-
-            job.scanned_count += 1
-
-            existing_msg = (
-                db.query(Message)
-                .filter(Message.user_id == user_id, Message.provider_msg_id == msg_id)
-                .first()
-            )
-            skipped_count = job.scanned_count - job.parsed_count
-            if _message_skip_reason(existing_msg, PARSER_VERSION):
-                flush_progress()
-                _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
-                continue
-
-            try:
-                full_msg = get_message(service, msg_id)
-            except Exception as exc:
-                if is_gmail_authorization_error(exc):
-                    raise
-                logger.warning("Failed to fetch message %s: %s", msg_id, exc)
-                flush_progress()
-                _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
-                continue
-
-            headers = extract_headers(full_msg)
-            plain_text, html = extract_message_body(full_msg)
-            attachments = extract_attachments(full_msg)
-            subject = headers.get("subject", "")
-            from_email = headers.get("from", "")
-            body_for_filter = plain_text if plain_text.strip() else html
-            flight_like_candidate = False
-
-            if candidate.prefilter and looks_like_flight_email:
-                # Many airlines send HTML-only emails with no plain text.
-                # Fall back to raw HTML so the keyword filter still fires.
-                flight_like_candidate = looks_like_flight_email(
-                    subject=subject,
-                    sender=from_email,
-                    body=body_for_filter,
-                )
-                if not flight_like_candidate:
-                    skipped_count = job.scanned_count - job.parsed_count
-                    flush_progress()
-                    _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
-                    continue
-            elif looks_like_flight_email:
-                flight_like_candidate = looks_like_flight_email(
-                    subject=subject,
-                    sender=from_email,
-                    body=body_for_filter,
-                )
-
-            parse_result = parse_email(
-                html=html,
-                plain_text=plain_text,
-                attachments=attachments,
-                user_name=user_name,
-                aliases=aliases,
-                received_at=headers.get("date"),
-                subject=headers.get("subject"),
-                from_email=headers.get("from"),
-            )
-            pnr = _extract_pnr(f"{subject}\n{body_for_filter}".upper())
-            applied = apply_booking_message(
-                db, user_id, parse_result, source_message_id=msg_id,
-                subject=subject, plain_text=plain_text, html=html,
-                received_at=headers.get("date"),
-            )
-            touched_segment_ids.update(applied.build.affected_segment_ids)
-            if applied.is_cancellation:
-                canceled_count = applied.canceled
-                canceled_segments += canceled_count
-                from_domain = from_email.split("@")[-1].rstrip(">").strip() if "@" in from_email else ""
-                from_domain_hash = sha256(from_domain.encode()).hexdigest()[:64] if from_domain else None
-                snippet = full_msg.get("snippet", "")
-                snippet_hash = sha256(snippet.encode()).hexdigest()[:64] if snippet else None
-                if not existing_msg:
-                    existing_msg = _get_or_create_message(
-                        db,
-                        user_id,
-                        msg_id,
-                        from_email=from_email[:320] or None,
-                        from_domain_hash=from_domain_hash,
-                        subject=subject,
-                        snippet_sha256=snippet_hash,
-                        status=MessageStatus.ACCEPTED,
-                    )
-                existing_msg.status = MessageStatus.ACCEPTED
-                existing_msg.parse_version = PARSER_VERSION
-                existing_msg.parse_error = "cancellation_notice"
-                existing_msg.parse_evidence = {
-                    "reason": "cancellation_notice",
-                    "pnr": pnr,
-                    "canceled_segments": canceled_count,
-                }
-                set_message_outcome(existing_msg, applied, source=parse_result.source, tier=candidate.tier)
-                job.segment_count += applied.build.inserted
-                updated_segments += applied.build.updated
-                job.updated_at = datetime.now(timezone.utc)
-                db.commit()
-                skipped_count = job.scanned_count - job.parsed_count
-                flush_progress()
-                _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
-                continue
-
-            if not parse_result.flights:
-                mutated = False
-                parse_miss = assess_parse_miss(
-                    subject=subject,
-                    sender=from_email,
-                    body=body_for_filter,
-                )
-                existing_pnr_segments = _existing_segments_for_pnr(db, user_id, pnr) if pnr else 0
-                if existing_pnr_segments and _looks_like_ancillary_flight_notice(subject, body_for_filter):
-                    from_domain = from_email.split("@")[-1].rstrip(">").strip() if "@" in from_email else ""
-                    from_domain_hash = sha256(from_domain.encode()).hexdigest()[:64] if from_domain else None
-                    snippet = full_msg.get("snippet", "")
-                    snippet_hash = sha256(snippet.encode()).hexdigest()[:64] if snippet else None
-                    if not existing_msg:
-                        existing_msg = _get_or_create_message(
-                            db,
-                            user_id,
-                            msg_id,
-                            internal_ts=datetime.fromtimestamp(int(full_msg.get("internalDate", 0)) / 1000, tz=timezone.utc),
-                            from_email=from_email[:320] or None,
-                            from_domain_hash=from_domain_hash,
-                            subject=subject,
-                            snippet_sha256=snippet_hash,
-                            status=MessageStatus.ACCEPTED,
-                        )
-                    existing_msg.status = MessageStatus.ACCEPTED
-                    existing_msg.parse_version = PARSER_VERSION
-                    existing_msg.parse_error = "ancillary_existing_pnr"
-                    existing_msg.parse_evidence = {
-                        "reason": "ancillary_email_matches_existing_pnr",
-                        "pnr": pnr,
-                        "existing_segments": existing_pnr_segments,
-                        "parse_miss": parse_miss.as_dict(),
-                    }
-                    job.updated_at = datetime.now(timezone.utc)
-                    db.commit()
-                    skipped_count = job.scanned_count - job.parsed_count
-                    flush_progress()
-                    _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
-                    continue
-                if existing_msg and existing_msg.status != MessageStatus.PENDING:
-                    existing_msg.parse_version = PARSER_VERSION
-                    existing_msg.parse_error = parse_miss.reason
-                    existing_msg.parse_evidence = parse_miss.as_dict()
-                    mutated = True
-                elif flight_like_candidate:
-                    from_domain = from_email.split("@")[-1].rstrip(">").strip() if "@" in from_email else ""
-                    from_domain_hash = sha256(from_domain.encode()).hexdigest()[:64] if from_domain else None
-                    snippet = full_msg.get("snippet", "")
-                    snippet_hash = sha256(snippet.encode()).hexdigest()[:64] if snippet else None
-                    existing_msg = _get_or_create_message(
-                        db,
-                        user_id,
-                        msg_id,
-                        from_email=from_email[:320] or None,
-                        from_domain_hash=from_domain_hash,
-                        subject=subject,
-                        snippet_sha256=snippet_hash,
-                        status=MessageStatus.REVIEW_REQUIRED,
-                        parse_version=PARSER_VERSION,
-                        parse_error=parse_miss.reason,
-                        parse_evidence=parse_miss.as_dict(),
-                    )
-                    existing_msg.status = MessageStatus.REVIEW_REQUIRED
-                    existing_msg.parse_version = PARSER_VERSION
-                    existing_msg.parse_error = parse_miss.reason
-                    existing_msg.parse_evidence = parse_miss.as_dict()
-                    mutated = True
-                if mutated:
-                    job.updated_at = datetime.now(timezone.utc)
-                    db.commit()
-                    flush_progress(force=True)
-                skipped_count = job.scanned_count - job.parsed_count
-                flush_progress()
-                _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
-                continue
-
-            from_domain = from_email.split("@")[-1].rstrip(">").strip() if "@" in from_email else ""
-            from_domain_hash = sha256(from_domain.encode()).hexdigest()[:64] if from_domain else None
-            snippet = full_msg.get("snippet", "")
-            snippet_hash = sha256(snippet.encode()).hexdigest()[:64] if snippet else None
-
-            # Ownership is resolved per flight, including shared bookings.
-            effective_status = applied.status
-
-            if not existing_msg:
-                existing_msg = _get_or_create_message(
-                    db,
-                    user_id,
-                    msg_id,
-                    from_email=from_email[:320] or None,
-                    from_domain_hash=from_domain_hash,
-                    subject=headers.get("subject"),
-                    snippet_sha256=snippet_hash,
-                    status=effective_status,
-                )
-            else:
-                existing_msg.status = effective_status
-            existing_msg.parse_version = PARSER_VERSION
-            existing_msg.parse_error = None
-            existing_msg.parse_evidence = None
-
-            job.parsed_count += 1
-            record_flight_discovery_signals(db, user_id, headers)
-
-            build_result = applied.build
-            set_message_outcome(existing_msg, applied, source=parse_result.source, tier=candidate.tier)
-            new_segs = build_result.inserted
-            updated_segments += build_result.updated
-            skipped_segments += build_result.skipped
-            job.segment_count += new_segs
-            subject = subject[:60]
-            sys.stdout.write("\r" + " " * 120 + "\r")
-            print(
-                f"  {GREEN}✈  +{new_segs} flight(s){RESET}  "
-                f"{DIM}tier={candidate.tier} parsed={len(parse_result.flights)} updated={build_result.updated} skipped={build_result.skipped}  "
-                f"{from_email[:40]}  |  {subject}{RESET}"
-            )
-
-            job.updated_at = datetime.now(timezone.utc)
-            db.commit()
-
-            skipped_count = job.scanned_count - job.parsed_count
-            _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
-
         targeted_reparse_ids = _targeted_reparse_message_ids()
         stale_messages = []
-        if not limit_reached:
+        if not limit_reached and reparse_only and not history_only and not exact_only:
             stale_messages = _select_stale_reparse_messages(
                 db,
                 user_id=user_id,
@@ -1436,6 +1200,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             _ACTIVE_PROGRESS_PHASE = "reparse"
             _print_phase("reparse", f"{len(stale_messages):,} previously parsed messages below parser v{PARSER_VERSION}")
             reporter.tier_started("stale_reparse", "refetching stale DB message IDs")
+        from app.services.flight_query_v4 import DiscoveryCandidate
         for stale_msg in stale_messages:
             msg_id = stale_msg.provider_msg_id
             if msg_id in processed_msg_ids:
@@ -1443,195 +1208,28 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             processed_msg_ids.add(msg_id)
             job.scanned_count += 1
             reporter.count("stale_reparse", "candidate")
-
             try:
                 full_msg = get_message(service, msg_id)
             except Exception as exc:
                 if is_gmail_authorization_error(exc):
                     raise
-                logger.warning("Failed to refetch stale message %s: %s", msg_id, exc)
+                failed_message_ids.add(msg_id)
+                logger.warning("Failed to refetch stale message %s", msg_id)
                 flush_progress()
                 continue
-            reporter.count("stale_reparse", "full_fetch")
-
-            headers = extract_headers(full_msg)
-            plain_text, html = extract_message_body(full_msg)
-            attachments = extract_attachments(full_msg)
-            body_for_filter = plain_text if plain_text.strip() else html
-            stale_subject = headers.get("subject") or stale_msg.subject or ""
-            stale_sender = headers.get("from") or stale_msg.from_email or ""
-            stale_pnr = _extract_pnr(f"{stale_subject}\n{body_for_filter}".upper())
-            evidence = assess_flight_evidence(
-                subject=stale_subject,
-                sender=stale_sender,
-                body=body_for_filter,
-            )
-            reporter.evidence("stale_reparse", evidence.verdict)
-            if _should_skip_expensive_parse(
-                tier="stale_reparse",
-                prefilter=True,
-                evidence=evidence,
-                force_parse=msg_id in targeted_reparse_ids,
-            ):
-                parse_miss = assess_parse_miss(
-                    subject=stale_subject,
-                    sender=stale_sender,
-                    body=body_for_filter,
-                )
-                previous_status = stale_msg.status
-                previous_ignored = bool(stale_msg.ignored)
-                stale_msg.status = MessageStatus.ACCEPTED
-                stale_msg.ignored = previous_ignored or previous_status != MessageStatus.ACCEPTED
-                stale_msg.parse_error = parse_miss.reason
-                stale_msg.parse_evidence = {
-                    **parse_miss.as_dict(),
-                    "resolved": True,
-                    "reason": "stale_reparse_evidence_skip",
-                    "ignored_reason": parse_miss.reason if stale_msg.ignored else None,
-                    "previous_status": previous_status.value,
-                    "tier": "stale_reparse",
-                    "evidence_gate": evidence.as_dict(),
-                }
-                reporter.count("stale_reparse", "ignored_nonflight")
-                stale_msg.parse_version = PARSER_VERSION
-                reporter.count("stale_reparse", "gate_skip")
-                job.updated_at = datetime.now(timezone.utc)
-                db.commit()
-                skipped_count = job.scanned_count - job.parsed_count
-                _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
-                continue
-
-            parse_started = time.perf_counter()
-            parse_result = parse_email(
-                html=html,
-                plain_text=plain_text,
-                attachments=attachments,
-                user_name=user_name,
-                aliases=aliases,
-                received_at=headers.get("date"),
-                subject=headers.get("subject"),
-                from_email=headers.get("from"),
-            )
-            reporter.parser_timing(
-                "stale_reparse",
-                seconds=time.perf_counter() - parse_started,
-                sender=stale_sender,
-                subject=stale_subject,
-            )
-            applied = apply_booking_message(
-                db, user_id, parse_result, source_message_id=stale_msg.provider_msg_id,
-                subject=stale_subject, plain_text=plain_text, html=html,
-                received_at=headers.get("date"),
-            )
-            touched_segment_ids.update(applied.build.affected_segment_ids)
-            if applied.is_cancellation:
-                canceled_count = applied.canceled
-                canceled_segments += canceled_count
-                stale_msg.status = MessageStatus.ACCEPTED
-                stale_msg.parse_error = "cancellation_notice"
-                stale_msg.parse_evidence = {
-                    "reason": "cancellation_notice",
-                    "pnr": stale_pnr,
-                    "canceled_segments": canceled_count,
-                    "resolved": True,
-                    "tier": "stale_reparse",
-                }
-                stale_msg.parse_version = PARSER_VERSION
-                set_message_outcome(stale_msg, applied, source=parse_result.source, tier="stale_reparse")
-                job.segment_count += applied.build.inserted
-                updated_segments += applied.build.updated
-                job.updated_at = datetime.now(timezone.utc)
-                db.commit()
-                skipped_count = job.scanned_count - job.parsed_count
-                _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
-                continue
-
-            if parse_result.flights:
-                job.parsed_count += 1
-                record_flight_discovery_signals(db, user_id, headers)
-                build_result = applied.build
-                new_segs = build_result.inserted
-                updated_segments += build_result.updated
-                skipped_segments += build_result.skipped
-                job.segment_count += new_segs
-                stale_msg.status = MessageStatus.ACCEPTED
-                stale_msg.ignored = False
-                stale_msg.parse_error = None
-                stale_msg.parse_evidence = {
-                    "reason": "parsed_flights",
-                    "resolved": True,
-                    "flight_count": len(parse_result.flights),
-                    "source": parse_result.source,
-                    "tier": "stale_reparse",
-                }
-                set_message_outcome(stale_msg, applied, source=parse_result.source, tier="stale_reparse")
-                reporter.parsed_flight(
-                    "stale_reparse",
-                    segments=new_segs,
-                    updated=build_result.updated,
-                    skipped=build_result.skipped,
-                    sender=headers.get("from") or stale_msg.from_email or "",
-                    subject=headers.get("subject") or stale_msg.subject or "",
-                )
-                subject = (headers.get("subject") or stale_msg.subject or "")[:60]
-                sys.stdout.write("\r" + " " * 120 + "\r")
-                print(
-                    f"  {GREEN}REPARSE  +{new_segs} flight(s){RESET}  "
-                    f"{DIM}parsed={len(parse_result.flights)} updated={build_result.updated} skipped={build_result.skipped}  "
-                    f"{(headers.get('from') or stale_msg.from_email or '')[:40]}  |  {subject}{RESET}"
-                )
-            else:
-                parse_miss = assess_parse_miss(
-                    subject=headers.get("subject") or stale_msg.subject or "",
-                    sender=headers.get("from") or stale_msg.from_email or "",
-                    body=body_for_filter,
-                )
-                existing_pnr_segments = _existing_segments_for_pnr(db, user_id, stale_pnr) if stale_pnr else 0
-                if existing_pnr_segments and _looks_like_ancillary_flight_notice(stale_subject, body_for_filter):
-                    stale_msg.status = MessageStatus.ACCEPTED
-                    stale_msg.parse_error = "ancillary_existing_pnr"
-                    stale_msg.parse_evidence = {
-                        "reason": "ancillary_email_matches_existing_pnr",
-                        "pnr": stale_pnr,
-                        "existing_segments": existing_pnr_segments,
-                        "parse_miss": parse_miss.as_dict(),
-                        "resolved": True,
-                        "tier": "stale_reparse",
-                    }
-                elif not parse_miss.should_review:
-                    stale_msg.status = MessageStatus.ACCEPTED
-                    stale_msg.ignored = True
-                    stale_msg.parse_error = parse_miss.reason
-                    stale_msg.parse_evidence = {
-                        **parse_miss.as_dict(),
-                        "resolved": True,
-                        "ignored_reason": parse_miss.reason,
-                        "tier": "stale_reparse",
-                    }
-                else:
-                    stale_msg.status = MessageStatus.REVIEW_REQUIRED
-                    stale_msg.ignored = False
-                    stale_msg.parse_error = parse_miss.reason
-                    stale_msg.parse_evidence = {
-                        **parse_miss.as_dict(),
-                        "resolved": False,
-                        "tier": "stale_reparse",
-                    }
-
-            stale_msg.parse_version = PARSER_VERSION
-            job.updated_at = datetime.now(timezone.utc)
-            db.commit()
-            skipped_count = job.scanned_count - job.parsed_count
-            _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
+            payload = parse_full_message(DiscoveryCandidate({"id": msg_id}, "stale_reparse", "", False), full_msg)
+            payload = prepare_attachments(payload)
+            reporter.evidence("stale_reparse", payload["evidence"].verdict)
+            process_payload(payload, stale_msg)
 
         sys.stdout.write("\n")
-        if not limit_reached and _count_remaining_stale_reparse_messages(
+        if not limit_reached and not failed_message_ids and not history_only and _count_remaining_stale_reparse_messages(
             db,
             user_id=user_id,
             parser_version=PARSER_VERSION,
         ) == 0:
             discovery_state.parser_version = PARSER_VERSION
-        if not limit_reached and not reparse_only:
+        if not limit_reached and not reparse_only and not failed_message_ids:
             mark_discovery_plan_success(
                 discovery_state,
                 discovery_plan,
@@ -1639,12 +1237,18 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             )
         elif reparse_only:
             discovery_state.updated_at = datetime.now(timezone.utc)
+        if history_only:
+            from app.services.gmail_history import finish_history_page
+            finish_history_page(db, history_row, failed_message_ids,
+                                deferred_ids=set(history_ids) - processed_msg_ids)
         _ACTIVE_PROGRESS_PHASE = "enrich"
         reporter.tier_started("enrich", "enriching saved segments")
         enriched_segments = enrich_user_segments(
-            db, user_id, include_weather=True, segment_ids=touched_segment_ids,
+            db, user_id, include_weather=not history_only, include_provider_lookup=not history_only,
+            segment_ids=touched_segment_ids,
         )
-        job.state = "completed"
+        job.state = "failed" if failed_message_ids else "completed"
+        job.error_message = "Some emails could not be checked. Please scan again." if failed_message_ids else None
         job.updated_at = datetime.now(timezone.utc)
         db.commit()
 
@@ -1664,7 +1268,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
 
         return {
             "job_id": job_id,
-            "state": "completed",
+            "state": job.state,
             "scanned_count": job.scanned_count,
             "parsed_count": job.parsed_count,
             "segment_count": job.segment_count,
@@ -1674,6 +1278,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             "canceled_count": canceled_segments,
             "tier_stats": reporter.as_dict(),
             "limit_reached": limit_reached,
+            "failed_message_ids": sorted(failed_message_ids),
+            "history_deferred": history_deferred,
         }
 
     except Exception as exc:

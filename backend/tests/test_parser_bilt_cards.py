@@ -6,6 +6,7 @@ passenger details. These cases exercise the public parser, not a live mailbox.
 
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from bs4 import BeautifulSoup
@@ -19,6 +20,8 @@ TEMPLATE = (Path(__file__).parent / "fixtures" / "bilt_flight_card.html").read_t
 DEPARTURE = "Wed, 9 Sep 2026"
 RETURN = "Fri, 11 Sep 2026"
 RECEIVED = datetime(2026, 9, 4, 18, tzinfo=timezone.utc)
+ZONES = {"LAS": "America/Los_Angeles", "DCA": "America/New_York", "BWI": "America/New_York",
+         "CLT": "America/New_York", "DTW": "America/Detroit", "ACT": "America/Chicago", "DFW": "America/Chicago"}
 
 
 def card(flight, dep, arr, dep_time, arr_time, date=DEPARTURE, *, arr_date=None, duration="1h 30m"):
@@ -89,8 +92,10 @@ def test_all_dated_cards_survive_preprocessing_without_inferred_ownership(bookin
         assert (actual.flight_number, actual.dep_airport, actual.arr_airport) == (number, dep, arr)
         expected_dep = datetime.strptime(date + " " + dep_clock, "%a, %d %b %Y %I:%M%p")
         expected_arr = datetime.strptime(date + " " + arr_clock, "%a, %d %b %Y %I:%M%p")
-        assert actual.dep_time == expected_dep.replace(tzinfo=timezone.utc)
-        assert actual.arr_time == expected_arr.replace(tzinfo=timezone.utc)
+        assert actual.dep_time == expected_dep.replace(tzinfo=ZoneInfo(ZONES[dep])).astimezone(timezone.utc)
+        assert actual.arr_time == expected_arr.replace(tzinfo=ZoneInfo(ZONES[arr])).astimezone(timezone.utc)
+        assert actual.time_provenance["departure_local_date"] == expected_dep.date().isoformat()
+        assert actual.time_provenance["arrival"]["local"] == expected_arr.isoformat()
         assert actual.source_received_at == RECEIVED
         assert actual.source == "shape_dated_flight_cards"
         assert actual.pnr == "XZ4Q7B"
@@ -121,7 +126,8 @@ def test_explicit_overnight_arrival_date_is_preserved(mode):
     )]), mode)
     assert len(result.flights) == 1
     assert result.flights[0].arr_time.date().isoformat() == "2026-09-10"
-    assert result.flights[0].dep_time.date().isoformat() == "2026-09-09"
+    assert result.flights[0].dep_time.isoformat() == "2026-09-10T06:30:00+00:00"
+    assert result.flights[0].time_provenance["departure_local_date"] == "2026-09-09"
 
 
 def test_card_with_a_missing_arrival_cannot_borrow_the_next_flight_endpoint():

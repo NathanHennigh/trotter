@@ -92,7 +92,12 @@ def test_orlando_retains_frontier_and_shared_spirit_without_changing_personal_hi
     assert {(flight.dep_airport, flight.arr_airport, flight.flight_number) for flight in personal} == PERSONAL_FLIGHTS
     assert db.query(Trip).filter_by(user_id=owner.id).count() == 1
     trip = db.query(Trip).filter_by(user_id=owner.id).one()
-    assert (trip.start_ts.date().isoformat(), trip.end_ts.date().isoformat()) == ("2025-02-18", "2025-02-23")
+    # Storage uses real UTC instants; the final Houston arrival is after UTC
+    # midnight but remains February 23 on the boarding pass in the current app.
+    assert (trip.start_ts.date().isoformat(), trip.end_ts.date().isoformat()) == ("2025-02-18", "2025-02-24")
+    from app.routers.trips import TripOut
+    displayed = TripOut.model_validate(trip).model_dump(mode="json")
+    assert (displayed["start_ts"][:10], displayed["end_ts"][:10]) == ("2025-02-18", "2025-02-23")
 
     views = inbox_views(db, owner)
     named = [item for item in views if item["passenger_name"]]

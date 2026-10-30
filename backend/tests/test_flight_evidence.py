@@ -148,3 +148,57 @@ def test_mileageplus_shopping_noise_is_skipped():
 
     assert "newsletter_sender" in evidence.signals
     assert evidence.verdict == "skip"
+
+
+def test_operational_itinerary_survives_generic_footer_and_24_hour_date():
+    evidence = assess_flight_evidence(subject="Your flight SY739 is delayed", sender="Sun Country <updates@example.com>",
+        body="Booking reference ABC123. DFW -> PUJ. Flight SY739. Departure 2026/06/19 10:00. Arrival 15:30. Add bags. Choose your seats. Deals and parking.")
+    assert evidence.verdict == "parse"
+    assert "operational_itinerary" in evidence.signals
+
+
+def test_sender_hostname_cannot_supply_a_flight_number():
+    evidence = assess_flight_evidence(subject="Mileage statement", sender="EVA <eservice@mh1.evaair.com>", body="Your account balance is 500 miles.")
+    assert evidence.flight_numbers == ()
+
+
+def test_review_decision_agrees_with_gate_for_real_and_nonflight_messages():
+    from app.services.parse_audit import assess_parse_miss
+    cases = [
+        ("Check in for your flight", "Record locator ABC123. UA100 DFW -> JFK on June 1. Choose seats and add bags."),
+        ("Mileage statement", "New service TPE -> DFW on Oct 1. Book now and earn bonus miles."),
+        ("Your hotel confirmation", "Hotel only reservation. Confirmation code ABC123. June 1."),
+    ]
+    for subject, body in cases:
+        gate = assess_flight_evidence(subject=subject, sender="mail@example.com", body=body)
+        miss = assess_parse_miss(subject=subject, sender="mail@example.com", body=body)
+        assert miss.should_review == (gate.verdict != "skip")
+
+
+def test_gate_change_city_labels_and_flight_number_label_are_operational():
+    evidence = assess_flight_evidence(subject="Important Travel Information: Your gate has been changed", sender="Frontier <mail@example.com>",
+        body="New flight itinerary. Confirmation code: ABC123. IAH - Houston, TX to MCO - Orlando, FL. Frontier flight number: #1418. Estimated departure: February 21, 2025, 4:16 PM. Book flight | Deals | Manage travel.")
+    assert evidence.verdict == "parse"
+    assert evidence.airport_codes == ("IAH", "MCO")
+    assert evidence.flight_numbers == ("FLIGHT1418",)
+
+
+def test_mileage_statement_ad_is_not_a_booked_flight():
+    evidence = assess_flight_evidence(subject="EVA Air Infinity MileageLands E-Mileage Statement", sender="eservice@mh1.evaair.com",
+        body="Miles balance 500. New service TPE -> DFW October 3, 2025. BR06 TPE -> LAX upgrade offer. Book now. Customer total.")
+    assert evidence.verdict == "skip"
+    assert "statement_noise" in evidence.signals
+    assert "MH1" not in evidence.flight_numbers
+    assert not {"CUS", "MER", "TAL"} & set(evidence.airport_codes)
+
+
+def test_ticket_with_city_names_and_seat_offer_footer_is_not_rejected():
+    evidence = assess_flight_evidence(subject="Your e-ticket receipt ABC123: 16 Nov 2023", sender="travel@example.com",
+        body="Booking reference ABC123. Your itinerary AA1555 American Airlines. 16 Nov 2023 21:20 Dallas Ft Worth. 16 Nov 2023 23:13 Nashville International. Passenger MADAME ALEX AVERY. Pay to choose your seat in advance.")
+    assert evidence.verdict == "parse"
+
+
+def test_numbered_confirmation_with_separate_airport_lines_survives_bag_footer():
+    evidence = assess_flight_evidence(subject="Fwd: View your travel confirmation", sender="traveler@example.com",
+        body="Confirmed. February 21, 2025. Frontier F91418. Houston\n*IAH*\n4:16 p.m.\nOrlando\n*MCO*\n7:40 p.m. Confirmation code ABC123. Check-in and Boarding Pass. Add bags and seats.")
+    assert evidence.verdict == "parse"

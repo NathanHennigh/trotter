@@ -150,7 +150,7 @@ def test_later_run_includes_learned_sender_domains():
     assert "from:new-agency.example" in combined
 
 
-def test_success_updates_incremental_and_marks_automatic_backfill_complete():
+def test_recent_sync_does_not_claim_unscanned_history_complete():
     state = SimpleNamespace(
         last_incremental_scan_at=None,
         backfill_cursor_before=None,
@@ -164,11 +164,11 @@ def test_success_updates_incremental_and_marks_automatic_backfill_complete():
     mark_discovery_plan_success(state, plan, scan_started_at=now)
 
     assert state.last_incremental_scan_at == now
-    assert state.backfill_cursor_before == now
-    assert state.backfill_complete is True
+    assert state.backfill_cursor_before is None
+    assert state.backfill_complete is False
 
 
-def test_explicit_backfill_flag_can_build_recovery_window(monkeypatch):
+def test_explicit_backfill_flag_keeps_normal_sync_incremental(monkeypatch):
     monkeypatch.setattr(flight_query_v4, "ENABLE_AUTOMATIC_BACKFILL", True)
     state = SimpleNamespace(
         last_incremental_scan_at=None,
@@ -184,10 +184,7 @@ def test_explicit_backfill_flag_can_build_recovery_window(monkeypatch):
         max_backfill_windows=1,
     )
 
-    backfill = [item for item in plan if item.tier == "exhaustive_backfill"]
-    assert len(backfill) == 1
-    assert backfill[0].prefilter is False
-    assert backfill[0].window_end == datetime(2026, 4, 24, tzinfo=timezone.utc)
+    assert not [item for item in plan if item.tier == "exhaustive_backfill"]
 
 
 def test_noisy_domains_are_not_in_fast_known_senders():

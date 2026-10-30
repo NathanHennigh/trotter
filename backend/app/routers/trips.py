@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from sqlalchemy.orm import Session, joinedload
 
 from ..db import get_db
@@ -19,6 +19,7 @@ from ..services.builder import (
     trip_destination_airport,
     trip_route_label_for_segments,
 )
+from ..services.flight_display_time import endpoint_local_time, utc
 from .auth import get_current_user
 
 router = APIRouter(prefix="/trips", tags=["trips"])
@@ -40,6 +41,12 @@ class SegmentOut(BaseModel):
     distance_km: Optional[float] = None
     meta_json: Optional[dict[str, Any]] = None
 
+    @field_serializer("dep_time", "arr_time", when_used="json")
+    def airport_local_clock(self, value, info):
+        departure = info.field_name == "dep_time"
+        return endpoint_local_time(value, self.meta_json, "departure" if departure else "arrival",
+                                   self.dep_airport if departure else self.arr_airport)
+
     class Config:
         from_attributes = True
 
@@ -52,6 +59,16 @@ class TripOut(BaseModel):
     destination_airport: Optional[str] = None
     route_label: Optional[str] = None
     segments: List[SegmentOut] = []
+
+    @field_serializer("start_ts", "end_ts", when_used="json")
+    def local_trip_boundary(self, value, info):
+        if value is None or not self.segments:
+            return value
+        departure = info.field_name == "start_ts"
+        edge = (min(self.segments, key=lambda row: utc(row.dep_time)) if departure
+                else max(self.segments, key=lambda row: utc(row.arr_time)))
+        return endpoint_local_time(value, edge.meta_json, "departure" if departure else "arrival",
+                                   edge.dep_airport if departure else edge.arr_airport)
 
     class Config:
         from_attributes = True

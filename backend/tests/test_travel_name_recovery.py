@@ -195,6 +195,43 @@ def test_newer_receipt_does_not_allow_older_passenger_assertion_to_win(api):
     assert job.added == 0 and job.needs_review == 1
 
 
+@pytest.mark.parametrize('reverse', [False, True])
+@pytest.mark.parametrize('known_time', [False, True])
+def test_unnamed_duplicate_never_erases_affirmative_same_leg_evidence(api, reverse, known_time):
+    inputs = [('named', 'Elisha Faith Magno', None), ('unnamed', '', [])]
+    for message, name, evidence in reversed(inputs) if reverse else inputs:
+        _, row = receipt(api, name=name, evidence=evidence, message=message,
+                         source_at=datetime(2026, 8, 2 if message == 'unnamed' else 1, tzinfo=timezone.utc))
+        if not known_time:
+            row.source_event_at = None
+            row.facts = {**row.facts, 'source_received_at': None}
+        api.db.commit()
+    originals = {row.id: deepcopy(row.facts) for row in api.db.query(BookingObservation)}
+    job = run(api, confirm(api))
+    assert (job.added, job.needs_review) == (1, 0)
+    assert api.db.query(Segment).count() == 1
+    assert all(api.db.get(BookingObservation, key).facts == facts for key, facts in originals.items())
+    assert len(api.db.query(Segment).one().meta_json['recovery_observation_ids']) == 2
+
+
+def test_unknown_chronology_with_different_schedule_is_held_not_hash_sorted(api):
+    _, named = receipt(api)
+    _, unnamed = receipt(api, name='', evidence=[], message='unknown-later')
+    named.source_event_at = unnamed.source_event_at = None
+    unnamed.facts = {**unnamed.facts, 'dep_time': '2026-09-09T13:00:00'}
+    api.db.commit()
+    job = run(api, confirm(api))
+    assert job.added == 0 and job.needs_review == 1
+
+
+def test_later_ambiguous_scope_cannot_borrow_prior_name(api):
+    receipt(api)
+    receipt(api, message='ambiguous', evidence=[{'name': 'Elisha Magno', 'role': 'traveler',
+        'applies': False, 'scope_ambiguous': True}], source_at=datetime(2026, 8, 2, tzinfo=timezone.utc))
+    job = run(api, confirm(api))
+    assert job.added == 0 and job.needs_review == 1
+
+
 def test_claim_requires_owned_original_full_name(api):
     receipt(api, name="MAGNO/ELISHAFAITH")
     receipt(api, name="Elisha Faith Magno", user=api.other)

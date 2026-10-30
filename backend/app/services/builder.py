@@ -419,8 +419,8 @@ def rebuild_affected_trips(db: Session, user_id: int, affected_trip_ids: set[int
                 earlier, later = sorted((candidate, segment), key=_segment_sort_key)
                 gap = _segment_dep_time(later) - _segment_arr_time(earlier)
                 if (
-                    earlier.arr_airport == later.dep_airport
-                    and earlier.arr_airport != home_airport
+                    _airports_are_near(earlier.arr_airport, later.dep_airport)
+                    and not _airports_are_near(earlier.arr_airport, home_airport)
                     and timedelta(0) <= gap <= timedelta(days=14)
                 ):
                     affected_trip_ids.add(candidate.trip_id)
@@ -1925,7 +1925,9 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     if arr_time and dep_time and arr_time <= dep_time:
         return "skipped"
 
-    existing = _find_supersedable_segment(db, user_id, flight)
+    existing = _find_same_source_segment(db, user_id, flight)
+    if existing is None:
+        existing = _find_supersedable_segment(db, user_id, flight)
     if existing is None:
         existing = _find_accepted_shared_segment(db, user_id, flight)
     if existing:
@@ -1995,6 +1997,66 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     db.add(seg)
     db.flush()
     return "inserted"
+
+
+def _find_same_source_segment(db: Session, user_id: int, flight) -> Optional[Segment]:
+    """Reparsing one proven original leg may correct UTC dates without new IDs.
+
+    Never match merely by adjacent dates/flight number: the original observation
+    must be attached to this user's segment and match the booking and local day.
+    Explicit reviewed schedule links use the same provenance check.
+    """
+    from ..models import BookingObservation
+    from .booking_reconciliation import observation_codes, local_day
+    provenance = getattr(flight, 'time_provenance', None) or {}
+    linked_ids = set(getattr(flight, 'reconciles_observation_ids', None) or [])
+    if not provenance and not linked_ids:
+        return None
+    number = _normalize_flight_number(flight.flight_number)
+    code = _normalize_pnr(flight.pnr)
+    if not number or not code:
+        return None
+    codes = {code, *(_normalize_pnr(value) for value in getattr(flight, 'pnr_aliases', None) or [])}
+    originals = db.query(BookingObservation).filter_by(user_id=user_id,
+        dep_airport=flight.dep_airport, arr_airport=flight.arr_airport).all()
+    source_id = getattr(flight, 'source_message_id', None)
+    direct_ids = {row.id for row in originals if row.source_message_id == source_id
+        and _normalize_flight_number(row.flight_number) == number and observation_codes(row).intersection(codes)
+        and local_day(row) == provenance.get('departure_local_date')}
+    valid_links = {row.id for row in originals if row.id in linked_ids
+        and _normalize_flight_number(row.flight_number) == number and observation_codes(row).intersection(codes)}
+    if linked_ids - valid_links:
+        raise ValueError('Schedule correction is not linked to this account and booking leg')
+    recovery_ids = set(getattr(flight, 'recovery_observation_ids', None) or [])
+    valid_recovery = {row.id for row in originals if row.id in recovery_ids
+        and _normalize_flight_number(row.flight_number) == number and observation_codes(row).intersection(codes)
+        and (row.id in valid_links or local_day(row) == provenance.get('departure_local_date'))}
+    if recovery_ids - valid_recovery:
+        raise ValueError('Recovery correction is not linked to this account and booking leg')
+    wanted = direct_ids | valid_links | valid_recovery
+    if not wanted:
+        return None
+    by_id = {row.id: row for row in db.query(BookingObservation).filter_by(user_id=user_id).all()}
+    matches = []
+    for segment in db.query(Segment).join(Trip).filter(Trip.user_id == user_id,
+            Segment.dep_airport == flight.dep_airport, Segment.arr_airport == flight.arr_airport).all():
+        if _normalize_flight_number(segment.flight_number) != number:
+            continue
+        meta = segment.meta_json or {}
+        evidence_ids = set(meta.get('observation_ids') or [])
+        for item_id in list(evidence_ids):
+            item = by_id.get(item_id)
+            if not item:
+                continue
+            evidence_ids.update((item.facts or {}).get('recovery_observation_ids') or [])
+            parts = str(item.source_message_id or '').split(':')
+            if len(parts) == 3 and parts[0] == 'travel-name' and parts[1].isdigit() and int(parts[1]) in by_id:
+                evidence_ids.add(int(parts[1]))
+        if wanted.intersection(evidence_ids):
+            matches.append(segment)
+    if len(matches) > 1:
+        raise ValueError('Source correction has multiple existing segments; review is required')
+    return matches[0] if matches else None
 
 
 def _find_accepted_shared_segment(db: Session, user_id: int, flight) -> Optional[Segment]:
@@ -2308,6 +2370,18 @@ def _segment_meta(flight) -> dict:
 
 
 def _merge_flight_provenance(meta: dict, flight, *, incoming_is_current: bool) -> None:
+    if incoming_is_current:
+        for key in ('time_provenance', 'source_time_provenance', 'parser_version'):
+            value = getattr(flight, key, None)
+            if value is not None:
+                meta[key] = value
+    for key in ('recovery_observation_ids', 'reconciles_observation_ids'):
+        values = list(meta.get(key) or [])
+        for value in getattr(flight, key, None) or []:
+            if value not in values:
+                values.append(value)
+        if values:
+            meta[key] = values
     for attribute, key in (("observation_id", "observation_ids"), ("source_message_id", "source_message_ids")):
         value = getattr(flight, attribute, None)
         if value is not None:

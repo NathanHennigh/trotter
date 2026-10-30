@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import random
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -69,7 +70,8 @@ def test_orlando_import_is_order_independent_and_repeatable(session, order):
     assert db.query(Trip).count() == 1
     trip = db.query(Trip).one()
     assert trip.start_ts.date().isoformat() == "2025-02-18"
-    assert trip.end_ts.date().isoformat() == "2025-02-23"
+    # The return lands Feb 23 at 22:10 in Houston, Feb 24 at 04:10 UTC.
+    assert trip.end_ts.isoformat().startswith("2025-02-24T04:10:00")
     before = [(s.id, s.trip_id, s.dep_airport, s.arr_airport, s.dep_time, s.arr_time) for s in db.query(Segment).order_by(Segment.id)]
     observations = db.query(BookingObservation).count()
     for key in reversed(order):
@@ -137,3 +139,69 @@ def test_cancellation_policy_footer_is_not_cancellation(session):
         received_at="Thu, 16 Jan 2025 21:00:00 +0000")
     assert not result.is_cancellation
     assert db.query(Segment).count() == 1
+
+
+@pytest.mark.parametrize('from_name_recovery', [False, True])
+def test_normal_history_reparse_corrects_utc_day_using_same_original_segment(session, monkeypatch, from_name_recovery):
+    from app.services import parser
+    from app.services.builder import build_segments_and_trips_detailed
+    db, user = session
+    old = ParsedFlight('LAS', 'IAH', datetime(2026, 3, 23, 23, 30, tzinfo=timezone.utc),
+        datetime(2026, 3, 24, 4, 20, tzinfo=timezone.utc), airline='UA', flight_number='UA123',
+        pnr='TIME01', ownership='other' if from_name_recovery else 'self')
+    monkeypatch.setattr(parser, 'PARSER_VERSION', 25)
+    apply_booking_message(db, user.id, ParseResult(flights=[old]), source_message_id='original',
+        subject='Flight receipt', received_at='2026-03-01T12:00:00Z')
+    if from_name_recovery:
+        source = db.query(BookingObservation).one()
+        derived = deepcopy(old); derived.ownership = 'self'; derived.source = 'travel_name_recovery'
+        derived.source_received_at = datetime(2026, 3, 1, 12, tzinfo=timezone.utc)
+        build_segments_and_trips_detailed(db, user.id, [derived],
+            source_message_id=f'travel-name:{source.id}:confirmed-alias')
+    db.commit()
+    segment_id = db.query(Segment).one().id
+    originals = {row.id: deepcopy(row.facts) for row in db.query(BookingObservation)}
+    corrected = deepcopy(old); corrected.ownership = 'self'
+    corrected.dep_time = datetime(2026, 3, 24, 6, 30, tzinfo=timezone.utc)
+    corrected.arr_time = datetime(2026, 3, 24, 9, 20, tzinfo=timezone.utc)
+    corrected.time_provenance = {'version': 1, 'status': 'normalized', 'departure_local_date': '2026-03-23',
+        'departure': {'basis': 'airport_local', 'airport': 'LAS', 'timezone': 'America/Los_Angeles',
+                      'local': '2026-03-23T23:30:00', 'utc': corrected.dep_time.isoformat()},
+        'arrival': {'basis': 'airport_local', 'airport': 'IAH', 'timezone': 'America/Chicago',
+                    'local': '2026-03-24T04:20:00', 'utc': corrected.arr_time.isoformat()}}
+    monkeypatch.setattr(parser, 'PARSER_VERSION', 26)
+    for _ in range(2):
+        result = apply_booking_message(db, user.id, ParseResult(flights=[corrected]), source_message_id='original',
+            subject='Flight receipt', received_at='2026-03-01T12:00:00Z')
+        db.commit()
+        assert result.build.inserted == 0
+        stored = db.query(Segment).one()
+        assert stored.id == segment_id and stored.dep_time == corrected.dep_time.replace(tzinfo=None)
+        assert stored.arr_time == corrected.arr_time.replace(tzinfo=None)
+        assert stored.meta_json['time_provenance']['departure_local_date'] == '2026-03-23'
+        assert all(db.get(BookingObservation, key).facts == facts for key, facts in originals.items())
+
+
+def test_multipart_forward_preserves_original_date_without_double_counting_headers(session):
+    db, user = session
+    text = '---------- Forwarded message ---------\nDate: Jan 1, 2025 14:00:00 +0000\nSubject: Receipt'
+    apply_booking_message(db, user.id, ParseResult(flights=[flight('self')]), source_message_id='multipart',
+        subject='Fwd: Flight receipt', plain_text=text, html='<div>' + text.replace('\n', '<br>') + '</div>',
+        received_at='2025-02-01T12:00:00Z')
+    observed = db.query(BookingObservation).one()
+    assert observed.source_event_at == datetime(2025, 1, 1, 14)
+    assert observed.facts['source_time_provenance']['received_at'] == '2025-02-01T12:00:00+00:00'
+
+
+def test_partial_cancellation_uses_airport_local_day_after_utc_normalization(session):
+    db, user = session
+    target = flight('self'); target.dep_airport = 'LAS'; target.arr_airport = 'IAH'
+    target.dep_time = datetime(2025, 2, 22, 7, 30, tzinfo=timezone.utc)
+    target.arr_time = datetime(2025, 2, 22, 10, 20, tzinfo=timezone.utc)
+    target.time_provenance = {'version': 1, 'status': 'normalized', 'departure_local_date': '2025-02-21'}
+    apply_booking_message(db, user.id, ParseResult(flights=[target]), source_message_id='initial',
+        subject='Flight receipt', received_at='2025-01-01T12:00:00Z')
+    result = apply_booking_message(db, user.id, ParseResult(flights=[target]), source_message_id='canceled',
+        subject='Flight cancellation confirmed',
+        plain_text='Your flight F91418 on February 21, 2025 was canceled.', received_at='2025-01-02T12:00:00Z')
+    assert result.canceled == 1 and db.query(Segment).count() == 0

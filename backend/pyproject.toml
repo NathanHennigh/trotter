@@ -25,7 +25,9 @@ beautifulsoup4 = "^4.12.0"
 icalendar = "^5.0.0"
 httpx = "^0.27.0"
 airportsdata = ">=20241001"
+tzdata = ">=2025.2"
 pillow = "^12.0.0"
+pypdf = ">=6.1,<7"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.0"

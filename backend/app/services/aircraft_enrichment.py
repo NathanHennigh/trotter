@@ -209,6 +209,11 @@ def lookup_faa_registration(registration: str) -> Optional[AircraftInfo]:
     )
 
 
+def _departure_local_date(segment: Segment) -> str:
+    from .flight_display_time import segment_local_date
+    return segment_local_date(segment)
+
+
 def aerodatabox_lookup_key(segment: Segment) -> Optional[str]:
     flight_number = _normalize_flight_number(segment.flight_number or "", segment.airline)
     if not flight_number:
@@ -216,7 +221,7 @@ def aerodatabox_lookup_key(segment: Segment) -> Optional[str]:
     return "|".join(
         [
             flight_number,
-            segment.dep_time.date().isoformat(),
+            _departure_local_date(segment),
             segment.dep_airport.upper(),
             segment.arr_airport.upper(),
         ]
@@ -270,7 +275,7 @@ def lookup_aerodatabox_flight(segment: Segment) -> Optional[dict]:
     if not flight_number:
         return None
 
-    date_local = segment.dep_time.date().isoformat()
+    date_local = _departure_local_date(segment)
     params = {
         "dateLocalRole": "Both",
         "withAircraftImage": "false",

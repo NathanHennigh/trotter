@@ -9,15 +9,15 @@ from functools import lru_cache
 from .bilt_booking import bilt_confirmation_evidence
 
 
-EVIDENCE_VERSION = 1
+EVIDENCE_VERSION = 2
 _AIRPORT_PAIR = re.compile(
-    r"\b(?P<dep>[A-Z]{3})\s*(?:-|--|->|>|TO|–|—)\s*(?P<arr>[A-Z]{3})\b",
+    r"\b(?P<dep>[A-Z]{3})\s*(?:-|--|->|>|\bTO\b|–|—)\s*(?P<arr>[A-Z]{3})\b",
     re.IGNORECASE,
 )
 _PAREN_AIRPORT = re.compile(r"\((?P<code>[A-Z]{3})\)")
 _FLIGHT_NUMBER = re.compile(
     r"\b(?P<airline>AA|UA|DL|WN|AS|B6|NK|F9|G4|SY|BA|AF|LH|KL|IB|AZ|TK|EK|QR|SQ|CX|NH|JL|KE|MH|TG|CI|OZ|CA|MU|QF|NZ|AC|WS|VS|ET|SA|MS|RJ|EY|GF|SV|AI|VN|BR|AY|SK|LO|OS|SN|TP|JU|FR|U2|VY|PC|HV|W6|DY|Z2|Y4|AM)\s?(?P<airline_number>\d{1,4}[A-Z]?)\b"
-    r"|\bflight\s+(?P<number>\d{1,4}[A-Z]?)\b",
+    r"|\bflight(?:\s+number)?\s*[:#]?\s*#?\s*(?P<number>\d{1,4}[A-Z]?)\b",
     re.IGNORECASE,
 )
 _PNR = re.compile(
@@ -30,7 +30,9 @@ _FLIGHT_WORD = re.compile(r"\b(?:flight|airline|itinerary|departure|arrival|rout
 _DATE_TIME = re.compile(
     r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}"
     r"|\b\d{1,2}:\d{2}\s*(?:AM|PM|a\.m\.|p\.m\.)\b"
-    r"|\b\d{1,2}/\d{1,2}/\d{2,4}\b",
+    r"|\b\d{1,2}/\d{1,2}/\d{2,4}\b"
+    r"|\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b"
+    r"|\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b",
     re.IGNORECASE,
 )
 _PROMO = re.compile(
@@ -73,7 +75,14 @@ class FlightEvidence:
 
 def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confidence: str = "unknown") -> FlightEvidence:
     """Score flight-like structure without deciding import behavior yet."""
+    # Bilt has a structural HTML adapter; retain table boundaries for that pass.
     bilt = bilt_confirmation_evidence(subject=subject, sender=sender, body=body)
+    if re.search(r"<[a-z][^>]*>", body[:200_000], re.I):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(body[:200_000], "html.parser")
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+        body = soup.get_text(" ", strip=True)
     if bilt:
         return FlightEvidence(
             version=EVIDENCE_VERSION, verdict="parse", score=13,
@@ -83,6 +92,7 @@ def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confi
         )
     text = "\n".join(part for part in (subject, sender, body[:200_000]) if part)
     route_text = "\n".join(part for part in (subject, body[:200_000]) if part)
+    route_text = re.sub(r"https?://\S+|\b[^\s<>@]+@[^\s<>@]+", " ", route_text, flags=re.I)
     compact = " ".join(text.split())
     upper = compact.upper()
     route_upper = " ".join(route_text.split()).upper()
@@ -97,7 +107,8 @@ def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confi
         score += 1
         signals.append("airport_context")
 
-    flight_numbers = _flight_numbers(upper)
+    # Sender hostnames (for example mh1.evaair.com) are not flight evidence.
+    flight_numbers = _flight_numbers(route_upper)
     if flight_numbers:
         score += 3
         signals.append("flight_number")
@@ -140,10 +151,39 @@ def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confi
     has_date = "date_or_time" in signals
     has_booking = "booking_identifier" in signals
     has_flight_number = "flight_number" in signals
+    operational_subject = bool(re.search(
+        r"\b(?:check[- ]?in|boarding|gate|flight.*(?:delay(?:ed)?|updates?|changes?)|(?:delay(?:ed)?|updates?).*flight|e-?ticket|itinerary|flight confirmation)\b",
+        subject, re.I,
+    ))
+    structured_route = has_route or bool(re.search(r"\bdepart(?:ure|ing)?\b", route_text, re.I)
+                                        and re.search(r"\barriv(?:al|ing|e)\b", route_text, re.I))
+    operational = (operational_subject and has_date and structured_route
+                   and (has_flight_number or has_booking)
+                   and not _PROMO.search(subject) and "newsletter_sender" not in signals)
+    # Receipts may spell airports out in full or render them on separate lines.
+    # A dated, numbered booking with ticket/check-in details is sufficient to
+    # extract deterministically; footer seat offers must not veto that evidence.
+    operational = operational or (has_date and has_flight_number and has_booking
+        and bool({"ticket_language", "boarding_or_checkin"} & set(signals))
+        and "newsletter_sender" not in signals and not _PROMO.search(subject))
+    cancellation_notice = (bool(re.search(r"\bcancel(?:led|ed|lation)\b", subject, re.I))
+                           and (has_booking or has_flight_number or "ticket_language" in signals)
+                           and "newsletter_sender" not in signals)
+    if cancellation_notice:
+        signals.append("cancellation_notice")
+        operational = True
+    if operational:
+        signals.append("operational_itinerary")
+        score = max(score, 8)
     noisy = bool({"promo_noise", "non_flight_travel_noise", "noisy_sender", "newsletter_sender"} & set(signals))
-    if noisy and not (has_route and has_date and (has_booking or has_flight_number)):
+    if noisy and not operational and not (has_route and has_date and (has_booking or has_flight_number)):
         score = min(score, 3)
     if "newsletter_sender" in signals and not (has_route and has_date and has_booking and has_flight_number):
+        score = min(score, 2)
+    if re.search(r"\b(?:mileage|miles|rewards?|account)[- ]+(?:e[- ]?)?statement\b", subject, re.I) and not has_booking:
+        # Balance statements may advertise dated new routes and flight numbers.
+        # They are not ticket evidence merely because an airline sent them.
+        signals.append("statement_noise")
         score = min(score, 2)
 
     if score >= 7:
@@ -170,6 +210,11 @@ def _route_airport_codes(upper: str) -> list[str]:
                 codes.append(code)
     if codes:
         return codes
+
+    for match in re.finditer(r"\b([A-Z]{3})\s*[-–]\s*[A-Z][A-Z ,.'-]{2,75}\s+TO\s+([A-Z]{3})\b", upper):
+        dep, arr = match.groups()
+        if _valid_iata(dep) and _valid_iata(arr):
+            return [dep, arr]
 
     parenthesized = [match.group("code") for match in _PAREN_AIRPORT.finditer(upper)]
     for code in parenthesized:

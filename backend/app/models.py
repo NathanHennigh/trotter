@@ -155,6 +155,54 @@ class GmailDiscoveryState(Base):
     user = relationship("User", back_populates="gmail_discovery_states")
 
 
+class GmailHistoryState(Base):
+    """Checkpointed history discovery, independent of the recent-mail watermark."""
+    __tablename__ = "gmail_history_states"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_gmail_history_user_provider"),
+        CheckConstraint("state IN ('pending','queued','running','complete','paused')", name="ck_gmail_history_state"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, 'sqlite'), primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(32), nullable=False, default="google")
+    state = Column(String(16), nullable=False, default="pending")
+    cursor_before = Column(DateTime(timezone=True), nullable=True)
+    window_start = Column(DateTime(timezone=True), nullable=True)
+    window_end = Column(DateTime(timezone=True), nullable=True)
+    page_token = Column(Text, nullable=True)
+    next_page_token = Column(Text, nullable=True)
+    pending_message_ids = Column(JSON, nullable=False, default=list)
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    lease_until = Column(DateTime(timezone=True), nullable=True)
+    scanned_count = Column(Integer, nullable=False, default=0)
+    error_code = Column(String(120), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class BookingRepairManifest(Base):
+    """Exact account-scoped repair plans; retain decisions and hashes, not raw mail."""
+    __tablename__ = "booking_repair_manifests"
+    __table_args__ = (
+        UniqueConstraint("user_id", "plan_hash", name="uq_booking_repair_user_plan"),
+        CheckConstraint("state IN ('previewed','applied')", name="ck_booking_repair_state"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    schema_version = Column(Integer, nullable=False, default=1)
+    state = Column(String(16), nullable=False, default="previewed")
+    base_fingerprint = Column(String(64), nullable=False)
+    plan_hash = Column(String(64), nullable=False)
+    manifest_json = Column(JSON, nullable=False)
+    preview_json = Column(JSON, nullable=False)
+    result_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    applied_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class GmailDiscoverySignal(Base):
     __tablename__ = "gmail_discovery_signals"
     __table_args__ = (

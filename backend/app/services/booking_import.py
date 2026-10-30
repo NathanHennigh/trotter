@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 
 from bs4 import BeautifulSoup
@@ -24,6 +24,13 @@ def visible_message_text(plain_text: str, html: str) -> str:
         node.decompose()
     parts = [plain_text or "", soup.get_text("\n", strip=True)]
     return "\n".join(part for part in parts if part)
+
+
+def booking_time_text(plain_text: str, html: str) -> str:
+    # MIME alternatives describe one message. Combining them repeats forwarded
+    # Date headers and incorrectly turns a single original receipt into an
+    # ambiguous nested forward. Keep the unmodified plain version when present.
+    return plain_text if (plain_text or '').strip() else visible_message_text('', html)
 
 
 def _date(value) -> datetime | None:
@@ -65,6 +72,51 @@ def booking_event_time(received_at, subject: str, text: str) -> datetime | None:
         return None
     original = _date(date_match[1])
     return original if original and (not received or original <= received) else None
+
+
+def booking_time_provenance(received_at, subject: str, text: str):
+    """Retain receipt time separately; an unknown forwarded timezone is an
+    interval, never a manufactured UTC instant or a newly received booking.
+    """
+    received = _date(received_at)
+    event = booking_event_time(received_at, subject, text)
+    result = {'version': 1, 'received_at': received.isoformat() if received else None,
+              'event_at': event.isoformat() if event else None, 'kind': 'direct'}
+    if event:
+        result.update(earliest=event.isoformat(), latest=event.isoformat())
+    if re.match(r'^\s*re\s*:', subject or '', re.I):
+        result['kind'] = 'reply_unknown'; return result
+    if not re.match(r'^\s*(?:fwd?|fw)\s*:', subject or '', re.I):
+        return result
+    result['kind'] = 'forwarded' if event else 'forwarded_unknown'
+    if event:
+        return result
+    marker = r'(?:-{2,}\s*Forwarded message\s*-{2,}|Begin forwarded message:)'
+    if len(re.findall(marker, text, re.I)) != 1:
+        return result
+    match = re.search(marker + r'\s*([\s\S]{0,1600})', text, re.I)
+    values = re.findall(r'(?im)^\s*Date:\s*(.+)$', match[1] if match else '')
+    if len(values) != 1:
+        return result
+    result['original_date'] = values[0].strip()
+    # dateutil otherwise supplies this year's value for abbreviated headers.
+    # A guessed year cannot establish ordering against another booking notice.
+    if not re.search(r'\b(?:19|20)\d{2}\b', values[0]):
+        return result
+    try:
+        from dateutil.parser import parse
+        local = parse(values[0], fuzzy=False)
+    except (ValueError, TypeError, OverflowError):
+        return result
+    if local.tzinfo is not None:
+        return result
+    lower = local.replace(tzinfo=timezone.utc) - timedelta(hours=14)
+    upper = local.replace(tzinfo=timezone.utc) + timedelta(hours=12)
+    if received and lower > received:
+        return result
+    result.update(kind='forwarded_timezone_unknown', earliest=lower.isoformat(),
+                  latest=min(upper, received).isoformat() if received else upper.isoformat())
+    return result
 
 
 @dataclass
@@ -156,7 +208,8 @@ def _dated_canceled_legs(assertions: list[str], flights: list) -> tuple[bool, li
                         break
                     except ValueError:
                         continue
-            if flight.dep_time.date() in dates and flight not in selected:
+            from .booking_ledger import flight_scope
+            if flight_scope(flight)['travel_date'] in {value.isoformat() for value in dates} and flight not in selected:
                 selected.append(flight)
     return partial, selected
 
@@ -167,10 +220,16 @@ def apply_booking_message(db, user_id: int, parsed, *, source_message_id: str,
     from .parser import _extract_pnr
 
     text = visible_message_text(plain_text, html)
-    event_at = booking_event_time(received_at, subject, text)
+    time_text = booking_time_text(plain_text, html)
+    event_at = booking_event_time(received_at, subject, time_text)
     flights = deepcopy(parsed.flights)
+    provenance = booking_time_provenance(received_at, subject, time_text)
+    from .parser import PARSER_VERSION
     for flight in flights:
         flight.source_received_at = event_at
+        flight.mail_received_at = _date(received_at)
+        flight.source_time_provenance = provenance
+        flight.parser_version = PARSER_VERSION
     cancellation = _cancellation_intent(subject, text)
     canceled = 0
     review_reason = None

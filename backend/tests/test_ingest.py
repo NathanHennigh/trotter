@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import get_db
 from app.main import app
-from app.models import Account, Message, MessageStatus, SyncJob, User
+from app.models import Account, GmailHistoryState, Message, MessageStatus, SyncJob, User
 from app.routers.auth import get_current_user
 from app.tasks.import_tasks import (
     DEFAULT_TARGETED_REPARSE_MESSAGE_IDS,
@@ -46,6 +46,7 @@ def test_db():
     Account.__table__.create(engine)
     SyncJob.__table__.create(engine)
     Message.__table__.create(engine)
+    GmailHistoryState.__table__.create(engine)
     Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override_get_db():
@@ -61,6 +62,7 @@ def test_db():
     session.close()
     app.dependency_overrides.pop(get_db, None)
     Message.__table__.drop(engine)
+    GmailHistoryState.__table__.drop(engine)
     SyncJob.__table__.drop(engine)
     Account.__table__.drop(engine)
     User.__table__.drop(engine)
@@ -91,6 +93,10 @@ def client():
 
 
 class TestIngestAuthGuard:
+    def test_get_history_requires_auth(self):
+        app.dependency_overrides.pop(get_current_user, None)
+        assert TestClient(app, raise_server_exceptions=False).get("/ingest/gmail/history").status_code in (401, 403)
+
     def test_start_import_requires_auth(self):
         """POST /ingest/gmail/import must reject unauthenticated requests."""
         # Ensure no auth override is active
@@ -180,6 +186,14 @@ class TestStartImport:
 
 
 class TestJobStatus:
+    def test_history_status_is_scoped_to_current_account(self, client, test_user, test_db):
+        test_db.add(User(id=99, email="other@example.com", name="Other"))
+        test_db.add(GmailHistoryState(user_id=99, state="complete", scanned_count=900))
+        test_db.add(GmailHistoryState(user_id=test_user.id, state="pending", scanned_count=50))
+        test_db.commit()
+        data = client.get("/ingest/gmail/history").json()
+        assert data["state"] == "pending" and data["scanned_count"] == 50
+
     def test_returns_404_for_unknown_job(self, client, test_user):
         response = client.get("/ingest/jobs/00000000-0000-0000-0000-000000000000")
         assert response.status_code == 404

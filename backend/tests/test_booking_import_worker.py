@@ -154,3 +154,142 @@ def test_worker_failure_rolls_back_whole_message_projection_and_evidence(worker,
         assert db.query(BookingObservation).count() == 0
         assert db.query(Message).count() == 0
     assert enriched == []
+
+
+@pytest.mark.parametrize("mode", ["sync", "reparse"])
+def test_every_worker_path_persists_original_gmail_time(worker, mode):
+    factory, user_id, _ = worker
+    if mode == "reparse":
+        with factory() as db:
+            for row in ROWS:
+                db.add(Message(user_id=user_id, provider_msg_id=row["id"], status=MessageStatus.REVIEW_REQUIRED,
+                               parse_version=1, internal_ts=None, ignored=False))
+            db.commit()
+    assert run(factory, user_id, mode, "times")["state"] == "completed"
+    expected = {row["id"]: parsedate_to_datetime(row["received_at"]).astimezone(timezone.utc) for row in ROWS}
+    with factory() as db:
+        for message in db.query(Message):
+            assert message.internal_ts.replace(tzinfo=timezone.utc) == expected[message.provider_msg_id]
+
+
+def test_fetch_failure_cannot_advance_incremental_coverage(worker, monkeypatch):
+    from app.models import GmailDiscoveryState
+    factory, user_id, _ = worker
+    monkeypatch.setattr(gmail, "batch_get_messages", lambda service, ids: ({}, {ids[0]: TimeoutError()}))
+    result = run(factory, user_id, "sync", "fetch-failure")
+    assert result["state"] == "failed" and result["failed_message_ids"]
+    with factory() as db:
+        assert db.query(GmailDiscoveryState).one().last_incremental_scan_at is None
+        assert db.query(Segment).count() == 0
+
+
+def test_exact_reprocess_never_discovers_or_fills_with_other_stale_messages(worker, monkeypatch):
+    factory, user_id, _ = worker
+    with factory() as db:
+        db.add(Message(user_id=user_id, provider_msg_id="untargeted", status=MessageStatus.REVIEW_REQUIRED, parse_version=1))
+        db.add(SyncJob(id="exact", user_id=user_id, state="pending"))
+        db.commit()
+    monkeypatch.setattr(flight_query_v4, "iter_discovery_messages", lambda *a: pytest.fail("No discovery on exact repair"))
+    result = import_tasks.run_gmail_import.run(job_id="exact", user_id=user_id, mode="exact_reprocess", message_ids=[ROWS[0]["id"]])
+    assert result["state"] == "completed" and result["scanned_count"] == 1
+    with factory() as db:
+        assert db.query(Message).filter_by(provider_msg_id="untargeted").one().parse_version == 1
+
+
+def test_recent_scan_does_not_replay_older_mail_on_version_upgrade(worker, monkeypatch):
+    factory, user_id, _ = worker
+    with factory() as db:
+        db.add(Message(user_id=user_id, provider_msg_id="old-untargeted", status=MessageStatus.REVIEW_REQUIRED, parse_version=1))
+        db.commit()
+    monkeypatch.setattr(gmail, "get_message", lambda *a: pytest.fail("Recent scan must not fetch older stale mail"))
+    assert run(factory, user_id, "sync", "recent-only")["state"] == "completed"
+    with factory() as db:
+        assert db.query(Message).filter_by(provider_msg_id="old-untargeted").one().parse_version == 1
+
+
+def test_history_yields_to_recent_scan_and_keeps_unprocessed_ids(worker, monkeypatch):
+    from app.models import GmailHistoryState
+    factory, user_id, _ = worker
+    with factory() as db:
+        state = GmailHistoryState(user_id=user_id, state="queued", cursor_before=datetime.now(timezone.utc))
+        db.add(state)
+        db.add(SyncJob(id="background", user_id=user_id, state="pending"))
+        db.add(SyncJob(id="interactive", user_id=user_id, state="pending", updated_at=datetime.now(timezone.utc)))
+        db.commit()
+        state_id = state.id
+    ids = [row["id"] for row in ROWS]
+    monkeypatch.setattr(gmail, "list_messages", lambda *a, **kw: ([{"id": mid} for mid in ids], "next"))
+    monkeypatch.setattr(gmail, "batch_get_messages", lambda *a: pytest.fail("Background must yield before fetching"))
+    result = import_tasks.run_gmail_import.run(job_id="background", user_id=user_id, mode="history", history_state_id=state_id, limit=50)
+    assert result["history_deferred"] is True
+    with factory() as db:
+        state = db.get(GmailHistoryState, state_id)
+        assert state.pending_message_ids == ids
+        assert state.state == "pending" and state.attempts == 0
+        assert state.next_page_token == "next" and state.page_token is None
+
+
+def test_history_timeout_keeps_fetched_page_for_recovery(worker, monkeypatch):
+    from app.models import GmailHistoryState
+    from billiard.exceptions import SoftTimeLimitExceeded
+    factory, user_id, _ = worker
+    with factory() as db:
+        state = GmailHistoryState(user_id=user_id, state="queued", cursor_before=datetime.now(timezone.utc))
+        db.add(state)
+        db.add(SyncJob(id="timeout", user_id=user_id, state="pending"))
+        db.commit()
+        state_id = state.id
+    ids = [ROWS[0]["id"], ROWS[1]["id"]]
+    monkeypatch.setattr(gmail, "list_messages", lambda *a, **kw: ([{"id": mid} for mid in ids], "next"))
+    def timeout(*args):
+        raise SoftTimeLimitExceeded()
+    monkeypatch.setattr(gmail, "batch_get_messages", timeout)
+    import_tasks.run_gmail_import.run(job_id="timeout", user_id=user_id, mode="history", history_state_id=state_id, limit=50)
+    with factory() as db:
+        state = db.get(GmailHistoryState, state_id)
+        assert state.pending_message_ids == ids and state.next_page_token == "next"
+        assert state.state == "running" and state.scanned_count == 0
+        assert db.get(SyncJob, "timeout").state == "failed"
+
+
+def test_interactive_request_waits_for_history_without_creating_another_job(worker, monkeypatch):
+    from contextlib import contextmanager
+    from app.models import GmailHistoryState
+    from app.services import import_lock
+    factory, user_id, _ = worker
+    monkeypatch.setattr(import_tasks.celery_app.conf, "task_always_eager", False)
+    with factory() as db:
+        db.add(GmailHistoryState(user_id=user_id, state="running"))
+        db.commit()
+    @contextmanager
+    def busy(*args):
+        raise import_lock.ImportAlreadyRunning("busy")
+        yield
+    monkeypatch.setattr(import_lock, "user_import_lock", busy)
+    queued = []
+    monkeypatch.setattr(import_tasks.run_gmail_import, "apply_async", lambda **kw: queued.append(kw))
+    result = run(factory, user_id, "sync", "interactive-wait")
+    assert result["state"] == "pending" and result["waiting_for_history"]
+    assert queued[0]["kwargs"]["job_id"] == "interactive-wait"
+    with factory() as db:
+        assert db.query(SyncJob).count() == 1
+
+
+def test_eager_development_retry_cannot_recurse_on_locked_history(worker, monkeypatch):
+    from contextlib import contextmanager
+    from app.models import GmailHistoryState
+    from app.services import import_lock
+    factory, user_id, _ = worker
+    monkeypatch.setattr(import_tasks.celery_app.conf, "task_always_eager", True)
+    with factory() as db:
+        db.add(GmailHistoryState(user_id=user_id, state="running"))
+        db.commit()
+    @contextmanager
+    def busy(*args):
+        raise import_lock.ImportAlreadyRunning("busy")
+        yield
+    monkeypatch.setattr(import_lock, "user_import_lock", busy)
+    monkeypatch.setattr(import_tasks.run_gmail_import, "apply_async", lambda **kw: pytest.fail("No recursive eager task"))
+    run(factory, user_id, "sync", "eager-busy")
+    with factory() as db:
+        assert db.get(SyncJob, "eager-busy").state == "failed"
