@@ -10,6 +10,7 @@ import re
 import unicodedata
 
 from .dream_location_research import source_area_intent
+from .dream_parser import source_content_label
 
 
 _ACTIVE = {"queued", "running"}
@@ -88,14 +89,16 @@ def _source_only_lodging_label(item, name, caption):
     return bool((cta_only or geographic) and not re.search(name_pattern, residual))
 
 
-def _named_identity(item, caption):
-    """Retain named misses; discard only obvious legacy descriptive labels."""
+def named_location_identity(item, caption):
+    """Shared source classification, never evidence that a provider pin is correct."""
     name = _text(getattr(item, "place_name", None)).strip()
     normalized = _normalized(name)
     if not normalized or normalized in _GENERIC_NAMES:
         return False
     if _explicit_named_evidence(name, caption):
         return True
+    if source_content_label(name, caption):
+        return False
     # Older importers sometimes copied the whole caption into place_name.
     if re.match(r"^(?:(?:best|beautiful|aesthetic)\s+)?(?:coffee shops|cafes|restaurants|hotels|stays)\s+(?:in|near|around)\b", normalized):
         return False
@@ -191,7 +194,7 @@ def location_presentation(
         return _result("unavailable", "location_unavailable", "Map details aren't available yet. Your save is kept.")
     if location_status == "needs_review":
         return _result("unresolved", "ambiguous_match", "Several places may match. No pin has been chosen.")
-    if _named_identity(item, caption):
+    if named_location_identity(item, caption):
         return _result("unresolved", "named_unresolved", "Place saved. Its map location hasn't been verified yet.")
     if not _usable_caption(caption):
         return _result("source_details", "caption_missing", "The post's caption isn't available. Your save is kept.")

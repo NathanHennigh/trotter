@@ -29,6 +29,8 @@ from ..services.dream_thumbnail_cache import (
     DreamThumbnailError,
     cache_thumbnail,
     read_cached_thumbnail,
+    thumbnail_item_id,
+    thumbnail_variant,
 )
 from ..services.google_places import (
     GeoapifyError,
@@ -174,6 +176,7 @@ class DreamItemOut(BaseModel):
     country: Optional[str] = None
     region_or_neighborhood: Optional[str] = None
     summary: str
+    personal_note: Optional[str] = None
     tags_json: Optional[list[str]] = None
     confidence: Optional[float] = None
     needs_review: bool
@@ -216,6 +219,7 @@ class ReviewEdits(BaseModel):
     city: Optional[str] = None
     country: Optional[str] = None
     region_or_neighborhood: Optional[str] = None
+    personal_note: Optional[str] = Field(default=None, max_length=8000)
     summary: Optional[str] = None
     tags_json: Optional[list[str]] = None
     google_place_id: Optional[str] = None
@@ -641,6 +645,7 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
         country=item.country,
         region_or_neighborhood=item.region_or_neighborhood,
         summary=item.summary,
+        personal_note=item.personal_note,
         tags_json=item.tags_json,
         confidence=item.confidence,
         needs_review=item.needs_review,
@@ -665,23 +670,52 @@ def dream_item_out(item: DreamItem) -> DreamItemOut:
 @router.get("/dream-items/{item_id}/thumbnail")
 def get_dream_item_thumbnail(
     item_id: int,
+    width: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).first()
+    item = db.query(DreamItem).options(selectinload(DreamItem.source_post).selectinload(DreamSourcePost.items)).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Dream item not found")
+    return dream_thumbnail_response(item, db, current_user, width)
+
+
+@router.get("/dream-source-posts/{source_id}/thumbnail")
+def get_dream_source_thumbnail(
+    source_id: int,
+    width: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # A stable source URL survives removal of its first extracted place. Check
+    # both ownership boundaries before touching disk or the Instagram network.
+    item = (db.query(DreamItem).join(DreamSourcePost, DreamItem.source_post_id == DreamSourcePost.id)
+            .options(selectinload(DreamItem.source_post).selectinload(DreamSourcePost.items))
+            .filter(DreamSourcePost.id == source_id, DreamSourcePost.user_id == current_user.id,
+                    DreamItem.user_id == current_user.id).order_by(DreamItem.id).first())
+    if not item:
+        raise HTTPException(status_code=404, detail="Dream source not found")
+    return dream_thumbnail_response(item, db, current_user, width)
+
+
+def dream_thumbnail_response(item: DreamItem, db: Session, current_user: User, width: Optional[int]):
+    if width not in (None, 240, 960):
+        raise HTTPException(status_code=422, detail="Thumbnail width must be 240 or 960")
 
     cached = read_cached_thumbnail(item.id)
     if not cached and item.source_post:
         for sibling in item.source_post.items:
-            if sibling.id != item.id:
+            if sibling.id != item.id and sibling.user_id == current_user.id:
                 cached = read_cached_thumbnail(sibling.id)
                 if cached:
                     break
     if cached:
         content, content_type = cached
-        return Response(content=content, media_type=content_type, headers={"Cache-Control": "private, max-age=604800"})
+        try:
+            content, content_type = thumbnail_variant(thumbnail_item_id(item), content, content_type, width)
+        except DreamThumbnailError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return Response(content=content, media_type=content_type, headers={"Cache-Control": "private, max-age=604800", "Vary": "Authorization"})
 
     raw = item.raw_metadata_json or {}
     metadata = raw.get("instagram_metadata") if isinstance(raw, dict) else None
@@ -706,7 +740,11 @@ def get_dream_item_thumbnail(
 
     item.raw_metadata_json = {**raw, "instagram_metadata": metadata}
     db.commit()
-    return Response(content=content, media_type=content_type, headers={"Cache-Control": "private, max-age=604800"})
+    try:
+        content, content_type = thumbnail_variant(thumbnail_item_id(item), content, content_type, width)
+    except DreamThumbnailError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return Response(content=content, media_type=content_type, headers={"Cache-Control": "private, max-age=604800", "Vary": "Authorization"})
 
 
 def deterministic_caption_fallback(
@@ -1067,6 +1105,15 @@ def review_item(
     item = db.query(DreamItem).filter(DreamItem.id == item_id, DreamItem.user_id == current_user.id).with_for_update().first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dream item not found")
+
+    # A personal note does not confirm an inferred place or cancel its background work.
+    note_edits = payload.edits.model_dump(exclude_unset=True) if payload.edits else {}
+    if payload.decision == "confirm" and note_edits and set(note_edits) == {"personal_note"}:
+        item.personal_note = (note_edits["personal_note"] or "").strip() or None
+        item.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(item)
+        return dream_item_out(item)
 
     cancel_enrichment(db, item, user_edited=True)
 

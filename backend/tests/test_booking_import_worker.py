@@ -30,7 +30,7 @@ def worker(tmp_path, monkeypatch):
         db.add(user)
         db.flush()
         user_id = user.id
-        db.add(Account(user_id=user_id, provider="google", refresh_token_encrypted=b"test-only", scopes="test"))
+        db.add(Account(user_id=user_id, provider="google", refresh_token_encrypted=b"test-only", scopes="https://www.googleapis.com/auth/gmail.readonly"))
         db.commit()
     messages = {
         row["id"]: {
@@ -70,6 +70,44 @@ def run(factory, user_id, mode, job_id):
         db.add(SyncJob(id=job_id, user_id=user_id, state="pending"))
         db.commit()
     return import_tasks.run_gmail_import.run(job_id=job_id, user_id=user_id, mode=mode, limit=0)
+
+
+@pytest.mark.parametrize("stage", ["discovery", "batch", "stale_refetch"])
+def test_worker_revocation_is_durable_without_deleting_tokens(worker, monkeypatch, stage):
+    from google.auth.exceptions import RefreshError
+    factory, user_id, _ = worker
+    def revoked(*args, **kwargs):
+        raise RefreshError("invalid_grant: Token has been expired or revoked.")
+    mode = "sync"
+    if stage == "discovery":
+        monkeypatch.setattr(flight_query_v4, "iter_discovery_messages", revoked)
+    elif stage == "batch":
+        monkeypatch.setattr(gmail, "batch_get_messages", lambda service, ids: ({}, {ids[0]: RefreshError("invalid_grant")}))
+    else:
+        mode = "reparse"
+        monkeypatch.setattr(gmail, "get_message", revoked)
+        with factory() as db:
+            db.add(Message(user_id=user_id, provider_msg_id="old-message", status=MessageStatus.ACCEPTED, parse_version=1, ignored=False))
+            db.commit()
+    run(factory, user_id, mode, f"revoked-{stage}")
+    with factory() as db:
+        account = db.query(Account).one()
+        assert account.gmail_connection_status == "needs_reconnect"
+        assert account.refresh_token_encrypted == b"test-only"
+        assert account.scopes == "https://www.googleapis.com/auth/gmail.readonly"
+        job = db.get(SyncJob, f"revoked-{stage}")
+        assert job.state == "failed"
+        assert job.error_message == "Reconnect Gmail to import your flights."
+    assert run(factory, user_id, "sync", f"retry-{stage}") == {"error": "gmail_connection_required"}
+
+
+def test_queued_worker_without_connection_makes_no_provider_call(worker, monkeypatch):
+    factory, user_id, _ = worker
+    with factory() as db:
+        db.query(Account).delete()
+        db.commit()
+    monkeypatch.setattr(gmail, "build_gmail_service", lambda token: pytest.fail("Unconnected user must never contact Gmail"))
+    assert run(factory, user_id, "sync", "unconnected") == {"error": "gmail_connection_required"}
 
 
 @pytest.mark.parametrize("mode", ["sync", "reparse"])

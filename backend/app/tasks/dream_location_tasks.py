@@ -6,7 +6,8 @@ import os
 
 from app.celery_app import celery_app
 from app.db import SessionLocal
-from app.services.dream_locations import due_jobs, queue_missing, resolve_location_job, setting, utcnow
+from app.models import DreamLocation
+from app.services.dream_locations import due_jobs, queue_matcher_upgrades, queue_missing, resolve_location_job, setting, utcnow
 
 
 def enabled():
@@ -26,6 +27,12 @@ def dispatch_pending_locations(*, session_factory=None, publish=None, now=None):
         refreshed = queue_google_refreshes(db, now=now, limit=batch_size)
         resumed = queue_pending_google_matches(db, now=now, limit=batch_size)
         discovery = queue_missing(db, limit=setting("DREAM_LOCATION_BATCH_SIZE", 25, 100), only_undiscovered=True, now=now)
+        # Prefer existing/new work; don't grow a historical retry backlog while
+        # workers are busy. Screening/retry rate is separately bounded per tick.
+        db.flush()
+        pending = len(db.query(DreamLocation.id).filter(DreamLocation.status.in_(["queued", "running"])).limit(batch_size).all())
+        upgraded = queue_matcher_upgrades(db, now=now,
+            limit=min(max(0, batch_size - pending), setting("DREAM_LOCATION_MATCHER_BATCH_SIZE", 5, 25)))
         jobs = due_jobs(db, now=now, limit=setting("DREAM_LOCATION_BATCH_SIZE", 25, 100))
         ids = [row.id for row in jobs]
         for row in jobs:
@@ -40,7 +47,7 @@ def dispatch_pending_locations(*, session_factory=None, publish=None, now=None):
             # Do not log broker credentials or payloads. Durable rows remain due;
             # the next tick retries notification after the 60-second dispatch lease.
             continue
-    return {"queued": discovery["queued"] + refreshed + resumed, "dispatched": dispatched, "enabled": True}
+    return {"queued": discovery["queued"] + refreshed + resumed + upgraded["queued"], "dispatched": dispatched, "enabled": True}
 
 
 @celery_app.task(name="app.tasks.dream_location_tasks.discover_dream_locations", ignore_result=True)

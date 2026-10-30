@@ -1073,6 +1073,59 @@ def test_exact_decorated_business_name_with_independent_local_context(
     assert len(calls) == 2
 
 
+def riad_place(**updates):
+    return place(**{
+        "displayName": {"text": "LUNARA - Riad & Spa"},
+        "types": ["guest_house", "lodging", "point_of_interest", "establishment"],
+        "addressComponents": [component("sublocality", "Médina"), component("locality", "Marrakech"),
+                              component("administrative_area_level_2", "Marrakech"),
+                              component("country", "Morocco", "MA")],
+        **updates,
+    })
+
+
+@pytest.mark.parametrize("city,region", [
+    ("Marrakech", None), ("Marrakech", "Marrakech Medina"), ("Marrakech", "Marrakesh Médina"),
+    ("Marrakech", "Medina Marrakech"), (None, "Marrakech Medina"),
+])
+def test_riad_descriptor_keeps_exact_brand_and_verified_city_neighborhood(monkeypatch, city, region):
+    calls, _ = singleton(monkeypatch, riad_place())
+    result = lookup(place_name="Lunara", city=city, country="Morocco", region=region, category="hotel")
+    assert result.status == "resolved"
+    assert result.candidates[0].id == "synthetic-place-1"
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("name", [
+    "LUNARA - Riad Miramar & Spa", "LUNARA - Riad & Spa Annex",
+    "LUNARA - Riad & Spa 2", "LUNARA - Riad & Spa Airport",
+])
+def test_riad_descriptor_never_discards_another_brand_or_branch(monkeypatch, name):
+    singleton(monkeypatch, riad_place(displayName={"text": name}))
+    assert lookup(place_name="Lunara", city="Marrakech", country="Morocco", category="hotel").status == "not_found"
+
+
+@pytest.mark.parametrize("region", ["Marrakech Gueliz", "Fez Medina", "Marrakech Old Medina"])
+def test_city_qualified_neighborhood_keeps_actual_geographic_conflicts(monkeypatch, region):
+    singleton(monkeypatch, riad_place())
+    assert lookup(place_name="Lunara", city="Marrakech", country="Morocco", region=region, category="hotel").status == "not_found"
+
+
+@pytest.mark.parametrize("options,updates", [
+    ({"city": "Fez"}, {}),
+    ({"country": "Spain"}, {}),
+    ({"category": "restaurant"}, {"types": ["restaurant", "point_of_interest", "establishment"]}),
+    ({"city": None, "region": None}, {}),
+    ({"region": "Marrakech Medina"}, {"addressComponents": [
+        component("sublocality", "Médina"), component("country", "Morocco", "MA"),
+    ]}),
+])
+def test_riad_matching_requires_lodging_and_independent_local_context(monkeypatch, options, updates):
+    singleton(monkeypatch, riad_place(**updates))
+    values = {"place_name": "Lunara", "city": "Marrakech", "country": "Morocco", "category": "hotel", **options}
+    assert lookup(**values).status == "not_found"
+
+
 @pytest.mark.parametrize("suffix", [
     "Annex", "North", "2", "with Sea View - Next to Another Beach", "a XYZ Hotel",
     ", a Different Name Hotel", ", an XYZ Hotel Riverside",
@@ -1185,6 +1238,129 @@ def context_lookup(monkeypatch, target=None, region_results=None, **options):
     ])
     result = lookup(**{"city": None, "region": "Example Island", **options})
     return result, calls
+
+
+def test_source_island_extracted_as_city_requires_independent_geography(monkeypatch):
+    target = place(displayName={"text": "Casa Toro Restaurant"}, types=["restaurant", "food"],
+                   addressComponents=[component("locality", "Coastal Village"),
+                                      component("administrative_area_level_1", "Provincia Costera", "LP"),
+                                      component("country", "Mexico", "MX")])
+    island = context_area(addressComponents=[component("administrative_area_level_1", "Coastal Province", "LP"),
+                                            component("country", "Mexico", "MX")])
+    calls, _ = responses(monkeypatch, [{"places": [{"id": target["id"]}]}, target, {"places": [island]}])
+    result = lookup(city="Example Island", category="restaurant", source_caption="Casa Toro is a restaurant in Example Island.")
+    assert result.status == "resolved" and result.candidates[0].id == target["id"]
+    assert (result.candidates[0].latitude, result.candidates[0].longitude) == (17.0732, -96.7266)
+    assert result.candidates[0].precision == "place" and len(calls) == 3
+    assert calls[-1]["json"]["textQuery"] == "Example Island, Mexico"
+
+
+@pytest.mark.parametrize("context", [
+    context_area(types=["locality", "political"]),
+    context_area(types=["locality", "administrative_area_level_2", "political"]),
+    context_area(types=["country", "political"]),
+    context_area(types=["hotel", "lodging"]),
+    context_area(displayName={"text": "Namesake Island"}),
+    context_area(viewport={"low": {"latitude": 0, "longitude": -100}, "high": {"latitude": 30, "longitude": -90}}),
+    context_area(addressComponents=[component("administrative_area_level_1", "Competing Province"), component("country", "Mexico", "MX")]),
+    context_area(addressComponents=[component("country", "Spain", "ES")]),
+])
+def test_city_granularity_recovery_never_overrides_actual_city_or_incompatible_context(monkeypatch, context):
+    calls, _ = responses(monkeypatch, [{"places": [{"id": "synthetic-place-1"}]}, place(), {"places": [context]}])
+    result = lookup(city="Example Island", source_caption="Casa Toro, Example Island.")
+    assert result.status == "not_found" and len(calls) == 3
+
+
+@pytest.mark.parametrize("contexts", [
+    [context_area(), context_area(id="second-island")],
+    [context_area(), context_area(id="same-named-city", types=["locality", "political"])],
+])
+def test_city_granularity_recovery_preserves_same_named_area_ambiguity(monkeypatch, contexts):
+    calls, _ = responses(monkeypatch, [{"places": [{"id": "synthetic-place-1"}]}, place(), {"places": contexts}])
+    assert lookup(city="Example Island", source_caption="Casa Toro, Example Island.").status == "not_found"
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("options,target", [
+    ({"source_caption": None}, place()),
+    ({"source_caption": "A different restaurant in Example Island"}, place()),
+    ({"source_caption": "Casa Toro in another destination"}, place()),
+    ({"region": "Unverified Region"}, place()),
+    ({"category": "hotel"}, place()),
+    ({"category": "unknown"}, place()),
+    ({"place_name": "Casa Taro"}, place()),
+    ({}, place(displayName={"text": "Casa Toro North"})),
+    ({"place_name": "Momo"}, place(displayName={"text": "Momo"})),
+    ({}, place(addressComponents=[component("country", "Spain", "ES")])),
+])
+def test_city_granularity_recovery_requires_source_identity_and_compatible_category(monkeypatch, options, target):
+    calls, _ = singleton(monkeypatch, target)
+    result = lookup(**{"city": "Example Island", "source_caption": "Casa Toro, Example Island. Momo is nearby.", **options})
+    assert result.status == "not_found" and len(calls) == 2
+
+
+def test_city_granularity_recovery_cannot_choose_between_branches_inside_island(monkeypatch):
+    targets = [place(), place(id="second-branch")]
+    calls, _ = responses(monkeypatch, [{"places": [{"id": x["id"]} for x in targets]},
+                                      {"places": targets}, {"places": [context_area()]}])
+    assert lookup(city="Example Island", source_caption="Casa Toro, Example Island.").status == "not_found"
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("area_code,target_code,area_kind", [
+    ("LP", "OTHER", "administrative_area_level_1"),
+    ("lp", "lp", "administrative_area_level_1"),
+    ("LP", "LP", "administrative_area_level_2"),
+])
+def test_context_admin_codes_must_agree_at_same_level_without_lowercase_alias_guessing(monkeypatch, area_code, target_code, area_kind):
+    target = place(addressComponents=[component("administrative_area_level_1", "Coastal Province", target_code),
+                                      component("country", "Mexico", "MX")])
+    area = context_area(addressComponents=[component("administrative_area_level_1", "Interior Province"),
+                                          component(area_kind, "Provincia Costera", area_code),
+                                          component("country", "Mexico", "MX")])
+    result, _ = context_lookup(monkeypatch, target=target, region_results={"places": [area]})
+    assert result.status == "not_found"
+
+
+def test_city_granularity_recovery_does_not_query_context_for_truncated_candidates(monkeypatch):
+    calls, _ = responses(monkeypatch, [{"places": [{"id": "synthetic-place-1"}], "nextPageToken": "more"},
+                                      {"places": [place()]}])
+    assert lookup(city="Example Island", source_caption="Casa Toro, Example Island.").status == "not_found"
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("wanted,actual", [
+    ("Seven Waterfalls Hike", "Seven Waterfalls"),
+    ("Cobalt Canyon Hiking Trail", "Cobalt Canyon"),
+    ("Cobalt Canyon", "Cobalt Canyon Hiking Trail"),
+])
+def test_exact_hiking_identity_ignores_only_provider_supported_activity_suffix(monkeypatch, wanted, actual):
+    calls, _ = singleton(monkeypatch, place(displayName={"text": actual}, types=["hiking_area", "sports_activity_location"]))
+    result = lookup(place_name=wanted, city=None, category="activity")
+    assert result.status == "resolved" and len(calls) == 2
+    assert result.candidates[0].precision == "place"
+
+
+@pytest.mark.parametrize("wanted,actual,types,category", [
+    ("Cobalt Canyon Hike", "Cobalt Canyon North", ["hiking_area"], "activity"),
+    ("Cobalt Canyon 2 Hike", "Cobalt Canyon 3", ["hiking_area"], "activity"),
+    ("Cobalt Canyon Hike", "Cobalt Canyon", ["hotel"], "activity"),
+    ("Cobalt Canyon Hike", "Cobalt Canyon", ["hiking_area"], "hotel"),
+    ("Cobalt Canyon Guided Tour", "Cobalt Canyon", ["hiking_area"], "activity"),
+    ("Cobalt Canyon Hike", "Cobalt Canyon Loop", ["hiking_area"], "activity"),
+    ("Nice Hike", "Nice", ["hiking_area"], "activity"),
+])
+def test_hiking_descriptor_does_not_erase_qualifiers_numbers_or_place_type(monkeypatch, wanted, actual, types, category):
+    singleton(monkeypatch, place(displayName={"text": actual}, types=types))
+    assert lookup(place_name=wanted, city=None, category=category).status == "not_found"
+
+
+def test_hiking_descriptor_does_not_pick_between_countrywide_namesakes(monkeypatch):
+    targets = [place(displayName={"text": "Cobalt Canyon"}, types=["hiking_area"]),
+               place(id="second-trail", displayName={"text": "Cobalt Canyon Hiking Trail"}, types=["hiking_area"])]
+    calls, _ = responses(monkeypatch, [{"places": [{"id": x["id"]} for x in targets]}, {"places": targets}])
+    assert lookup(place_name="Cobalt Canyon Hike", city=None, category="activity").status == "not_found"
+    assert len(calls) == 2
 
 
 def test_missing_region_component_uses_one_exact_small_region_context_query(monkeypatch):

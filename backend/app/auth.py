@@ -65,6 +65,8 @@ def get_user_from_jwt(token: str) -> Optional[Dict[str, Any]]:
     """
     try:
         payload = verify_app_jwt(token)
+        if payload.get("session_kind") == "demo":
+            return None  # Retired review-only sessions must never become regular sessions.
         return {
             "user_id": int(payload["sub"]),
             "email": payload["email"]

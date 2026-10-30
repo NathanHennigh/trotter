@@ -465,6 +465,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
     # Lazy imports so the module loads without the optional heavy packages installed
     from app.services.booking_import import apply_booking_message, set_message_outcome
     from app.services.import_lock import user_import_lock
+    from app.services.gmail_connection import connection_status, mark_gmail_reconnect, is_gmail_authorization_error
     from app.services.enrichment import enrich_user_segments
     from app.services.gmail import (
         batch_get_messages,
@@ -506,6 +507,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
     touched_segment_ids: set[int] = set()
     import_guards = ExitStack()
     limit_reached = False
+    used_gmail_token = None
     try:
         job = db.query(SyncJob).filter(SyncJob.id == job_id, SyncJob.user_id == user_id).first()
         if not job:
@@ -529,11 +531,12 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             .filter(Account.user_id == user_id, Account.provider == "google")
             .first()
         )
-        if not account:
+        if connection_status(account) != "connected":
             job.state = "failed"
-            job.error_message = "No Google account linked"
+            job.error_message = "Connect or reconnect Gmail to import your flights."
+            job.updated_at = datetime.now(timezone.utc)
             db.commit()
-            return {"error": "no_google_account"}
+            return {"error": "gmail_connection_required"}
 
         user = db.query(User).filter(User.id == user_id).first()
         user_name = (user.name or "") if user else ""
@@ -541,7 +544,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
         fetch_batch_size = _env_int("TROTTER_GMAIL_BATCH_SIZE", 50) or 50
         parse_workers = _env_int("TROTTER_PARSE_WORKERS", 4) or 4
 
-        service = build_gmail_service(account.refresh_token_encrypted)
+        used_gmail_token = account.refresh_token_encrypted
+        service = build_gmail_service(used_gmail_token)
         discovery_state = get_or_create_discovery_state(db, user_id)
         discovery_started_at = datetime.now(timezone.utc)
         learned_sender_domains = get_learned_sender_domains(db, user_id)
@@ -1067,6 +1071,9 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     [candidate.msg["id"] for candidate in metadata_gate_candidates],
                 )
                 if metadata_errors:
+                    for exc in metadata_errors.values():
+                        if is_gmail_authorization_error(exc):
+                            raise exc
                     for msg_id in metadata_errors:
                         reporter.count(fetch_tiers.get(msg_id), "metadata_fetch_error")
                 for candidate in metadata_gate_candidates:
@@ -1089,6 +1096,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 [candidate.msg["id"] for candidate in fetch_candidates],
             )
             for msg_id, exc in fetch_errors.items():
+                if is_gmail_authorization_error(exc):
+                    raise exc
                 logger.warning("Failed to fetch message %s: %s", msg_id, exc)
             if fetch_errors:
                 for msg_id in fetch_errors:
@@ -1199,6 +1208,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             try:
                 full_msg = get_message(service, msg_id)
             except Exception as exc:
+                if is_gmail_authorization_error(exc):
+                    raise
                 logger.warning("Failed to fetch message %s: %s", msg_id, exc)
                 flush_progress()
                 _print_progress(job.scanned_count, total_estimate, job.parsed_count, job.segment_count, skipped_count)
@@ -1436,6 +1447,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             try:
                 full_msg = get_message(service, msg_id)
             except Exception as exc:
+                if is_gmail_authorization_error(exc):
+                    raise
                 logger.warning("Failed to refetch stale message %s: %s", msg_id, exc)
                 flush_progress()
                 continue
@@ -1672,12 +1685,13 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             # projection, observations and history. Earlier complete messages
             # were committed together and are safe to replay.
             db.rollback()
+            reconnect_needed = mark_gmail_reconnect(db, user_id, used_gmail_token, exc)
             job = db.query(SyncJob).filter(SyncJob.id == job_id).first()
             if job:
                 job.state = "failed"
-                job.error_message = str(exc)[:500]
+                job.error_message = "Reconnect Gmail to import your flights." if reconnect_needed else str(exc)[:500]
                 job.updated_at = datetime.now(timezone.utc)
-                db.commit()
+            db.commit()
         except Exception:
             pass
     finally:

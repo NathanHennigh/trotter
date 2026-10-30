@@ -45,16 +45,24 @@ def create_app() -> FastAPI:
 	from .routers.ingest import router as ingest_router
 	from .routers.ingest_review import router as ingest_review_router
 	from .routers.travel_inbox import router as travel_inbox_router
+	from .routers.travel_sharing import router as travel_sharing_router
 	from .routers.trips import router as trips_router
 	from .routers.dreams import router as dreams_router
+	from .routers.planner import router as planner_router
+	from .routers.planner_landing import router as planner_landing_router
+	from .routers.apple_links import router as apple_links_router
 
 	app.include_router(health_router)
 	app.include_router(auth_router)
 	app.include_router(ingest_router)
 	app.include_router(ingest_review_router)
 	app.include_router(travel_inbox_router)
+	app.include_router(travel_sharing_router)
 	app.include_router(trips_router)
 	app.include_router(dreams_router)
+	app.include_router(planner_router)
+	app.include_router(planner_landing_router)
+	app.include_router(apple_links_router)
 
 	return app
 

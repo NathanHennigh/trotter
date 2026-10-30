@@ -46,7 +46,7 @@ def test_migration_preserves_every_old_table_schema_and_raw_row():
     columns = inspect(engine).get_columns("dream_locations")
     assert {(column["name"], column["nullable"]) for column in columns} == {
         (column.name, column.nullable) for column in DreamLocation.__table__.columns
-        if column.name != "coordinate_precision"}  # Added later by migration 0014.
+        if column.name not in {"coordinate_precision", "matcher_version", "matcher_retry_version", "matcher_generation"}}  # Added in 0014/0016.
     engine.dispose()
 
 

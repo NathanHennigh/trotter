@@ -54,6 +54,23 @@ def test_ambiguous_candidate_is_not_an_unnamed_post():
     assert location_presentation(item(place_name="Mô-Mô"), location_status="needs_review")["location_reason"] == "ambiguous_match"
 
 
+def test_old_process_heading_is_inspiration_without_rewriting_saved_fields():
+    saved = item(place_name="The art of ceramics", category="attraction", city="Lisbon",
+                 country="Portugal", caption="The art of ceramics. Hand-thrown pottery and traditional craftsmanship. #Lisbon")
+    before = deepcopy(vars(saved))
+    result = location_presentation(saved, location_status="not_found", sorting_state="sorted")
+    assert result["location_state"] == "source_details"
+    assert result["location_reason"] == "identity_not_shared"
+    assert vars(saved) == before
+
+
+def test_named_museum_with_process_prose_remains_a_named_unresolved_place():
+    saved = item(place_name="The Art of Clay", category="museum", country="Portugal",
+                 caption="Visit The Art of Clay for traditional craftsmanship and hand-made pottery.")
+    result = location_presentation(saved, location_status="not_found", sorting_state="sorted")
+    assert result["location_reason"] == "named_unresolved"
+
+
 @pytest.mark.parametrize("name,caption", [
     ("Seaweed Studio", "Seaweed studio on Airbnb"),
     ("Beautiful Life Rooms", "Beautiful Life Rooms in Milos"),

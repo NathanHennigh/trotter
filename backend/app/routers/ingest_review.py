@@ -12,13 +12,14 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import BookingObservation, Message, MessageStatus, Segment, Trip, User
+from ..models import BookingObservation, Message, MessageStatus, Segment, TravelInboxItem, Trip, User
 from ..services.booking_ledger import (
     booking_code, event_time, flight_scope, has_verified_self_observation,
     record_user_decision, snapshot_user_itinerary, user_decision_for_flight,
 )
 from ..services.builder import build_segments_and_trips_detailed, rebuild_affected_trips, _normalize_flight_number
 from ..services.import_lock import ImportAlreadyRunning, user_import_lock
+from ..services import travel_name_recovery as name_recovery
 from .auth import get_current_user
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -30,6 +31,7 @@ class BookingDecisionIn(BaseModel):
 
 class TravelNameAliases(BaseModel):
     aliases: list[str] = Field(default_factory=list, max_length=20)
+    confirmed: bool = True
 
     @field_validator("aliases")
     @classmethod
@@ -40,7 +42,7 @@ class TravelNameAliases(BaseModel):
             value = " ".join(unicodedata.normalize("NFKC", alias).split())
             if not 2 <= len(value) <= 100 or not any(character.isalpha() for character in value):
                 raise ValueError("Each alias must be a name between 2 and 100 characters")
-            if any(not (character.isalpha() or character in " '-.’,()") for character in value):
+            if any(not (character.isalpha() or character in " '-.’,()/") for character in value):
                 raise ValueError("Aliases must contain names, not email addresses or booking codes")
             if value.casefold() not in seen:
                 normalized.append(value)
@@ -200,13 +202,13 @@ def decide_booking_observation(
         raise
 
 
-@router.get("/travel-name-aliases", response_model=TravelNameAliases)
+@router.get("/travel-name-aliases")
 def get_travel_name_aliases(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     user = db.query(User).filter_by(id=current_user.id).one()
-    return TravelNameAliases(aliases=user.travel_name_aliases or [])
+    return name_recovery.identity_state(db, user)
 
 
-@router.put("/travel-name-aliases", response_model=TravelNameAliases)
+@router.put("/travel-name-aliases")
 def put_travel_name_aliases(
     body: TravelNameAliases, current_user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
@@ -214,11 +216,74 @@ def put_travel_name_aliases(
         with user_import_lock(db.get_bind(), current_user.id):
             user = db.query(User).filter_by(id=current_user.id).one()
             user.travel_name_aliases = body.aliases
+            if body.confirmed:
+                user.travel_names_confirmed_at = datetime.now(timezone.utc)
+                name_recovery.queue_recovery(db, user)
             db.commit()
-            return body
+            return name_recovery.identity_state(db, user)
     except ImportAlreadyRunning as exc:
         db.rollback()
         raise HTTPException(409, str(exc)) from exc
     except Exception:
         db.rollback()
         raise
+
+
+@router.post("/travel-name-recovery")
+def retry_name_recovery(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        with user_import_lock(db.get_bind(), current_user.id):
+            user = db.get(User, current_user.id)
+            if not user.travel_names_confirmed_at:
+                raise HTTPException(409, "Confirm your travel names before checking saved bookings")
+            name_recovery.queue_recovery(db, user, force=True)
+            db.commit()
+            return name_recovery.identity_state(db, user)
+    except ImportAlreadyRunning as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+
+
+class ClaimSelfIn(BaseModel):
+    passenger_name: str = Field(min_length=2, max_length=100)
+
+
+@router.post("/travel-inbox/{item_id}/claim-self")
+def claim_self(item_id: str, body: ClaimSelfIn, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        with user_import_lock(db.get_bind(), current_user.id):
+            item = db.query(TravelInboxItem).filter_by(id=item_id, user_id=current_user.id).first()
+            if item is None:
+                raise HTTPException(404, "Saved flight not found")
+            normalize = lambda value: " ".join(unicodedata.normalize("NFKC", value).split()).casefold()
+            if not item.passenger_name or normalize(item.passenger_name) != normalize(body.passenger_name):
+                raise HTTPException(422, "Confirm the passenger name printed on this booking")
+            from ..services.passenger_identity import full_names_match
+            if not full_names_match(item.passenger_name, item.passenger_name):
+                raise HTTPException(422, "Add your full travel name in Profile so this booking can be checked safely")
+            if name_recovery.active_shares_for_item(db, current_user.id, item.id):
+                raise HTTPException(409, "This booking has already been shared. Resolve that invitation before claiming it")
+            user = db.get(User, current_user.id)
+            try:
+                aliases = list(user.travel_name_aliases or [])
+                if normalize(item.passenger_name) not in {normalize(name) for name in aliases}:
+                    aliases.append(item.passenger_name)
+                validated = TravelNameAliases(aliases=aliases)
+            except ValueError as exc:
+                raise HTTPException(422, "Review your saved travel names in Profile before adding this name") from exc
+            user.travel_name_aliases = validated.aliases
+            user.travel_names_confirmed_at = datetime.now(timezone.utc)
+            name_recovery.queue_recovery(db, user)
+            db.commit()
+            return name_recovery.identity_state(db, user)
+    except ImportAlreadyRunning as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/travel-onboarding/complete")
+def complete_travel_onboarding(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.get(User, current_user.id)
+    user.travel_onboarding_completed_at = datetime.now(timezone.utc)
+    db.commit()
+    return name_recovery.identity_state(db, user)

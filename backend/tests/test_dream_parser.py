@@ -28,6 +28,58 @@ def parsed_place(**overrides):
     return item
 
 
+@pytest.mark.parametrize("name,caption", [
+    ("The art of ceramics", "The art of ceramics. Every bowl is hand-thrown; each pattern reflects centuries of craftsmanship. #Lisbon"),
+    ("L'art du textile", "L’art du textile. Chaque motif est fait à la main. Traditional craftsmanship in every piece. #Paris"),
+    ("How to make flatbread", "How to make flatbread. Mix the ingredients, knead the dough, then bake. #Istanbul"),
+    ("Traditional bread recipe", "Traditional bread recipe. Three ingredients, mixed by hand before we bake."),
+    ("Making pottery", "Making pottery. This technique involves clay, a wheel and a careful hand-made process."),
+    ("Restoring old doors", "Restoring old doors. Sanded by hand and restored with traditional techniques. #Marrakech"),
+    ("Making waves", "Making waves. A step by step tutorial for painting water."),
+])
+def test_process_topics_never_become_invented_attractions(name, caption):
+    item = dream_parser._normalize_item(parsed_place(
+        place_name=name, category="attraction", city=None, country=None,
+        summary="A famous site visitors can tour.", google_maps_search_query=name,
+    ), caption)
+    assert item.place_name is None and item.category == "unknown"
+    assert item.google_maps_search_query is None and item.needs_google_places_lookup is False
+    assert item.needs_review and item.confidence <= .65
+    assert "famous site" not in item.summary and item.summary.startswith(caption.split(".")[0])
+
+
+@pytest.mark.parametrize("name,caption,category", [
+    ("The Art of Clay", "Visit The Art of Clay in Lisbon to see hand-made ceramics and traditional techniques.", "museum"),
+    ("The Art of Clay", "The Art of Clay is a museum exhibiting craftsmanship and pottery techniques.", "museum"),
+    ("The Art of Clay", "Our workshop called The Art of Clay teaches traditional craftsmanship.", "activity"),
+    ("L'art du textile", "Visitez L’art du textile. Un atelier de savoir-faire traditionnel et de pièces faites à la main.", "museum"),
+    ("Making Waves", "Inside Making Waves, a gallery showing the process behind each painting.", "attraction"),
+    ("The Bread Recipe", "At The Bread Recipe, bakers mix ingredients and bake before your eyes.", "cafe"),
+    ("The Art of Clay", "The Art of Clay @the_art_of_clay teaches pottery techniques.", "activity"),
+    ("The Art of Craft Museum", "The Art of Craft Museum showcases centuries of craftsmanship.", "museum"),
+    ("Cobalt Workshop", "Cobalt Workshop teaches hand-made ceramics and traditional techniques.", "activity"),
+    ("Making Waves", "Making Waves, Lisbon, Portugal.", "restaurant"),
+])
+def test_source_named_venues_survive_even_when_name_resembles_a_process_heading(name, caption, category):
+    item = dream_parser._normalize_item(parsed_place(place_name=name, category=category), caption)
+    assert item.place_name == name and item.category == category
+    assert item.needs_google_places_lookup is True
+
+
+def test_unrelated_process_caption_does_not_reject_an_unmatched_name():
+    assert not dream_parser.source_content_label("The Art of Clay", "Making pottery. Traditional hand-made craftsmanship.")
+
+
+def test_real_venue_in_mixed_process_caption_is_kept_without_inventing_a_second_stop():
+    caption = "The art of ceramics. Hand-made craftsmanship at Cobalt Museum in Lisbon, Portugal."
+    items = dream_parser._normalize_model_output({"items": [
+        parsed_place(place_name="The art of ceramics", category="attraction"),
+        parsed_place(place_name="Cobalt Museum", category="museum"),
+    ]}, caption)
+    assert [item.place_name for item in items if item.place_name] == ["Cobalt Museum"]
+    assert len(items) == 1 and items[0].needs_google_places_lookup is True
+
+
 @pytest.mark.parametrize('caption,expected', [
     ('Seaweed studio on airbnb🤍', 'hotel'),
     ('Seaweed Studio is listed on Airbnb.', 'hotel'),
@@ -96,7 +148,7 @@ def test_parse_caption_with_venice_uses_schema_and_sanitizes_metadata(monkeypatc
     assert result.provider == "venice"
     assert result.items[0].place_name == "Casa Dani"
     assert result.items[0].needs_review is False
-    assert result.raw["prompt_version"] == "dream-places-v4"
+    assert result.raw["prompt_version"] == "dream-places-v5"
     assert result.raw["attempts"] == 1
     assert result.raw["latency_ms"] >= 0
     assert result.raw["request_id"] == "chatcmpl-test"

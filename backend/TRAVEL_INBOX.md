@@ -1,9 +1,10 @@
 # Retained travel inbox
 
 Trotter keeps other people's flight records privately in the importing user's
-travel inbox. This is the foundation for a future explicit sharing/invitation
-flow. It does not create recipients, match accounts by name, send invitations,
-transfer tickets, or expose records to anybody else.
+travel inbox. The original inbox API remains read-only. The separate explicit
+sharing/invitation flow is described in [FLIGHT_SHARING.md](FLIGHT_SHARING.md).
+It never matches accounts by name, sends emails automatically, or transfers an
+airline ticket: an invited recipient accepts a copy of selected flight facts.
 
 ## Import behavior
 
@@ -74,13 +75,11 @@ reparse historical mail. It indexes evidence already retained in the ledger;
 historical messages that predate that ledger require a separate normal reparse
 to supply their missing observations.
 
-## Future sharing boundary
+## Sharing boundary
 
-Use the stable retained-record ID as the source of a future explicit share.
-That feature will still need recipient verification, authorization, acceptance,
-revocation/expiry, duplicate handling and account-invitation flows. Names alone
-must never resolve to accounts. Build a passenger-specific transfer allowlist:
-the current owner-only read response and its message pointers are not a public
-or recipient-facing payload. Shared PNRs can expose other passengers at the
-airline, so the eventual feature must decide explicitly which booking details
-the sender may disclose. None of those sharing actions is enabled here.
+Stable retained-record IDs are the source of explicit shares. The sharing API
+binds each invitation to an exact sign-in email and requires recipient acceptance.
+Names never resolve to accounts. Its passenger-specific transfer allowlist is
+separate from the owner-only inbox response. Booking references, message pointers,
+email content, payment data and co-traveler manifests are excluded. The original
+`/travel-inbox` routes still expose no sharing mutations.

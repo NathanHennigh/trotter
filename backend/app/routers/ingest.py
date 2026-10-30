@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import Message, MessageStatus, SyncJob, User
 from ..tasks.import_tasks import run_gmail_import
+from ..services.gmail_connection import require_gmail_connection, mark_gmail_reconnect, connection_required_error
 from .auth import get_current_user
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -60,6 +61,7 @@ def start_gmail_import(
     db: Session = Depends(get_db),
 ) -> StartImportResponse:
     """Create a SyncJob record and enqueue a background Gmail import task."""
+    require_gmail_connection(db, current_user.id)
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     job = SyncJob(
@@ -173,12 +175,9 @@ def test_queries(
     from app.services.flight_query import build_gmail_query as build_v1
     from app.services.flight_query_v2 import build_gmail_queries as build_v2
     from app.services.flight_query_v3 import build_gmail_queries as build_v3
-    from app.models import Account
     import sys
 
-    account = db.query(Account).filter(Account.user_id == current_user.id, Account.provider == "google").first()
-    if not account:
-        raise HTTPException(status_code=400, detail="No Google account found")
+    account = require_gmail_connection(db, current_user.id)
 
     service = build_gmail_service(account.refresh_token_encrypted)
     q_v1 = build_v1()
@@ -216,9 +215,16 @@ def test_queries(
 
     print(f"\n{BOLD}{'─'*60}{RESET}")
     print(f"{BOLD}  ⚖  v1 vs v2 — collecting IDs…{RESET}")
-    v1_ids = collect_ids(q_v1, "v1 Query")
-    v2_ids = collect_query_group(q_v2, "v2 Hybrid")
-    v3_ids = collect_query_group(q_v3, "v3 Production")
+    try:
+        v1_ids = collect_ids(q_v1, "v1 Query")
+        v2_ids = collect_query_group(q_v2, "v2 Hybrid")
+        v3_ids = collect_query_group(q_v3, "v3 Production")
+    except Exception as exc:
+        if mark_gmail_reconnect(db, current_user.id, account.refresh_token_encrypted, exc):
+            db.commit()
+            db.refresh(account)
+            raise connection_required_error(account) from exc
+        raise
     print(f"{BOLD}  IDs collected — parsing will run in background{RESET}")
     print(f"{BOLD}{'─'*60}{RESET}\n")
 

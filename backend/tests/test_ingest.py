@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import get_db
 from app.main import app
-from app.models import Message, MessageStatus, SyncJob, User
+from app.models import Account, Message, MessageStatus, SyncJob, User
 from app.routers.auth import get_current_user
 from app.tasks.import_tasks import (
     DEFAULT_TARGETED_REPARSE_MESSAGE_IDS,
@@ -43,6 +43,7 @@ def test_db():
     )
     # Create only the tables used by ingest tests (avoids PostGIS columns in segments)
     User.__table__.create(engine)
+    Account.__table__.create(engine)
     SyncJob.__table__.create(engine)
     Message.__table__.create(engine)
     Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -61,6 +62,7 @@ def test_db():
     app.dependency_overrides.pop(get_db, None)
     Message.__table__.drop(engine)
     SyncJob.__table__.drop(engine)
+    Account.__table__.drop(engine)
     User.__table__.drop(engine)
 
 
@@ -71,6 +73,9 @@ def test_user(test_db):
     test_db.add(user)
     test_db.commit()
     test_db.refresh(user)
+    test_db.add(Account(user_id=user.id, provider="google", refresh_token_encrypted=b"fixture",
+                        scopes="https://www.googleapis.com/auth/gmail.readonly"))
+    test_db.commit()
 
     app.dependency_overrides[get_current_user] = lambda: user
     yield user

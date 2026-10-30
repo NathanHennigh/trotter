@@ -25,7 +25,7 @@ DEFAULT_MAX_ATTEMPTS = 2
 DEFAULT_MAX_COMPLETION_TOKENS = 2400
 TRUNCATION_FALLBACK_COMPLETION_TOKENS = 6000
 DEFAULT_MAX_CAPTION_CHARS = 20_000
-PROMPT_VERSION = "dream-places-v4"
+PROMPT_VERSION = "dream-places-v5"
 
 TRANSIENT_HTTP_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
 
@@ -56,6 +56,8 @@ Extraction rules:
 - Cities or regions mentioned only as comparisons or alternatives (for example, "while everyone flocks to Sa Pa, try Ta Xua") are not the saved places' location. In that example use Ta Xua, never Sa Pa.
 - A comparison destination is not itself a place to save unless the caption also explicitly recommends visiting a named place there.
 - Never invent an exact place name or infer one from a general travel theme.
+- Craft/process videos, recipes, renovations, techniques and cultural explanations are inspiration unless the caption explicitly names a visitable place. A topic heading or activity description is not an attraction's proper name, even when a city hashtag is present.
+- Preserve genuinely named museums, galleries, workshops, studios and other venues when the source identifies them. For content with no named place, return one unknown inspiration item with place_name null and summarize the actual content; never turn it into a fictional site, attraction or business.
 - Preserve proper names as written, apart from obvious whitespace cleanup.
 - A named stay listed on Airbnb is category hotel, not activity. Airbnb Experiences are activities. Generic descriptions such as "deluxe room with view" do not establish a property name or destination.
 - A city, country, region, neighborhood, or broad destination is not a place_name.
@@ -200,6 +202,49 @@ def _clamp_confidence(value: Any) -> float:
     return max(0.0, min(1.0, parsed))
 
 
+def source_content_label(place_name: str | None, caption: str | None) -> bool:
+    """A process/topic heading is not a venue merely because it occurs verbatim.
+
+    Use source structure and supporting process prose, not a craft/place-name
+    blacklist. Explicit names, handles and visitable-venue relationships win,
+    including businesses whose real names resemble an instructional heading.
+    """
+    def normalized(value):
+        value = unicodedata.normalize("NFKD", str(value or "")).casefold()
+        value = "".join(char for char in value if not unicodedata.combining(char))
+        return " ".join(re.sub(r"[^\w\s]", " ", value).split())
+
+    name, source = normalized(place_name), normalized(caption)
+    if not name or not source:
+        return False
+    target = r"(?<!\w)" + re.escape(name) + r"(?!\w)"
+    if not re.search(target, source):
+        return False
+    heading = (r"^(?:(?:the )?art of|l art (?:de|du|des)|el arte de|a arte de|"
+               r"(?:the )?process of|how to|comment (?:faire|fabriquer)|como (?:hacer|fazer)|"
+               r"making|crafting|cooking|baking|building|renovating|restoring|carving|weaving)\b")
+    if not (re.search(heading, name) or re.search(r"\b(?:recipe|tutorial|step by step|before and after)$", name)):
+        return False
+    compact = re.sub(r"\W", "", name)
+    if any(re.sub(r"[_.]", "", handle).casefold() == compact
+           for handle in re.findall(r"(?<!\w)@([\w.]+)", str(caption or ""))):
+        return False
+    venue = r"(?:museum|gallery|workshop|studio|restaurant|cafe|hotel|shop|exhibition|atelier|musee|galerie|taller)"
+    named = r"\b(?:called|named|name is|s appelle|appele|llamado)\s+" + target
+    visit = r"\b(?:at|inside|visit|visiting|visited|chez|visitez)\s+" + target
+    label = r"\b" + venue + r"\s+(?:(?:called|named)\s+)?" + target
+    declaration = target + r"\s+(?:(?:is|is a|is an|is the|est|est un|est une)\s+)" + venue + r"\b"
+    if any(re.search(pattern, source) for pattern in (named, visit, label, declaration)):
+        return False
+    if re.search(r"\b" + venue + r"\b", name):
+        return False
+    remainder = re.sub(target, "", source)
+    return bool(re.search(
+        r"\b(?:hand (?:cut|laid|made|carved|woven|painted|thrown)|handmade|craftsmanship|"
+        r"techniques?|process|tutorial|recipe|ingredients?|step by step|mix|knead|bake|"
+        r"carve|weave|sanded|restored|renovation|savoir faire|a la main)\b", remainder))
+
+
 def _normalize_item(raw_item: dict[str, Any], caption: str) -> DreamParseItem:
     category = (
         raw_item.get("category") if raw_item.get("category") in ALLOWED_CATEGORIES else "unknown"
@@ -212,6 +257,10 @@ def _normalize_item(raw_item: dict[str, Any], caption: str) -> DreamParseItem:
     tags = [str(tag).strip().lower() for tag in tags if str(tag).strip()][:12]
     confidence = _clamp_confidence(raw_item.get("confidence"))
     needs_review = bool(raw_item.get("needs_review", True))
+    content_only = source_content_label(place_name, caption)
+    if content_only:
+        place_name = None
+        category = "unknown"
 
     # Narrow correction for an explicit source label, without inferring any
     # location or turning an Airbnb experience into accommodation.
@@ -252,7 +301,12 @@ def _normalize_item(raw_item: dict[str, Any], caption: str) -> DreamParseItem:
         )
         needs_google = bool(raw_item.get("needs_google_places_lookup", bool(city or country)))
 
-    summary = str(raw_item.get("summary") or "").strip()
+    # A mistaken attraction summary can invent a site as well as its name.
+    # Preserve the source's own description when rejecting that identity.
+    summary = (re.sub(r"(?<!\w)#[\w]+", "", caption).strip() if content_only
+               else str(raw_item.get("summary") or "").strip())
+    if content_only:
+        summary = re.sub(r"\s+", " ", summary).strip()[:220]
     if not summary:
         summary = re.sub(r"\s+", " ", caption).strip()[:220] or "Saved from Instagram"
 
@@ -273,7 +327,13 @@ def _normalize_item(raw_item: dict[str, Any], caption: str) -> DreamParseItem:
 
 def _normalize_model_output(payload: dict[str, Any], caption: str) -> list[DreamParseItem]:
     raw_items = payload.get("items") if isinstance(payload.get("items"), list) else [payload]
-    items = [_normalize_item(item, caption) for item in raw_items if isinstance(item, dict)]
+    normalized = [(item, _normalize_item(item, caption)) for item in raw_items if isinstance(item, dict)]
+    has_named_place = any(item.place_name for _, item in normalized)
+    # A topic heading is not another stop in a mixed caption. Preserve one
+    # inspiration save when it is the whole source, not an extra empty place
+    # beside an explicitly named venue from that same post.
+    items = [item for raw, item in normalized
+             if not has_named_place or not source_content_label(raw.get("place_name"), caption)]
     if not items:
         raise DreamParserError("Parser returned no usable items")
     return items

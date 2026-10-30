@@ -25,6 +25,13 @@ case "${TROTTER_API_URL:-}" in https://*) ;; *) echo 'ERROR: TROTTER_API_URL mus
 case "${TROTTER_WEB_URL:-}" in https://*) ;; *) echo 'ERROR: TROTTER_WEB_URL must use HTTPS.' >&2; exit 1 ;; esac
 
 compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+if [[ -n "${APPLE_KEY_ID:-}" || -n "${APPLE_TEAM_ID:-}" ]]; then
+  [[ -n "${APPLE_KEY_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -s "$SECRETS_DIR/apple_private_key" ]] || {
+    echo 'ERROR: Apple sign-in requires APPLE_KEY_ID, APPLE_TEAM_ID, and secrets/apple_private_key.' >&2
+    exit 1
+  }
+  compose+=(-f "$DEPLOY_DIR/compose.ios.yml")
+fi
 "${compose[@]}" config --quiet
 "${compose[@]}" build
 "${compose[@]}" rm -sf migrate >/dev/null 2>&1 || true

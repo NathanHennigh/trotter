@@ -34,7 +34,7 @@ def test_worker_recovers_ignored_bilt_without_claiming_an_unnamed_passenger(tmp_
         db.add(user)
         db.flush()
         uid = user.id
-        db.add(Account(user_id=uid, provider="google", refresh_token_encrypted=b"fixture", scopes="fixture"))
+        db.add(Account(user_id=uid, provider="google", refresh_token_encrypted=b"fixture", scopes="https://www.googleapis.com/auth/gmail.readonly"))
         db.add(Message(user_id=uid, provider_msg_id=mid, subject=subject, from_email=sender,
                        status=MessageStatus.ACCEPTED, ignored=True, parse_version=version,
                        parse_error="ignored_nonflight_promo",

@@ -161,6 +161,20 @@ places and confirmed Place IDs. Outside Compose, explicitly set
 `GOOGLE_PLACES_CACHE_URL` to a nonpersistent Redis instance; there is no fallback
 to the persistent task broker.
 
+When tested matching or source-research rules improve, deliberately increment
+`MATCHER_VERSION` in `backend/app/services/dream_locations.py`. Do not increment it
+for unrelated deployments. The indexed recovery pass screens old terminal misses
+once per version and retries only named saves with usable country context and no
+selected/confirmed/manual pin. Source-only inspiration is screened without a
+provider request. Existing and newly discovered work take capacity first; at most
+`DREAM_LOCATION_MATCHER_BATCH_SIZE` old saves (default 5, maximum 25) are admitted
+per minute, within the existing location batch capacity. Historical reservations
+yield to ordinary jobs in dispatch order. The worker stamps the actual version
+only after a fenced terminal outcome (including exhausted attempts), while a
+separate reservation marker preserves priority and rollback safety. Ordinary
+attempt limits and outage cooldowns still apply. A completed miss does not repeat
+until inputs or matcher rules change.
+
 Dream parsing uses Venice by default with `qwen3-5-9b` as the primary extractor and `kimi-k2-5` as the selective fallback. Put the API key in the ignored secret file without a trailing explanation or quotes:
 
 ```bash
@@ -175,3 +189,29 @@ chmod 600 secrets/venice_api_key
 The backend uses strict JSON Schema responses, disables model web search, and stores only request IDs, token counts, finish reasons, and operational warnings from hosted responses. A missing or unavailable provider never deletes the shared Dream source; the item remains reviewable.
 
 For local baseline testing only, set `DREAM_AI_PROVIDER=ollama`, set `OLLAMA_BASE_URL`, and optionally retain the legacy `DREAM_PARSER_MODEL` variables. Ollama is not required in the production deployment.
+
+## Android beta invitations
+
+The web container mounts the ignored `deploy/downloads/` directory read-only.
+Publish a verified, signed package as `trotter-android.apk` there before
+activating the invitation page. Keep its signing certificate consistent with
+installed builds and increase its Android version code for each beta release.
+Verify the package, record its SHA-256, then atomically replace the public file;
+retain the previous package with the deployment rollback artifacts.
+
+Only `/downloads/trotter-android.apk` is served, as an APK attachment without
+caching. Other download paths return 404 and directory listing is disabled.
+Do not place signing keys or credentials in this directory. Verify the served
+file's hash and the public download response after deployment.
+
+Android invitations offer both opening the installed app and downloading the
+beta. After installing, the recipient returns to the same invitation and opens
+Trotter. Its token stays in the invitation fragment and is never appended to
+the package download URL. Sign-in preserves the pending invitation, and joining
+requires an explicit action. iPhone and desktop visitors use the browser flow;
+the page does not advertise an unavailable native iPhone download.
+
+The current private beta retains the test signing certificate used by installed
+builds, so it can update them without uninstalling. Store distribution requires
+a dedicated release signing setup and an explicit migration plan; do not rotate
+the certificate silently or publish its private key with the APK.

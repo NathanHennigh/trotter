@@ -10,13 +10,35 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
-from sqlalchemy import and_, or_, update
+from sqlalchemy import and_, case, literal_column, or_, text, update
 from sqlalchemy.orm import Session
 
-from ..models import DreamItem, DreamLocation, User
+from ..models import DreamGoogleIdentity, DreamItem, DreamLocation, User
 
 IDENTITY_FIELDS = ("place_name", "city", "country", "region_or_neighborhood", "category")
 ACTIVE = {"queued", "running"}
+# Bump deliberately with tested matching/research changes, never per deploy.
+# Existing terminal misses receive one new bounded generation for each version.
+MATCHER_VERSION = 1
+
+
+def _matcher_state(row):
+    # Pre-versioning workers can edit a save after rollback. Their new
+    # generation must not inherit a newer rule version from the old inputs.
+    if row.matcher_generation != row.generation:
+        return 0, 0
+    return row.matcher_version or 0, row.matcher_retry_version or 0
+
+
+def _matcher_version_column():
+    return case((DreamLocation.matcher_generation == DreamLocation.generation,
+                 DreamLocation.matcher_version), else_=literal_column("0"))
+
+
+def _complete_matcher_version(row, version):
+    row.matcher_version = version
+    row.matcher_generation = row.generation
+    row.matcher_retry_version = 0
 
 
 def location_recovery(row):
@@ -198,13 +220,14 @@ def location_maps_url(item):
 def archive_resolution(row, reason, now):
     entry = {
         "reason": reason, "at": now.isoformat(), "fingerprint": row.fingerprint,
-        "generation": row.generation, "status": row.status, "provider": row.provider,
+        "generation": row.generation, "matcher_version": _matcher_state(row)[0],
+        "status": row.status, "provider": row.provider,
         "address": row.address, "latitude": row.latitude, "longitude": row.longitude,
         "google_maps_url": row.google_maps_url, "candidates": row.candidates,
     }
     if row.provider == "google_places":
         from .google_location_lifecycle import ids_history
-        entry = {key: entry[key] for key in ("reason", "at", "fingerprint", "generation", "status", "provider")}
+        entry = {key: entry[key] for key in ("reason", "at", "fingerprint", "generation", "matcher_version", "status", "provider")}
         entry.update(ids_history(row))
     row.history = [*(row.history or []), entry]
 
@@ -256,6 +279,10 @@ def enqueue_location(db: Session, item: DreamItem, *, force=False, supersede=Fal
         row.history = [{"reason": "source_lookup_context", "at": now.isoformat(), "source_evidence_fingerprint": source_identity}]
     row.fingerprint, row.pin_fingerprint = identity, pin
     row.attempts, row.lease_token, row.lease_expires_at = 0, None, None
+    # Explicit retries/source changes take ordinary priority. The upgrade
+    # scheduler sets its separate reservation marker after this normal reset.
+    row.matcher_retry_version = 0
+    row.matcher_version, row.matcher_generation = 0, row.generation
     row.provider, row.address, row.latitude, row.longitude, row.google_maps_url = None, None, None, None, None
     row.coordinate_precision = row.coordinate_precision if google and google.selected_place_id and (not changed or preserve_google_choice) else None
     row.candidates, row.message, row.checked_at, row.last_dispatched_at = [], None, None, None
@@ -308,6 +335,62 @@ def queue_missing(db: Session, *, user_id=None, limit=100, only_undiscovered=Fal
     return {"queued": queued, "checked": len(items), "last_id": items[-1].id if items else after_id}
 
 
+def queue_matcher_upgrades(db: Session, *, limit=5, now=None):
+    """Screen old terminal misses once per rule revision, without provider I/O.
+
+    The partial index excludes live work and accepted pins. A skipped source is
+    also marked screened so vague inspiration cannot starve later named saves.
+    Queued work is stamped only after a fenced terminal outcome: an old worker
+    completing an abandoned upgrade claim must not masquerade as new rules.
+    """
+    from .dream_location_presentation import named_location_identity
+    from .dream_place_aliases import caption_for_place
+    from .dream_place_search import _normal
+
+    now = now or utcnow()
+    limit = max(0, min(25, limit))
+    items = db.query(DreamItem).join(DreamLocation, and_(
+        DreamLocation.item_id == DreamItem.id, DreamLocation.user_id == DreamItem.user_id,
+    )).outerjoin(DreamGoogleIdentity, DreamGoogleIdentity.location_id == DreamLocation.id).filter(
+        # A constant predicate also lets PostgreSQL's prepared/generic plans
+        # prove eligibility for the partial index; user values never enter SQL.
+        text("dream_locations.status IN ('not_found', 'failed')"),
+        _matcher_version_column() < MATCHER_VERSION,
+        DreamGoogleIdentity.selected_place_id.is_(None),
+        DreamGoogleIdentity.confirmed_place_id.is_(None),
+    ).order_by(_matcher_version_column(), DreamLocation.id).limit(limit).with_for_update(
+        of=DreamItem, skip_locked=True,
+    ).populate_existing().all()
+    queued = 0
+    for item in items:
+        row = db.query(DreamLocation).filter_by(item_id=item.id, user_id=item.user_id).with_for_update().populate_existing().first()
+        if not row or row.status not in {"not_found", "failed"} or _matcher_state(row)[0] >= MATCHER_VERSION:
+            continue
+        google = row.google_identity
+        if google and (google.selected_place_id or google.confirmed_place_id):
+            continue
+        # A newly added manual pin wins even if its location row was not yet
+        # updated. Named source identity + usable country is the minimum input;
+        # matching still independently validates every provider candidate.
+        country = _normal(item.country or "")
+        eligible = (legacy_coordinates(item)[0] is None
+                    and named_location_identity(item, caption_for_place(item))
+                    and country not in {"", "unknown", "not specified", "n a", "anywhere", "worldwide"})
+        if not eligible:
+            _complete_matcher_version(row, MATCHER_VERSION)
+            continue
+        previous_version = _matcher_state(row)[0]
+        row, added = enqueue_location(db, item, force=True, now=now)
+        if added:
+            row.matcher_retry_version = MATCHER_VERSION
+            row.history = [*(row.history or []), {"reason": "matcher_upgrade", "at": now.isoformat(),
+                           "generation": row.generation, "from_version": previous_version,
+                           "to_version": MATCHER_VERSION}]
+            queued += 1
+    db.flush()
+    return {"queued": queued, "checked": len(items)}
+
+
 def claim_job(db: Session, job_id: int, *, now=None):
     now = now or utcnow()
     row = db.get(DreamLocation, job_id)
@@ -317,6 +400,10 @@ def claim_job(db: Session, job_id: int, *, now=None):
     if not item:
         return None
     db.refresh(row)
+    # An older deployment cannot finish a reservation/lease claimed under
+    # newer rules and falsely leave it marked as tested by those rules.
+    if _matcher_state(row)[1] > MATCHER_VERSION:
+        return None
     if row.fingerprint != fingerprint(item) or row.pin_fingerprint != pin_fingerprint(item):
         enqueue_location(db, item, now=now)
         return None
@@ -338,10 +425,12 @@ def claim_job(db: Session, job_id: int, *, now=None):
         else:
             row.status, row.next_attempt_at, row.lease_token, row.lease_expires_at = "failed", None, None, None
             row.message = "Location lookup could not finish. You can retry."
+            _complete_matcher_version(row, MATCHER_VERSION)
         return None
     if row.attempts >= setting("DREAM_LOCATION_MAX_ATTEMPTS", 5, 10) and not deferred_probe:
         row.status, row.next_attempt_at, row.lease_token = "failed", None, None
         row.message = "Location lookup could not finish. You can retry."
+        _complete_matcher_version(row, MATCHER_VERSION)
         return None
     token = str(uuid.uuid4())
     changed = db.execute(update(DreamLocation).where(
@@ -356,6 +445,7 @@ def claim_job(db: Session, job_id: int, *, now=None):
         _store_location_recovery(row, {**recovery, "state": "attempting"})
     from .dream_place_aliases import caption_for_place
     return {"job_id": row.id, "item_id": item.id, "user_id": item.user_id, "token": token,
+            "matcher_version": MATCHER_VERSION,
             "fingerprint": row.fingerprint, "pin_fingerprint": row.pin_fingerprint,
             "inputs": [item.place_name, item.city, item.country, item.region_or_neighborhood, item.category],
             "source_caption": caption_for_place(item),
@@ -495,6 +585,8 @@ async def resolve_location_job(job_id, *, session_factory=None, resolver=None, n
                 apply_candidate(row, row.candidates[0])
             if row.status == "blocked":
                 _defer_location(row, "configuration", finished)
+        if row.status not in ACTIVE | {"blocked"}:
+            _complete_matcher_version(row, claim["matcher_version"])
         db.commit()
         return row.status
 
@@ -541,4 +633,9 @@ def due_jobs(db: Session, *, now=None, limit=100):
     return db.query(DreamLocation).filter(or_(
         DreamLocation.status.in_(["queued", "blocked"]) & (DreamLocation.next_attempt_at <= now),
         (DreamLocation.status == "running") & (DreamLocation.lease_expires_at <= now),
-    )).filter(or_(DreamLocation.last_dispatched_at.is_(None), DreamLocation.last_dispatched_at <= now - timedelta(seconds=60))).order_by(DreamLocation.id).limit(limit).all()
+    )).filter(
+        or_(DreamLocation.matcher_generation != DreamLocation.generation,
+            DreamLocation.matcher_retry_version <= MATCHER_VERSION),
+        or_(DreamLocation.last_dispatched_at.is_(None), DreamLocation.last_dispatched_at <= now - timedelta(seconds=60)),
+    ).order_by(case((and_(DreamLocation.matcher_generation == DreamLocation.generation,
+                         DreamLocation.matcher_retry_version > 0), 1), else_=0), DreamLocation.id).limit(limit).all()

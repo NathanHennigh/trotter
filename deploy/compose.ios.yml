@@ -1,0 +1,17 @@
+# Optional Apple sign-in credentials. Add this overlay only after provisioning
+# deploy/secrets/apple_private_key. The base Android/web deployment needs no file.
+services:
+  api:
+    environment:
+      APPLE_PRIVATE_KEY_FILE: /run/secrets/apple_private_key
+    secrets:
+      - apple_private_key
+  worker:
+    environment:
+      APPLE_PRIVATE_KEY_FILE: /run/secrets/apple_private_key
+    secrets:
+      - apple_private_key
+
+secrets:
+  apple_private_key:
+    file: ./secrets/apple_private_key

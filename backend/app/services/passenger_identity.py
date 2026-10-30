@@ -15,7 +15,7 @@ from typing import Any
 from bs4 import BeautifulSoup
 
 
-_TITLE = {"mr", "mrs", "ms", "miss", "dr", "prof", "mstr"}
+_TITLE = {"mr", "mrs", "ms", "miss", "dr", "prof", "mstr", "madame", "mme", "monsieur", "mlle"}
 _SUFFIX = {"jr", "sr", "ii", "iii", "iv"}
 _NON_NAME = set(
     "passenger passengers traveler travelers traveller travellers name names first last "
@@ -62,6 +62,14 @@ def names_match(passenger: str, candidate: str) -> bool:
     a, b = _tokens(passenger), _tokens(candidate)
     if not a or not b or "@" in candidate or "@" in passenger:
         return False
+    # Airlines often print FAMILY/GIVENMIDDLE. Only exact concatenation of
+    # explicitly supplied names is safe: ELISHA must not match ELISHABETH.
+    for printed, full in ((passenger, b), (candidate, a)):
+        if printed.count("/") == 1 and len(full) >= 2:
+            family, given = printed.split("/")
+            if (_tokens(family) == [full[-1]] and full[-1] not in _SUFFIX
+                    and "".join(_tokens(given)) == "".join(full[:-1])):
+                return True
     if len(a) < 2 or len(b) < 2:
         return a == b and len(a) == len(b)
     if sorted(a) == sorted(b):
@@ -88,6 +96,14 @@ def names_match(passenger: str, candidate: str) -> bool:
                 continue
             return True
     return False
+
+
+def full_names_match(passenger: str, candidate: str) -> bool:
+    """Ownership recovery requires full given and family names, never initials."""
+    return (isinstance(passenger, str) and isinstance(candidate, str)
+            and all(len(parts) >= 2 and all(len(token) > 1 and token.isalpha() for token in parts)
+                    for parts in (_tokens(passenger), _tokens(candidate)))
+            and names_match(passenger, candidate))
 
 
 def _name(value: str) -> str | None:

@@ -1926,6 +1926,8 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
         return "skipped"
 
     existing = _find_supersedable_segment(db, user_id, flight)
+    if existing is None:
+        existing = _find_accepted_shared_segment(db, user_id, flight)
     if existing:
         allow_overwrite = _incoming_is_newer_or_equal(existing, flight)
         if allow_overwrite and _incoming_is_contained_partial_segment(existing, flight):
@@ -1993,6 +1995,33 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     db.add(seg)
     db.flush()
     return "inserted"
+
+
+def _find_accepted_shared_segment(db: Session, user_id: int, flight) -> Optional[Segment]:
+    """Attach a recipient's own later confirmation to an accepted shared leg.
+
+    Shared flights deliberately have no sender booking reference. An exact dated
+    route/number identity lets a later self-owned email update its schedule using
+    the normal event chronology rather than duplicate it. Legacy/unknown imports
+    and other shared invitations never gain this matching permission.
+    """
+    if (getattr(flight, "ownership", None) != "self"
+            or not getattr(flight, "source_message_id", None)
+            or getattr(flight, "source", None) == "accepted_flight_share"):
+        return None
+    number = _normalize_flight_number(flight.flight_number)
+    departure = _db_datetime(flight.dep_time)
+    if not number or not departure:
+        return None
+    candidates = db.query(Segment).join(Trip).filter(
+        Trip.user_id == user_id, Segment.pnr.is_(None),
+        Segment.dep_airport == flight.dep_airport, Segment.arr_airport == flight.arr_airport,
+    ).all()
+    matches = [segment for segment in candidates
+               if (segment.meta_json or {}).get("source") == "accepted_flight_share"
+               and _normalize_flight_number(segment.flight_number) == number
+               and _db_datetime(segment.dep_time).date() == departure.date()]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _find_unique_trip_flight_segment(

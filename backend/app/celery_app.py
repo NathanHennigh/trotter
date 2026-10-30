@@ -10,7 +10,7 @@ def create_celery_app() -> Celery:
 		"travelstrava",
 		broker=broker_url,
 		backend=backend_url,
-		include=["app.tasks.example", "app.tasks.import_tasks", "app.tasks.dream_location_tasks", "app.tasks.dream_enrichment_tasks"],
+		include=["app.tasks.example", "app.tasks.import_tasks", "app.tasks.dream_location_tasks", "app.tasks.dream_enrichment_tasks", "app.tasks.planner_tasks", "app.tasks.account_cleanup_tasks", "app.tasks.travel_name_tasks"],
 	)
 
 	app.conf.update(
@@ -26,6 +26,18 @@ def create_celery_app() -> Celery:
 			"app.tasks.dream_enrichment_tasks.*": {"queue": "dream_enrichment"},
 		},
 		beat_schedule={
+			"travel-name-recovery": {
+				"task": "app.tasks.travel_name_tasks.discover_travel_name_recovery",
+				"schedule": 15.0,
+			},
+			"erased-account-cleanup": {
+				"task": "app.tasks.account_cleanup_tasks.clean_erased_accounts",
+				"schedule": 60.0,
+			},
+			"planner-discovery": {
+				"task": "app.tasks.planner_tasks.discover_planner_jobs",
+				"schedule": 30.0,
+			},
 			"dream-location-discovery": {
 				"task": "app.tasks.dream_location_tasks.discover_dream_locations",
 				"schedule": 60.0,

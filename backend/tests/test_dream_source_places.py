@@ -20,9 +20,9 @@ def output(names=("El Fenn", "Bacha Coffee", "Le Jardin")):
                                needs_google_places_lookup=True) for name in names])}
 
 
-def capture(client, test_db, monkeypatch):
+def capture(client, test_db, monkeypatch, *, caption=None):
     monkeypatch.setattr("app.routers.dreams.notify_enrichment", lambda _: None)
-    saved = client.post("/dreams/share", json={"source_url": "https://instagram.com/reel/multi", "caption": output()["caption"]}).json()
+    saved = client.post("/dreams/share", json={"source_url": "https://instagram.com/reel/multi", "caption": caption or output()["caption"]}).json()
     job_id = test_db.query(DreamEnrichmentJob).filter_by(item_id=saved["dream_item_id"]).one().id
     return saved, job_id, sessionmaker(bind=test_db.get_bind(), autoflush=False)
 
@@ -128,6 +128,117 @@ def test_weaker_fallback_cannot_add_a_phantom_place_or_replace_known_venues(clie
     cards = client.get("/dream-items").json()
     assert [card["place_name"] for card in cards] == ["El Fenn", "Bacha Coffee", "Le Jardin"]
     assert all(card["status"] != "processing" for card in cards)
+
+
+def process_source(*, corrected=False, names=("The art of ceramics",)):
+    caption = "The art of ceramics. Hand-made pottery and traditional craftsmanship. #Marrakech"
+    if "Cobalt Museum" in names:
+        caption += " Visit Cobalt Museum to see the collection."
+    entries = ([DreamParseItem(category="unknown", place_name=None,
+                              summary="A video about hand-made pottery and traditional craftsmanship.",
+                              tags=["craft"], needs_google_places_lookup=False)] if corrected else [
+        DreamParseItem(place_name=name, category="attraction", city="Marrakech", country="Morocco",
+                       summary="A famous attraction visitors can tour.", tags=["art"],
+                       confidence=.8, needs_google_places_lookup=True) for name in names])
+    return {"caption": caption, "metadata": {"thumbnail_url": "https://example.invalid/art.jpg"},
+            "parsed": DreamParseResponse(provider="synthetic", model="synthetic", items=entries)}
+
+
+@pytest.mark.parametrize("custom_summary", [None, "Compare with our kitchen tiles"])
+def test_no_place_reparse_corrects_a_generated_topic_in_original_card_preserving_personal_content(client, test_db, test_user, monkeypatch, custom_summary):
+    saved, job_id, factory = capture(client, test_db, monkeypatch, caption=process_source()["caption"])
+    assert run(factory, job_id, process_source()) == "completed"
+    with factory() as db:
+        item = db.get(DreamItem, saved["dream_item_id"])
+        item.personal_note, item.tags_json = "Show this to Alex", ["renovation"]
+        if custom_summary:
+            item.summary = custom_summary
+        original = (item.id, item.source_post_id, item.source_url, item.created_at, item.source_place_key)
+        original_generation = item.location.generation
+        db.commit()
+    assert run(factory, retry(factory, saved["dream_item_id"]), process_source(corrected=True)) == "completed"
+    cards = client.get("/dream-items").json()
+    assert len(cards) == 1 and cards[0]["id"] == saved["dream_item_id"]
+    assert cards[0]["location_state"] == "source_details" and cards[0]["location_reason"] == "identity_not_shared"
+    with factory() as db:
+        item = db.get(DreamItem, saved["dream_item_id"])
+        assert (item.id, item.source_post_id, item.source_url, item.created_at, item.source_place_key) == original
+        assert (item.place_name, item.city, item.country, item.region_or_neighborhood) == (None, None, None, None)
+        assert item.category == "unknown" and item.needs_google_places_lookup is False
+        assert item.google_maps_url is None and item.google_place_id is None
+        assert item.personal_note == "Show this to Alex" and item.tags_json == ["renovation", "craft"]
+        assert item.summary == (custom_summary or process_source(corrected=True)["parsed"].items[0].summary)
+        assert item.raw_metadata_json["source_generated_summary"] == process_source(corrected=True)["parsed"].items[0].summary
+        assert item.location.generation == original_generation + 1
+        assert item.location.status == "not_found" and item.location.next_attempt_at is None and item.location.attempts == 0
+    assert run(factory, retry(factory, saved["dream_item_id"]), process_source(corrected=True)) == "completed"
+    with factory() as db:
+        item = db.get(DreamItem, saved["dream_item_id"])
+        assert item.location.generation == original_generation + 1
+        assert len(item.source_post.items) == 1
+
+
+@pytest.mark.parametrize("protection", [
+    "user_edit", "confirmed", "manual_url", "manual_status", "selected_google", "confirmed_google",
+    "resolved_provider", "legacy_place_id", "legacy_coordinates", "legacy_coordinates_no_job",
+    "preserve_anchor", "preserve_existing",
+])
+def test_no_place_correction_cannot_erase_edits_accepted_pins_or_backfill_preservation(client, test_db, test_user, monkeypatch, protection):
+    from app.models import DreamGoogleIdentity
+    from app.services.dream_source_places import reconcile_places
+    saved, job_id, factory = capture(client, test_db, monkeypatch, caption=process_source()["caption"])
+    run(factory, job_id, process_source())
+    with factory() as db:
+        item = db.get(DreamItem, saved["dream_item_id"])
+        if protection == "user_edit": item.raw_metadata_json = {**item.raw_metadata_json, "dream_user_edited": True}
+        elif protection == "confirmed": item.status = "confirmed"
+        elif protection == "manual_url": item.google_maps_url = "https://maps.google.com/?q=31.63,-7.98"
+        elif protection == "manual_status": item.location.status = "manual"
+        elif protection == "resolved_provider": item.location.status, item.location.provider = "resolved", "geoapify"
+        elif protection == "legacy_place_id": item.google_place_id = "saved-google-id"
+        elif protection in {"legacy_coordinates", "legacy_coordinates_no_job"}:
+            item.raw_metadata_json = {**item.raw_metadata_json, "place_match": {"raw": {
+                "properties": {"result_type": "amenity"},
+                "geometry": {"type": "Point", "coordinates": [-7.98, 31.63]}}}}
+            if protection == "legacy_coordinates_no_job":
+                db.delete(item.location)
+                db.flush()
+                db.expire(item, ["location"])
+        elif protection in {"selected_google", "confirmed_google"}:
+            item.location.google_identity = DreamGoogleIdentity(selected_place_id="saved-google-id",
+                confirmed_place_id="saved-google-id" if protection == "confirmed_google" else None)
+        db.flush()
+        fields = ("place_name", "category", "city", "country", "summary", "google_maps_url", "google_place_id")
+        before = {field: getattr(item, field) for field in fields}
+        generation = item.location.generation if item.location else None
+        result = reconcile_places(db, item, process_source(corrected=True)["parsed"],
+                                  preserve_anchor=protection == "preserve_anchor",
+                                  preserve_existing=protection == "preserve_existing")
+        assert result["added"] == 0 and result["place_ids"] == []
+        assert {field: getattr(item, field) for field in fields} == before
+        assert (item.location.generation if item.location else None) == generation
+        assert len(item.source_post.items) == 1
+
+
+def test_no_place_reparse_does_not_reinterpret_mixed_source_real_places(client, test_db, test_user, monkeypatch):
+    value = process_source(names=("The art of ceramics", "Cobalt Museum"))
+    saved, job_id, factory = capture(client, test_db, monkeypatch, caption=value["caption"])
+    run(factory, job_id, value)
+    before = {card["id"]: card["place_name"] for card in client.get("/dream-items").json()}
+    corrected = process_source(corrected=True, names=("The art of ceramics", "Cobalt Museum"))
+    assert run(factory, retry(factory, saved["dream_item_id"]), corrected) == "completed"
+    assert {card["id"]: card["place_name"] for card in client.get("/dream-items").json()} == before
+
+
+def test_no_place_reparse_preserves_a_single_explicitly_named_concept_title_venue(client, test_db, test_user, monkeypatch):
+    value = process_source(names=("The Art of Clay",))
+    value["caption"] = "Visit The Art of Clay, a museum showing hand-made pottery and traditional craftsmanship."
+    saved, job_id, factory = capture(client, test_db, monkeypatch, caption=value["caption"])
+    run(factory, job_id, value)
+    corrected = {**value, "parsed": process_source(corrected=True)["parsed"]}
+    assert run(factory, retry(factory, saved["dream_item_id"]), corrected) == "completed"
+    cards = client.get("/dream-items").json()
+    assert len(cards) == 1 and cards[0]["place_name"] == "The Art of Clay"
 
 
 def test_unnamed_guide_reparse_clears_stale_geography_and_retains_original_save(client, test_db, test_user, monkeypatch):

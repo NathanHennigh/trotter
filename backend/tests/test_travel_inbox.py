@@ -181,6 +181,10 @@ def test_initial_alias_never_claims_a_named_travelers_ticket(session):
     user.travel_name_aliases = ["M Blake"]
     assert item_states(db, user)[0]["status"] == "retained"
     user.travel_name_aliases = ["Morgan Blake"]
+    assert item_states(db, user)[0]["status"] == "needs_review"
+    # A saved name queues recovery; do not hide the ticket before a safe
+    # personal-history projection or explicit decision has accepted it.
+    record_user_decision(db, user.id, flight(), ownership="self")
     assert item_states(db, user)[0]["status"] == "belongs_to_you"
 
 

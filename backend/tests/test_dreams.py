@@ -291,6 +291,41 @@ def test_review_confirm_applies_edits(client, test_user, test_db):
     assert item.dream.title == "Spain"
 
 
+def test_personal_note_survives_enrichment_without_confirming_the_place(client, test_user, test_db):
+    created = client.post("/dreams/share", json={"source_url": "https://instagram.com/reel/own-note", "shared_text": "Casa Dani Madrid"}).json()
+    item_id = created["dream_item_id"]
+    item = test_db.get(DreamItem, item_id)
+    original_status = item.status
+    original_jobs = [(job.id, job.status) for job in test_db.query(DreamEnrichmentJob).all()]
+    response = client.post(f"/dream-items/{item_id}/review", json={"edits": {"personal_note": "  Go with Sam\nAsk for a table outside  "}})
+    assert response.status_code == 200
+    assert response.json()["personal_note"] == "Go with Sam\nAsk for a table outside"
+    assert response.json()["status"] == original_status
+    test_db.expire_all()
+    assert [(job.id, job.status) for job in test_db.query(DreamEnrichmentJob).all()] == original_jobs
+    assert finish_enrichment(test_db, item_id) == "completed"
+    listed = client.get("/dream-items").json()[0]
+    assert listed["personal_note"] == "Go with Sam\nAsk for a table outside"
+    assert listed["summary"] == "Tortilla spot in Madrid."
+    response = client.post(f"/dream-items/{item_id}/review", json={"edits": {"personal_note": ""}})
+    assert response.status_code == 200
+    assert response.json()["personal_note"] is None
+    assert response.json()["summary"] == "Tortilla spot in Madrid."
+
+
+def test_personal_note_is_bounded_and_owned(client, test_user, test_db):
+    created = client.post("/dreams/share", json={"source_url": "https://instagram.com/reel/own-note-limit"}).json()
+    endpoint = f"/dream-items/{created['dream_item_id']}/review"
+    assert client.post(endpoint, json={"edits": {"personal_note": "a" * 8001}}).status_code == 422
+    other = User(id=2, email="another@example.com", name="Other")
+    test_db.add(other)
+    test_db.commit()
+    app.dependency_overrides[get_current_user] = lambda: other
+    assert client.post(endpoint, json={"edits": {"personal_note": "Not mine"}}).status_code == 404
+    test_db.expire_all()
+    assert test_db.get(DreamItem, created["dream_item_id"]).personal_note is None
+
+
 def test_parse_caption_endpoint_uses_configured_ai_service(client, test_user, monkeypatch):
     def fake_parse(caption, source_url=None):
         assert "Casa Dani" in caption

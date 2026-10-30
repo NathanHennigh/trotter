@@ -9,7 +9,7 @@ import unicodedata
 from sqlalchemy.orm import Session
 
 from ..models import DreamItem, DreamSourcePost, User
-from .dream_locations import enqueue_location
+from .dream_locations import enqueue_location, legacy_coordinates
 
 
 def normalized(value):
@@ -124,6 +124,7 @@ def reconcile_places(db: Session, anchor: DreamItem, parsed, *, preserve_anchor=
     """
     from ..routers import dreams
     from .dream_enrichment import enrichment_is_protected
+    from .dream_location_presentation import named_location_identity
     from .dream_place_aliases import caption_for_place, source_place_aliases
 
     # All public mutations and the worker use owner -> items -> job/location.
@@ -149,7 +150,25 @@ def reconcile_places(db: Session, anchor: DreamItem, parsed, *, preserve_anchor=
     entries = []
     seen = set()
     named = [entry for entry in parsed.items if (entry.place_name or "").strip()]
-    candidates = named or (parsed.items[:1] if not any(item.place_name for item in existing) else [])
+    location = anchor.location
+    google = location.google_identity if location else None
+    accepted_pin = bool(anchor.google_place_id or legacy_coordinates(anchor)[0] is not None or location and (
+        location.status in {"resolved", "manual"}
+        or google and (google.selected_place_id or google.confirmed_place_id)))
+    # A weaker model result alone cannot erase a genuine named place. But a
+    # sole, unreviewed source card can retain an old generated topic/description
+    # as its name forever unless source evidence can explicitly correct it.
+    # Reuse that original card; never create another empty card or reinterpret
+    # multiple independently saved places from a mixed source.
+    correct_generated_nonplace = bool(
+        not named and len(existing) == 1 and anchor.place_name
+        and (anchor.raw_metadata_json or {}).get("source_extracted_key")
+        and not preserve_anchor and not preserve_existing
+        and not enrichment_is_protected(anchor) and not accepted_pin
+        and not named_location_identity(anchor, source.caption or "")
+    )
+    candidates = named or (parsed.items[:1] if correct_generated_nonplace
+                          or not any(item.place_name for item in existing) else [])
     # A model may return both names in `English name (local name)`. Prefer the
     # primary source name when the pair names the same exact branch. Ambiguous
     # shared aliases and different geography cannot collapse distinct venues.
@@ -192,10 +211,12 @@ def reconcile_places(db: Session, anchor: DreamItem, parsed, *, preserve_anchor=
         if sum(candidate.id == item.id for candidate in compatible.values()) == 1 and not any(
             by_key.get(other_key) is item for other_key, _ in entries if other_key != key):
             by_key[key] = item
-    # Only a blank draft can be assigned by position. A named historical card
-    # must match its saved identity even when the new parse changes ordering.
+    # Apart from a source-proven non-place correction, only a blank draft can
+    # be assigned by position. A named historical card must match its saved
+    # identity even when the new parse changes ordering.
     matched_ids = {by_key[key].id for key, _ in entries if key in by_key}
-    unassigned_anchor = (not anchor.place_name or anchor_is_draft or provisional_draft(anchor)) and anchor.id not in matched_ids and not enrichment_is_protected(anchor)
+    unassigned_anchor = (not anchor.place_name or anchor_is_draft or provisional_draft(anchor)
+                         or correct_generated_nonplace) and anchor.id not in matched_ids and not enrichment_is_protected(anchor)
     assigned = set()
     added = 0
     touched = []

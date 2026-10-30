@@ -11,7 +11,6 @@ from __future__ import annotations
 from datetime import datetime
 from hashlib import sha256
 import json
-import unicodedata
 
 from ..models import BookingCancellation, BookingObservation, TravelInboxEvidence, TravelInboxItem, User
 from .booking_ledger import booking_code, event_time
@@ -55,6 +54,10 @@ def _owner(db, user_id, observation=None):
 
 def _is_review_projection(db, user_id, observation):
     """A review's synthesized personal flight isn't a new passenger receipt."""
+    if (observation.facts or {}).get("source") == "travel_name_recovery":
+        parts = str(observation.source_message_id or "").split(":")
+        source = db.get(BookingObservation, int(parts[1])) if len(parts) == 3 and parts[0] == "travel-name" and parts[1].isdigit() else None
+        return bool(source and source.user_id == user_id and _flight_identity(source) == _flight_identity(observation))
     if (observation.facts or {}).get("source") != "user_review":
         return False
     prefix, separator, suffix = str(observation.source_message_id or "").partition(":")
@@ -232,11 +235,19 @@ sharing will require separate authorization and an explicit payload allowlist.
     decision = max(decisions, key=_source_order).facts["user_decision"] if decisions else {}
     owner_names = [user.name, *(user.travel_name_aliases or [])]
 
-    def literal_name(value):
-        return " ".join(unicodedata.normalize("NFC", value).split()).casefold() if isinstance(value, str) else None
-
-    if item.passenger_name and literal_name(item.passenger_name) in {literal_name(name) for name in owner_names if name}:
-        status = "belongs_to_you"
+    from .passenger_identity import full_names_match
+    if (item.passenger_name and any(full_names_match(item.passenger_name, name) for name in owner_names if name)
+            and not facts.get("force_review") and decision.get("ownership") != "other"
+            and decision.get("status") not in {"canceled", "hold"}):
+        # Name confirmation queues recovery; it is not itself proof that the
+        # itinerary accepted a held/canceled/shared booking. Keep those visible.
+        proofs = db.query(BookingObservation).filter_by(user_id=user_id, pnr=latest.pnr,
+            travel_date=latest.travel_date, ownership="self").all() if latest else []
+        verified = any(_flight_identity(proof) == _flight_identity(latest)
+            and not (proof.facts or {}).get("force_review")
+            and (proof.facts or {}).get("user_decision", {}).get("status") not in {"canceled", "hold"}
+            for proof in proofs)
+        status = "belongs_to_you" if verified else "needs_review"
     elif item.passenger_name and reason != "companion" and decision.get("ownership") == "self":
         status = "needs_review"
     elif not item.passenger_name and decision.get("ownership") == "self" and decision.get("status") == "active":
