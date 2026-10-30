@@ -51,6 +51,9 @@ import { FlightInvitationProvider, useFlightInvitation } from "./src/services/fl
 import { PlannerInvitationProvider, usePlannerInvitation } from "./src/services/plannerLinks";
 import { DreamTripPicker } from "./src/components/world-window/planner/DreamTripPicker";
 import { PlannerScreen } from "./src/screens/PlannerScreen";
+import { TravelIdentityProvider, useTravelIdentity } from "./src/services/travelIdentity";
+import { TravelNamesScreen } from "./src/screens/TravelNamesScreen";
+import { GmailSetupScreen } from "./src/screens/GmailSetupScreen";
 
 const tabs: BottomNavTab[] = [
   "globe",
@@ -239,7 +242,9 @@ function AccountGate() {
   const incomingShare = shares.items.find((item) => item.ownerId === accountId);
   return (
     <DreamsProvider key={`${accountId}:${accountRevision}`}>
+      <TravelIdentityProvider>
       <AppShell incomingShare={incomingShare} consumeShare={consumeShare} />
+      </TravelIdentityProvider>
     </DreamsProvider>
   );
 }
@@ -253,6 +258,12 @@ function AppShell({
 }) {
   const flightInvitation = useFlightInvitation();
   const plannerInvitation = usePlannerInvitation();
+  const { identity: travelIdentity, loading: identityLoading, completeOnboarding } = useTravelIdentity();
+  const [identityScreen, setIdentityScreen] = React.useState<"names-onboarding" | "gmail-onboarding" | "names-profile">();
+  const identityScreenRef = React.useRef(identityScreen);
+  identityScreenRef.current = identityScreen;
+  const setupConsidered = React.useRef(false);
+  const setupDeferred = React.useRef(Boolean(incomingShare || flightInvitation.token || plannerInvitation.token));
   const profileOrigin = React.useRef<BottomNavTab>("globe");
   const [plannerEntry, setPlannerEntry] = React.useState<{ tripId?: string; dreamItemIds?: string[]; destination?: string; sourceUrl?: string; key: number }>();
   const [sharedTripSource, setSharedTripSource] = React.useState<string>();
@@ -302,7 +313,7 @@ function AppShell({
   const registerPlannerBack = React.useCallback((handler: (() => boolean) | null) => {
     handlers.current.planner = handler;
   }, []);
-  const { trips } = useTravelTrips();
+  const { trips, gmailConnected } = useTravelTrips();
   const { shareInstagramLinkDurable, refresh: refreshDreams } = useDreams();
   const insets = useSafeAreaInsets();
   const handledShare = React.useRef<{ queueId: number; status: "capturing" | "failed" | "retained" } | undefined>(undefined);
@@ -317,10 +328,11 @@ function AppShell({
     setActiveTab(tab);
   };
   const changeTab = (tab: BottomNavTab) => {
-    if (tab === currentTab.current && !selectedTripId && !countries && !passportCollection && !flightInboxOpen) return;
+    if (tab === currentTab.current && !selectedTripId && !countries && !passportCollection && !flightInboxOpen && !identityScreen) return;
     if (tab === "profile" && currentTab.current !== "profile") profileOrigin.current = currentTab.current;
     if (tab !== "dreams") setSharedTripSource(undefined);
     setFlightInboxOpen(false);
+    setIdentityScreen(undefined);
     tripProgress.stopAnimation(); tripProgress.setValue(0);
     tripDragOffset.stopAnimation(); tripDragOffset.setValue(0);
     setPassportReset((value) => value + 1);
@@ -335,6 +347,29 @@ function AppShell({
   const openPlanner = (entry: { tripId?: string; dreamItemIds?: string[]; destination?: string; sourceUrl?: string } = {}) => {
     setPlannerEntry({ ...entry, key: ++scopeSequence.current });
     changeTab("planner");
+  };
+  React.useEffect(() => {
+    if (incomingShare || flightInvitation.token || plannerInvitation.token) {
+      // Receiving a place or invitation keeps its direct path; setup can wait
+      // until a normal launch, and travel names remain available in Profile.
+      setupDeferred.current = true;
+      setIdentityScreen(undefined);
+    }
+    if (!identityLoading && !travelIdentity) setupDeferred.current = true;
+    if (setupConsidered.current || !travelIdentity) return;
+    setupConsidered.current = true;
+    if (!setupDeferred.current && !travelIdentity.onboarding_completed) {
+      setIdentityScreen(travelIdentity.confirmed ? "gmail-onboarding" : "names-onboarding");
+    }
+  }, [travelIdentity, identityLoading, incomingShare, flightInvitation.token, plannerInvitation.token]);
+  const finishTravelSetup = async () => {
+    const expectedScreen = identityScreenRef.current;
+    await completeOnboarding();
+    if (identityScreenRef.current === expectedScreen) setIdentityScreen(undefined);
+  };
+  const advanceTravelSetup = async () => {
+    if (gmailConnected) await finishTravelSetup();
+    else setIdentityScreen("gmail-onboarding");
   };
   React.useEffect(() => {
     if (plannerInvitation.token) changeTab("planner");
@@ -447,7 +482,7 @@ function AppShell({
   React.useEffect(() => {
     const listener = BackHandler.addEventListener("hardwareBackPress", () => {
       // The inbox owns Back while a flight preview or composer is open.
-      if (flightInboxOpen) return false;
+      if (flightInboxOpen || identityScreen) return false;
       if (selectedTripId) { closeTrip(); return true; }
       if (activeTab === "passport") {
         if (countries) {
@@ -465,11 +500,11 @@ function AppShell({
       return false;
     });
     return () => listener.remove();
-  }, [selectedTripId, countries, passportCollection, activeTab, flightInboxOpen]);
+  }, [selectedTripId, countries, passportCollection, activeTab, flightInboxOpen, identityScreen]);
 
   // Retain navigation state without exposing or accepting input on hidden screens.
   const layer = (key: string, visible: boolean, content: React.ReactNode) => {
-    visible = visible && !flightInboxOpen;
+    visible = visible && !flightInboxOpen && !identityScreen;
     return (
     // Keep Fabric's native boundary stable as opacity and pointer events
     // change; flattening/reparenting this layer would detach the globe TextureView.
@@ -482,11 +517,14 @@ function AppShell({
     </View>
   );
   };
-  const mainVisible = !selectedTrip && !flightInboxOpen;
+  const mainVisible = !selectedTrip && !flightInboxOpen && !identityScreen;
   const baseTab = selectedTrip ? tripOrigin.current : activeTab;
   const passportVisible = baseTab === "passport" && !countries;
   const countryVisible = baseTab === "passport" && Boolean(countries);
   const label = (tab: BottomNavTab) => tab.charAt(0).toUpperCase() + tab.slice(1);
+  if (identityLoading && !setupConsidered.current && !setupDeferred.current && !incomingShare && !flightInvitation.token && !plannerInvitation.token) {
+    return <SessionRestoringScreen />;
+  }
   return (
     <View style={styles.shell}>
       <TripBackground progress={tripProgress} dragOffset={tripDragOffset}>
@@ -533,11 +571,20 @@ function AppShell({
         <ProfileScreen active={activeTab} onChange={changeTab} onOpenStamps={() => openCountries()}
           onBack={() => changeTab(profileOrigin.current)}
           onOpenFlightInbox={() => setFlightInboxOpen(true)}
+          onOpenTravelNames={() => setIdentityScreen("names-profile")}
           onOpenAirport={code => openPassportCollection("airports", undefined, code)} />)}
       </TripBackground>
       {flightInboxOpen && <View style={styles.overlay}>
         <FlightSharingScreen onBack={closeFlightInbox} invitationToken={flightInvitation.token}
           onInvitationConsumed={() => { if (flightInvitation.token) flightInvitation.consume(flightInvitation.token); }} />
+      </View>}
+      {identityScreen && <View style={styles.overlay}>
+        {identityScreen === "gmail-onboarding" ? <GmailSetupScreen
+          onDone={finishTravelSetup} onSkip={finishTravelSetup} onBack={() => setIdentityScreen("names-onboarding")} />
+          : <TravelNamesScreen onboarding={identityScreen === "names-onboarding"}
+            onSaved={identityScreen === "names-onboarding" ? advanceTravelSetup : async () => setIdentityScreen(undefined)}
+            onSkip={identityScreen === "names-onboarding" ? advanceTravelSetup : undefined}
+            onBack={identityScreen === "names-profile" ? () => setIdentityScreen(undefined) : undefined} />}
       </View>}
       {selectedTrip && <TripNavigationSurface key={selectedTrip.id} trip={selectedTrip} flightId={selectedFlightId}
         origin={tripPaperOrigin} closing={tripClosing} onClosed={finishCloseTrip} onRequestClose={closeTrip}

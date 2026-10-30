@@ -103,6 +103,8 @@ function load(file, name, overrides = {}) {
     CollectionProgress: "CollectionProgress",
     FlightSharingScreen: "FlightSharingScreen", useFlightInvitation: () => ({ ready: true, consume: noOp }),
     PlannerScreen: "PlannerScreen", DreamTripPicker: "DreamTripPicker", ProfileAvatar: "ProfileAvatar", usePlannerInvitation: () => ({ ready: true, consume: noOp }),
+    TravelNamesScreen: "TravelNamesScreen", GmailSetupScreen: "GmailSetupScreen", SessionRestoringScreen: "SessionRestoringScreen",
+    useTravelIdentity: () => ({ identity: { confirmed: true, onboarding_completed: true }, loading: false, completeOnboarding: async () => {} }),
     React: host.React, useState: host.React.useState, useMemo: host.React.useMemo, useEffect: host.React.useEffect, useRef: host.React.useRef,
     StyleSheet: { create: x => x, absoluteFillObject: {}, absoluteFill: {} },
     Animated: { Value: class { constructor(value) { this.value = value; } setValue(value) { this.value = value; } stopAnimation() {} } },
@@ -176,6 +178,76 @@ test("Rapid tab changes retain unique scene boundaries and do not reset an alrea
 
 const deferredShare = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const flushShare = async () => { for (let n = 0; n < 12; n++) await Promise.resolve(); };
+
+test('first normal launch offers names then optional Gmail; completion returns to the globe', async () => {
+  let completed = 0;
+  const host = appHost({ useTravelIdentity: () => ({ identity: { confirmed: false, onboarding_completed: false }, loading: false, completeOnboarding: async () => { completed++; } }) });
+  let tree = host.render({ consumeShare: noOp });
+  assert.equal(find(tree, 'TravelNamesScreen').props.onboarding, true);
+  assert.equal(find(tree, 'HomeGlobeScreen').props.visible, false);
+  await find(tree, 'TravelNamesScreen').props.onSkip(); tree = host.render();
+  assert(find(tree, 'GmailSetupScreen'), 'Skipping names still offers the explicit optional Gmail step');
+  assert.equal(completed, 0);
+  await find(tree, 'GmailSetupScreen').props.onSkip(); tree = host.render();
+  assert.equal(completed, 1);
+  assert.equal(find(tree, 'GmailSetupScreen'), undefined);
+  assert.equal(find(tree, 'HomeGlobeScreen').props.visible, true);
+  host.unmount();
+});
+
+test('an already connected account confirms names without a second Gmail connection step', async () => {
+  let completed = 0;
+  const host = appHost({
+    useTravelIdentity: () => ({ identity: { confirmed: false, onboarding_completed: false }, loading: false, completeOnboarding: async () => { completed++; } }),
+    useTravelTrips: () => ({ trips: [trip], gmailConnected: true }),
+  });
+  let tree = host.render({ consumeShare: noOp });
+  await find(tree, 'TravelNamesScreen').props.onSaved(); tree = host.render();
+  assert.equal(completed, 1);
+  assert.equal(find(tree, 'GmailSetupScreen'), undefined);
+  assert.equal(find(tree, 'HomeGlobeScreen').props.visible, true);
+  find(tree, 'HomeGlobeScreen').props.onChange('profile'); tree = host.render();
+  find(tree, 'ProfileScreen').props.onOpenTravelNames(); tree = host.render();
+  assert.equal(find(tree, 'TravelNamesScreen').props.onboarding, false);
+  find(tree, 'TravelNamesScreen').props.onBack(); tree = host.render();
+  assert(nodes(tree).some(node => node.type === 'RetainedScene' && node.props.active && find(node, 'ProfileScreen')));
+  assert.equal(completed, 1, 'Profile editing does not replay onboarding');
+  host.unmount();
+});
+
+test('onboarding never interrupts an incoming saved place or flight/planner invitation', () => {
+  for (const entry of ['place', 'flight', 'planner']) {
+    const identity = { confirmed: false, onboarding_completed: false };
+    const host = appHost({
+      useTravelIdentity: () => ({ identity, loading: false, completeOnboarding: async () => {} }),
+      useDreams: () => ({ refresh: noOp }),
+      useFlightInvitation: () => ({ ready: true, token: entry === 'flight' ? 'invite' : undefined, consume: noOp }),
+      usePlannerInvitation: () => ({ ready: true, token: entry === 'planner' ? 'invite' : undefined, consume: noOp }),
+    });
+    let tree = host.render({ consumeShare: noOp, incomingShare: entry === 'place' ? { queueId: 42, sourceUrl: 'https://www.instagram.com/reel/synthetic/', viewOnly: true } : undefined });
+    assert.equal(find(tree, 'TravelNamesScreen'), undefined);
+    assert.equal(find(tree, 'GmailSetupScreen'), undefined);
+    assert(find(tree, entry === 'place' ? 'DreamsScreen' : entry === 'flight' ? 'FlightSharingScreen' : 'PlannerScreen'));
+    tree = host.render({ consumeShare: noOp });
+    assert.equal(find(tree, 'TravelNamesScreen'), undefined, 'Consuming the link does not open setup over its destination');
+    host.unmount();
+  }
+});
+
+test('failed setup completion stays retryable and cannot close a newer profile form', async () => {
+  let attempts = 0;
+  const pending = deferredShare();
+  const host = appHost({ useTravelIdentity: () => ({ identity: { confirmed: true, onboarding_completed: false }, loading: false, completeOnboarding: () => ++attempts === 1 ? Promise.reject(new Error('Offline')) : pending.promise }) });
+  let tree = host.render({ consumeShare: noOp });
+  await assert.rejects(find(tree, 'GmailSetupScreen').props.onSkip(), /Offline/);
+  tree = host.render(); assert(find(tree, 'GmailSetupScreen'));
+  const completing = find(tree, 'GmailSetupScreen').props.onDone();
+  find(tree, 'HomeGlobeScreen').props.onChange('profile'); tree = host.render();
+  find(tree, 'ProfileScreen').props.onOpenTravelNames(); tree = host.render();
+  pending.resolve(); await completing; tree = host.render();
+  assert(find(tree, 'TravelNamesScreen'), 'Old asynchronous completion leaves the newer screen intact');
+  host.unmount();
+});
 
 test('native Add to trip opens explicit group selection without another personal capture', () => {
   const captures = [], consumed = [];

@@ -16,11 +16,14 @@ import {
   type RetainedFlight, type SharedFlight,
 } from '../services/flightSharing';
 import { useTravelTrips } from '../services/travelTrips';
+import { useTravelIdentity } from '../services/travelIdentity';
+import { claimableTravelName } from '../components/world-window/profile/travelNamePresentation';
+import { TravelRecoveryStatus } from '../components/world-window/profile/TravelRecoveryStatus';
 import { colors, fonts } from '../theme/trotterTheme';
 import { selectionHaptic } from '../utils/experiencePreferences';
 
 type InboxTab = 'send' | 'received' | 'sent';
-type Page = { kind: 'inbox' } | { kind: 'compose'; group: RetainedBooking } | { kind: 'detail'; share: FlightShare; outgoing: boolean };
+type Page = { kind: 'inbox' } | { kind: 'compose'; group: RetainedBooking } | { kind: 'claim'; group: RetainedBooking; itemId: string; name: string } | { kind: 'detail'; share: FlightShare; outgoing: boolean };
 const EMPTY: FlightSharingInbox = { items: [], incoming: [], outgoing: [] };
 const STATUS: Record<FlightShare['status'], string> = {
   pending: 'Awaiting acceptance', accepted: 'Accepted', declined: 'Declined', revoked: 'Revoked', expired: 'Expired',
@@ -36,6 +39,8 @@ export function FlightSharingScreen({ onBack, invitationToken, onInvitationConsu
 }) {
   const insets = useSafeAreaInsets();
   const { accountId, accountEmail, refresh: refreshTravel } = useTravelTrips();
+  const travelIdentity = useTravelIdentity();
+  const claimedJob = React.useRef<string | undefined>(undefined);
   const [data, setData] = React.useState<FlightSharingInbox>(EMPTY);
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
@@ -82,6 +87,12 @@ export function FlightSharingScreen({ onBack, invitationToken, onInvitationConsu
     void load(true);
   }, [load, accountId]);
   React.useEffect(() => {
+    const recovery = travelIdentity.identity?.recovery;
+    if (recovery?.state === 'completed' && recovery.id === claimedJob.current) {
+      claimedJob.current = undefined; void load();
+    }
+  }, [travelIdentity.identity?.recovery, load]);
+  React.useEffect(() => {
     if (!invitationToken) { setResolving(false); return; }
     let current = true;
     setResolving(true); setResolveFailed(false); setError(''); setNotice('');
@@ -103,9 +114,10 @@ export function FlightSharingScreen({ onBack, invitationToken, onInvitationConsu
     if (busyRef.current) return;
     if (resolving || resolveFailed) consumed.current?.();
     setResolveFailed(false); setError(''); setNotice('');
-    if (page.kind !== 'inbox') setPage({ kind: 'inbox' });
+    if (page.kind === 'claim') setPage({ kind: 'compose', group: page.group });
+    else if (page.kind !== 'inbox') setPage({ kind: 'inbox' });
     else onBack();
-  }, [page.kind, onBack, resolving, resolveFailed]);
+  }, [page, onBack, resolving, resolveFailed]);
   React.useEffect(() => {
     if (Platform.OS === 'web') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => { back(); return true; });
@@ -213,12 +225,23 @@ export function FlightSharingScreen({ onBack, invitationToken, onInvitationConsu
     catch (cause) { if (!(cause instanceof Error && cause.name === 'AbortError')) throw cause; }
   });
 
-  const header = page.kind === 'compose' ? 'Prepare flights' : page.kind === 'detail' ? 'Shared flights' : 'Flights for others';
+  const confirmSelf = () => run('Saving your name…', async () => {
+    if (page.kind !== 'claim') return;
+    const initialPage = pageKey(page);
+    const result = await travelIdentity.claimSelf(page.itemId, page.name);
+    if (!alive.current) return;
+    claimedJob.current = result.recovery?.id;
+    if (initialPage !== pageKey(pageRef.current)) return;
+    selectionHaptic('confirmation'); setTab('send'); setPage({ kind: 'inbox' });
+    void load();
+  });
+  const header = page.kind === 'claim' ? 'Your travel name' : page.kind === 'compose' ? 'Prepare flights' : page.kind === 'detail' ? 'Shared flights' : 'Flights for others';
   const share = page.kind === 'detail' ? page.share : undefined;
   const status = share ? shareStatus(share) : undefined;
   const groupItems = page.kind === 'compose' ? page.group.items : [];
   const selectedItems = groupItems.filter(item => selected.includes(item.id));
   const changedName = selectedItems.some(item => passengerName(item) !== name.trim());
+  const selfCandidate = claimableTravelName(groupItems);
   return <KeyboardAvoidingView style={[s.screen, { paddingTop: insets.top }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <WWHeader title={header} onBack={back} />
     {page.kind === 'inbox' && !resolving && <View style={s.tabs} accessibilityRole="tablist">
@@ -236,10 +259,11 @@ export function FlightSharingScreen({ onBack, invitationToken, onInvitationConsu
           : page.kind === 'inbox' ? <Action label="Retry" secondary onPress={() => { setError(''); void load(); }} disabled={refreshing} /> : null}
       </View> : null}
       {notice ? <View style={s.notice}><Text style={s.noticeText} accessibilityLiveRegion="polite">{notice}</Text></View> : null}
+      {page.kind === 'inbox' && tab === 'send' ? <TravelRecoveryStatus /> : null}
       {(resolving || (loading && page.kind === 'inbox')) ? <View style={s.loading}><ActivityIndicator color={colors.blue} /><Text style={s.secondary}>{resolving ? 'Opening your invitation…' : 'Loading flights…'}</Text></View> : null}
 
       {!loading && !resolving && page.kind === 'inbox' && tab === 'send' && <>
-        <Text style={s.intro}>Tickets found in your email for other travelers. Choose a booking to prepare a share.</Text>
+        <Text style={s.intro}>Tickets found in your email for other travelers. Choose a booking to share it, or confirm a previous name if the flights are yours.</Text>
         {groups.length ? groups.map(group => <PressFeedback key={group.key} accessibilityRole="button" accessibilityLabel={`Prepare flights for ${group.passenger || 'an unnamed traveler'}`} onPress={() => openBooking(group)} style={s.booking}>
           <View style={s.cardTop}><Text style={s.overline}>{group.passenger ? 'TRAVELER' : 'TRAVELER NOT NAMED'}</Text><WWIcon name="trips" color={colors.blue} size={20} /></View>
           <Text style={s.cardTitle}>{group.passenger || 'Assign a traveler'}</Text>
@@ -256,6 +280,11 @@ export function FlightSharingScreen({ onBack, invitationToken, onInvitationConsu
         </PressFeedback>) : !error ? <Empty title={tab === 'received' ? 'Nothing received yet' : 'No shares yet'} copy={tab === 'received' ? 'Flights shared with your Google account email will appear here. You choose whether to add them.' : 'Prepare a booking in To send. Your invitations and their status will stay here.'} /> : null}
       </>}
       {!resolving && page.kind === 'compose' && <>
+        {selfCandidate ? <View style={s.claimPrompt}>
+          <View style={s.claimName}><Text style={s.small}>Name on the ticket</Text><Text style={s.claimNameText}>{selfCandidate.name}</Text></View>
+          <PressFeedback accessibilityRole="button" accessibilityLabel={`This is me: ${selfCandidate.name}`} disabled={!!busy || travelIdentity.saving} style={s.claimAction}
+            onPress={() => { setError(''); setPage({ kind: 'claim', group: page.group, ...selfCandidate }); }}><Text style={s.linkText}>This is me</Text></PressFeedback>
+        </View> : null}
         <View style={s.summary}><Text style={s.overline}>SELECT FLIGHTS</Text><Text style={s.intro}>Only the selected flights will be shared.</Text></View>
         <View style={s.flightStack}>{groupItems.map(item => <FlightRow key={item.id} flight={item.flight} selected={selected.includes(item.id)}
           disabled={!canChoose(item) || !!busy} onPress={() => choose(item.id)} note={!canChoose(item) ? item.share_blocked_reason || 'This flight cannot be shared yet.' : undefined} />)}</View>
@@ -271,6 +300,14 @@ export function FlightSharingScreen({ onBack, invitationToken, onInvitationConsu
         </View>
         <View style={s.privacy}><WWIcon name="passport" color={colors.mutedInk} size={19} /><Text style={[s.small, s.flex]}>Shares include flight details only. Booking codes, payment details, and original emails stay private.</Text></View>
         <Action label={busy || `Create share · ${selected.length} ${selected.length === 1 ? 'flight' : 'flights'}`} onPress={create} disabled={!!busy || !selected.length} loading={!!busy} />
+      </>}
+      {!resolving && page.kind === 'claim' && <>
+        <View style={s.shareIdentity}><Text style={s.label}>Name recorded on your ticket</Text><Text style={s.recipientName}>{page.name}</Text></View>
+        <Text style={s.claimTitle}>Is this one of your travel names?</Text>
+        <Text style={s.intro}>Trotter will recheck your saved bookings and add flights that match this name to your travel history. This name will also be used for future imports.</Text>
+        <Text style={s.intro}>Other passengers’ flights stay separate. Flights already in your history won’t be added twice.</Text>
+        <Action label={busy || 'Yes, this is me'} onPress={confirmSelf} disabled={!!busy || travelIdentity.saving} loading={!!busy} />
+        <Action label="Go back" secondary onPress={back} disabled={!!busy} />
       </>}
       {!resolving && page.kind === 'detail' && share && <>
         <View style={s.shareIdentity}>
@@ -332,10 +369,12 @@ function Empty({ title, copy }: { title: string; copy: string }) {
   return <View style={s.empty}><View style={s.emptyIcon}><WWIcon name="mail" size={30} color={colors.blue} /></View><Text style={s.emptyTitle}>{title}</Text><Text style={s.emptyCopy}>{copy}</Text></View>;
 }
 function message(cause: unknown): string { return cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'; }
-function pageKey(page: Page): string { return page.kind === 'compose' ? `compose:${page.group.key}` : page.kind === 'detail' ? `detail:${page.share.id}` : 'inbox'; }
+function pageKey(page: Page): string { return page.kind === 'claim' ? `claim:${page.itemId}` : page.kind === 'compose' ? `compose:${page.group.key}` : page.kind === 'detail' ? `detail:${page.share.id}` : 'inbox'; }
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.paperSoft }, content: { width: '100%', maxWidth: 640, alignSelf: 'center', paddingHorizontal: 24 },
+  claimTitle: { fontFamily: fonts.display, fontSize: 29, lineHeight: 35, color: colors.ink, marginBottom: 15 },
+  claimPrompt: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, paddingBottom: 18, marginBottom: 18, borderBottomWidth: 1, borderBottomColor: colors.paperBorder }, claimName: { flexGrow: 1, flexShrink: 1, flexBasis: 150, gap: 4 }, claimNameText: { fontFamily: fonts.display, fontSize: 25, lineHeight: 30, color: colors.ink }, claimAction: { minHeight: 48, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: colors.paperBorder, borderRadius: 3 },
   tabs: { flexDirection: 'row', paddingHorizontal: 24, marginBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.paperBorder, maxWidth: 640, alignSelf: 'center', width: '100%' },
   tab: { flex: 1, minHeight: 46, paddingHorizontal: 15, flexDirection: 'row', gap: 6, justifyContent: 'center', alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' }, tabSelected: { borderBottomColor: colors.blue },
   tabText: { fontFamily: fonts.sans, fontSize: 13, color: colors.mutedInk }, tabTextSelected: { color: colors.blue }, count: { minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.blue, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }, countText: { fontFamily: fonts.mono, fontSize: 9, color: colors.paperSoft },

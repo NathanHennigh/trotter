@@ -7,6 +7,7 @@ import { PressFeedback } from '../components/world-window/motion';
 import { TravelerCard } from '../components/world-window/profile/TravelerCard';
 import { HomeAirportPicker } from '../components/world-window/profile/HomeAirportPicker';
 import { AccountControls } from '../components/world-window/profile/AccountControls';
+import { TravelRecoveryStatus } from '../components/world-window/profile/TravelRecoveryStatus';
 import type { BottomNavTab } from '../data/trotterMock';
 import airports from '../data/collections/airports.json';
 import { getApiBaseUrl, useTravelTrips } from '../services/travelTrips';
@@ -15,8 +16,8 @@ import { useTravelerIdentity } from '../utils/travelerIdentity';
 import { getMobileVisualWidth } from '../utils/mobileLayout';
 import { colors, fonts, layout } from '../theme/trotterTheme';
 
-export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInbox, onBack }: {
-  active: BottomNavTab; onChange: (tab: BottomNavTab) => void; onOpenStamps?: () => void; onOpenAirport?: (code: string) => void; onOpenFlightInbox?: () => void; onBack?: () => void;
+export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInbox, onOpenTravelNames, onBack }: {
+  active: BottomNavTab; onChange: (tab: BottomNavTab) => void; onOpenStamps?: () => void; onOpenAirport?: (code: string) => void; onOpenFlightInbox?: () => void; onOpenTravelNames?: () => void; onBack?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const { width, fontScale } = useWindowDimensions();
@@ -62,6 +63,12 @@ export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInb
           {gmailConnectionError ? <Text style={s.error} accessibilityRole="alert">{gmailConnectionError}</Text> : null}
           {gmailSyncError ? <Text style={s.error} accessibilityRole="alert">{gmailSyncError}</Text> : null}
         </View>
+        {onOpenTravelNames ? <>
+          <PressFeedback onPress={onOpenTravelNames} accessibilityRole="button" accessibilityLabel="Travel names. Edit previous or other names used on flight tickets." style={s.flightInbox}>
+            <View style={s.flightInboxCopy}><Text style={s.providerName}>Travel names</Text><Text style={s.secondary}>Previous names · Names on your tickets</Text></View><WWIcon name="chevron" size={20} color={colors.blue} />
+          </PressFeedback>
+          <TravelRecoveryStatus />
+        </> : null}
         {onOpenFlightInbox ? <PressFeedback onPress={onOpenFlightInbox} accessibilityRole="button" accessibilityLabel="Flights for others. Send and receive flight bookings." style={s.flightInbox}>
           <View style={s.flightInboxCopy}><Text style={s.providerName}>Flights for others</Text><Text style={s.secondary}>Bookings to send · Flights shared with you</Text></View>
           <WWIcon name="chevron" size={20} color={colors.blue} />

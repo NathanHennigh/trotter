@@ -108,7 +108,7 @@ function gateHost(initialAccount) {
     useFlightInvitation: () => ({ ready: true, consume() {} }),
     usePlannerInvitation: () => ({ ready: true, consume() {} }),
     Linking: { addEventListener: (_name, callback) => { receive = callback; return { remove() {} }; }, getInitialURL: () => initial },
-    parseIncomingDreamShare: sourceUrl => ({ sourceUrl }), AuthScreen: 'AuthScreen', SessionRestoringScreen: 'SessionRestoringScreen', DreamsProvider: 'DreamsProvider', AppShell: 'AppShell' };
+    parseIncomingDreamShare: sourceUrl => ({ sourceUrl }), AuthScreen: 'AuthScreen', SessionRestoringScreen: 'SessionRestoringScreen', DreamsProvider: 'DreamsProvider', TravelIdentityProvider: 'TravelIdentityProvider', AppShell: 'AppShell' };
   new Function('module', 'exports', ...Object.keys(globals), output)(module, module.exports, ...Object.values(globals));
   return {
     render(nextAccount = account) {
@@ -125,6 +125,10 @@ function gateHost(initialAccount) {
   };
 }
 const flushGate = async () => { for (let n = 0; n < 15; n++) await Promise.resolve(); };
+function shellProps(tree) {
+  if (tree?.type === 'AppShell') return tree.props;
+  for (const child of tree?.props?.children ?? []) { const found = shellProps(child); if (found) return found; }
+}
 
 test('a verified cold launch waits for its initial share instead of mounting the default tab first', async () => {
   const host = gateHost({ authStatus: 'loading' });
@@ -133,7 +137,7 @@ test('a verified cold launch waits for its initial share instead of mounting the
   host.resolveInitial('https://www.instagram.com/p/cold/'); await flushGate();
   const tree = host.render();
   assert.equal(tree.type, 'DreamsProvider');
-  const incoming = tree.props.children[0].props.incomingShare;
+  const incoming = shellProps(tree).incomingShare;
   assert.equal(incoming.sourceUrl, 'https://www.instagram.com/p/cold/');
   assert.equal(incoming.ownerId, 11);
   host.dispose();
@@ -147,10 +151,10 @@ test('a signed-out share stays queued through sign-in and cannot cross an accoun
   assert.equal(tree.type, 'SessionRestoringScreen');
   assert.equal(tree.props.sourceUrl, 'https://www.instagram.com/p/waiting/');
   tree = host.render({ authStatus: 'signed-in', accountId: 11 });
-  assert.equal(tree.props.children[0].props.incomingShare.ownerId, 11);
+  assert.equal(shellProps(tree).incomingShare.ownerId, 11);
   assert.equal(host.render({ authStatus: 'signed-out' }).type, 'AuthScreen');
   tree = host.render({ authStatus: 'signed-in', accountId: 22 });
-  assert.equal(tree.props.children[0].props.incomingShare, undefined);
+  assert.equal(shellProps(tree).incomingShare, undefined);
   host.dispose();
 });
 

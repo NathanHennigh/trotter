@@ -162,6 +162,7 @@ type TravelTripsContextValue = {
   accountId?: number;
   accountRevision?: number;
   accountEmail?: string;
+  accountName?: string;
   authProviders: ('google' | 'apple')[];
   lastSyncedAt?: string;
   signIn: () => Promise<void>;
@@ -628,7 +629,7 @@ function useTravelTripsState(): TravelTripsContextValue {
     gmailConnected: account?.gmail_connected === true,
     gmailConnectionStatus: account?.gmail_connection_status ?? (account?.gmail_connected ? 'connected' : 'not_connected'),
     gmailConnecting, gmailConnectionError,
-    error, accountId: account?.user_id, accountRevision, accountEmail: account?.email, lastSyncedAt,
+    error, accountId: account?.user_id, accountRevision, accountEmail: account?.email, accountName: account?.name ?? undefined, lastSyncedAt,
     authProviders: account?.auth_providers ?? ['google'],
     signIn, signInWithApple, retryAuth, signOut, finishAccountDeletion, refresh: () => loadTrips('refreshing'), loadTripDetail, syncFromGmail, connectGmail, cancelGmailConnection: cancelConnectingGmail };
 }
