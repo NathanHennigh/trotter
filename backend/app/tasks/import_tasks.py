@@ -525,6 +525,26 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
         except Exception as exc:
             from app.services.import_lock import ImportAlreadyRunning
             from app.models import GmailHistoryState
+            if history_only and isinstance(exc, ImportAlreadyRunning):
+                # The recent-mail lane has priority. Contention is ordinary
+                # scheduling, not a failed Gmail attempt; retain every checkpoint
+                # and retry counter while releasing this background lease.
+                now = datetime.now(timezone.utc)
+                deferred = db.query(GmailHistoryState).filter(
+                    GmailHistoryState.id == history_state_id,
+                    GmailHistoryState.user_id == user_id,
+                    GmailHistoryState.state.in_(["queued", "running"]),
+                ).update({
+                    GmailHistoryState.state: "pending",
+                    GmailHistoryState.error_code: None,
+                    GmailHistoryState.lease_until: None,
+                    GmailHistoryState.next_attempt_at: now + timedelta(seconds=60),
+                    GmailHistoryState.updated_at: now,
+                }, synchronize_session=False)
+                job.state, job.error_message, job.updated_at = "completed", None, now
+                db.commit()
+                return {"job_id": job_id, "state": "completed", "history_deferred": bool(deferred),
+                        "scanned_count": 0, "parsed_count": 0, "segment_count": 0}
             # Recent scans keep their existing job while the historical lane
             # cooperatively yields; never fail the user's request just for this.
             history_running = (not reparse_only and isinstance(exc, ImportAlreadyRunning)

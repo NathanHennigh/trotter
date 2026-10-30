@@ -1,7 +1,7 @@
 """Exercise real mailbox worker paths with local email fixtures, never Gmail."""
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -293,3 +293,58 @@ def test_eager_development_retry_cannot_recurse_on_locked_history(worker, monkey
     run(factory, user_id, "sync", "eager-busy")
     with factory() as db:
         assert db.get(SyncJob, "eager-busy").state == "failed"
+
+
+@pytest.mark.parametrize("pending_ids", [[], ["stored-first", "stored-second"]])
+def test_history_import_lock_contention_defers_without_failure_or_checkpoint_loss(worker, monkeypatch, pending_ids):
+    from app import db as app_db
+    from app.models import GmailHistoryState
+    from app.services.import_lock import user_import_lock
+    from app.tasks.gmail_history_tasks import scan_history_page
+
+    factory, user_id, enriched = worker
+    monkeypatch.setattr(app_db, "SessionLocal", factory)
+    monkeypatch.setenv("TROTTER_ENABLE_AUTOMATIC_BACKFILL", "true")
+    monkeypatch.setenv("TROTTER_GMAIL_HISTORY_USER_IDS", str(user_id))
+    monkeypatch.setattr(gmail, "build_gmail_service", lambda *a: pytest.fail("No Gmail call while recent scan owns lock"))
+    monkeypatch.setattr(import_tasks.run_gmail_import, "apply_async", lambda **kw: pytest.fail("History resumes through its scheduler"))
+    started = datetime.now(timezone.utc)
+    cursor = started - timedelta(days=31)
+    with factory() as db:
+        state = GmailHistoryState(
+            user_id=user_id, state="queued", cursor_before=cursor,
+            window_start=cursor - timedelta(days=31), window_end=cursor,
+            page_token="current-page", next_page_token="next-page",
+            pending_message_ids=pending_ids, attempts=3, scanned_count=42,
+            error_code="gmail_fetch_retry", lease_until=started + timedelta(seconds=420),
+        )
+        db.add(state)
+        db.add(SyncJob(id="recent-running", user_id=user_id, state="running"))
+        db.commit()
+        state_id = state.id
+        engine = db.get_bind()
+
+    # Exercise the real account lock, history task and importer together. The
+    # wrapper must not turn this successful no-op into a failed history retry.
+    with user_import_lock(engine, user_id):
+        result = scan_history_page.run(state_id, user_id)
+
+    finished = datetime.now(timezone.utc)
+    assert result["state"] == "completed" and result["history_deferred"] is True
+    assert result["scanned_count"] == result["parsed_count"] == result["segment_count"] == 0
+    assert enriched == []
+    with factory() as db:
+        state = db.get(GmailHistoryState, state_id)
+        assert state.state == "pending" and state.error_code is None
+        assert state.attempts == 3 and state.scanned_count == 42
+        assert state.lease_until is None
+        assert started + timedelta(seconds=60) <= state.next_attempt_at.replace(tzinfo=timezone.utc) <= finished + timedelta(seconds=60)
+        assert state.cursor_before.replace(tzinfo=timezone.utc) == cursor
+        assert state.window_end.replace(tzinfo=timezone.utc) == cursor
+        assert state.window_start.replace(tzinfo=timezone.utc) == cursor - timedelta(days=31)
+        assert state.page_token == "current-page" and state.next_page_token == "next-page"
+        assert state.pending_message_ids == pending_ids
+        job = db.get(SyncJob, result["job_id"])
+        assert job.state == "completed" and job.error_message is None
+        assert db.get(SyncJob, "recent-running").state == "running"
+        assert db.query(Message).count() == db.query(Segment).count() == 0
