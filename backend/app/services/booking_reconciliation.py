@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from copy import deepcopy
 
 from .booking_ledger import booking_code, event_time
-from .passenger_identity import full_names_match
+from .passenger_identity import full_names_match, identity_candidates
 
 
 def original_source(row):
@@ -38,6 +38,7 @@ def evidence(row):
 
 
 def matches(row, names):
+    names = identity_candidates("", names)
     return [entry for entry in evidence(row) if isinstance(entry, dict)
             and entry.get('role') == 'traveler' and entry.get('applies') is True
             and not entry.get('scope_ambiguous')

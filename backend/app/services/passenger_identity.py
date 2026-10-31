@@ -53,26 +53,84 @@ def _tokens(value: str) -> list[str]:
     return [part for part in value.split() if part not in _TITLE]
 
 
+def _ordered_name_tokens(value: str) -> list[str]:
+    """Canonicalize explicit family/given notation without sorting name parts."""
+    if len(re.findall(r'[/,]', value)) != 1:
+        return _tokens(value)
+    family_text, given_text = re.split(r'[/,]', value)
+    family, given = _tokens(family_text), _tokens(given_text)
+    if not family or not given:
+        return []
+    # A comma before a suffix is natural-order punctuation, not family/given.
+    if ',' in value and len(given) == 1 and given[0] in _SUFFIX:
+        previous = family[-1] if family[-1] in _SUFFIX else None
+        if previous and previous != given[0]:
+            return []
+        return family if previous else family + given
+    family_suffix = family.pop() if family[-1] in _SUFFIX else None
+    given_suffix = given.pop() if given[-1] in _SUFFIX else None
+    if not family or not given or (family_suffix and given_suffix and family_suffix != given_suffix):
+        return []
+    suffix = family_suffix or given_suffix
+    return given + family + ([suffix] if suffix else [])
+
+
+def identity_candidates(user_name: str | None, aliases: list[str] | None) -> list[str]:
+    """Prefer explicitly confirmed full names over their ambiguous short form."""
+    candidates = list(dict.fromkeys(name.strip() for name in [user_name, *(aliases or [])]
+                                   if isinstance(name, str) and name.strip() and '@' not in name))
+
+    def parts(name):
+        tokens = _ordered_name_tokens(name)
+        suffix = tokens[-1] if tokens and tokens[-1] in _SUFFIX else None
+        tokens = tokens[:-1] if suffix else tokens
+        if (len(tokens) < 2 or len(tokens[0]) < 2 or len(tokens[-1]) < 2
+                or any(not token.isalpha() or token in _SUFFIX for token in tokens)):
+            return None
+        return tokens[-1], suffix, tokens[:-1]
+
+    parsed = [parts(name) for name in candidates]
+    # Do not infer that compound family-name particles are middle names.
+    particles = {'de', 'del', 'da', 'di', 'du', 'la', 'le', 'van', 'von', 'der', 'den', 'bin', 'ibn', 'al'}
+    full_names = [value for value in parsed if value and len(value[2]) >= 2
+                  and all(len(token) > 1 for token in value[2])
+                  and not particles.intersection(value[2][1:])]
+
+    def less_specific(value, full):
+        if not value or value[:2] != full[:2] or value[2][0] != full[2][0]:
+            return False
+        given, known = value[2], full[2]
+        return len(given) == 1 or (len(given) == len(known) and given != known
+            and all(left == right or (len(left) == 1 and left == right[0])
+                    for left, right in zip(given[1:], known[1:])))
+
+    return [name for name, value in zip(candidates, parsed)
+            if not any(less_specific(value, full) for full in full_names)]
+
+
+def _compact_given_matches(left: list[str], right: list[str]) -> bool:
+    """Compare fused given names only against explicitly supplied components."""
+    for compact, full in ((left, right), (right, left)):
+        if (len(compact) != 1 or not 2 <= len(full) <= 8
+                or any(len(token) < 2 or not token.isalpha() for token in full)):
+            continue
+        if compact[0] == ''.join(full):
+            return True
+    return False
+
+
 def names_match(passenger: str, candidate: str) -> bool:
     """Match full names, reordered names, or a compatible given-name initial.
 
     A first name or surname alone never matches a longer account name. Explicit
     conflicting middle names and generational suffixes are not discarded.
     """
-    a, b = _tokens(passenger), _tokens(candidate)
+    a, b = _ordered_name_tokens(passenger), _ordered_name_tokens(candidate)
     if not a or not b or "@" in candidate or "@" in passenger:
         return False
-    # Airlines often print FAMILY/GIVENMIDDLE. Only exact concatenation of
-    # explicitly supplied names is safe: ELISHA must not match ELISHABETH.
-    for printed, full in ((passenger, b), (candidate, a)):
-        if len(re.findall(r"[/,]", printed)) == 1 and len(full) >= 2:
-            family, given = re.split(r"[/,]", printed)
-            if (_tokens(family) == [full[-1]] and full[-1] not in _SUFFIX
-                    and "".join(_tokens(given)) == "".join(full[:-1])):
-                return True
     if len(a) < 2 or len(b) < 2:
         return a == b and len(a) == len(b)
-    if sorted(a) == sorted(b):
+    if a == b:
         return True
     a_suffix = a[-1] if a[-1] in _SUFFIX else None
     b_suffix = b[-1] if b[-1] in _SUFFIX else None
@@ -89,6 +147,8 @@ def names_match(passenger: str, candidate: str) -> bool:
         for right in (b, b[1:] + b[:1]):
             if len(left[-1]) < 2 or left[-1] != right[-1]:
                 continue
+            if _compact_given_matches(left[:-1], right[:-1]):
+                return True
             if not compatible(left[0], right[0]):
                 continue
             lm, rm = left[1:-1], right[1:-1]
@@ -530,7 +590,7 @@ def apply_passenger_identity(flights: list, *, html: str, plain_text: str,
         _jsonld_evidence(html), _text_evidence(plain_text or "", "text_passenger_label", flights),
         _text_evidence(_html_lines(html), "html_passenger_label", flights),
     )
-    candidates = [name for name in [user_name, *aliases] if name and "@" not in name]
+    candidates = identity_candidates(user_name, aliases)
     multiple = len({str(f.pnr).upper() for f in flights if f.pnr}) > 1
     for flight in flights:
         own_evidence = list(getattr(flight, "passenger_evidence", []) or [])

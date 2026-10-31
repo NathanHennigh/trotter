@@ -56,3 +56,17 @@ Repeated source-link metadata is reported separately from material itinerary cha
 A read-only production export at 00:29:43 UTC on October 31 matched every row in all 13 captured tables from the post-reconnection baseline. The temporary account import lock was then released successfully; normal scans can run again.
 
 Production history has not been replaced by this replay. Any historical correction must use the persisted preview/apply procedure and be checked against the then-current account, with deployment validation completed separately.
+
+## Middle-name follow-up
+
+The user subsequently confirmed their full travel name. Parser 28 adds consistent middle-name handling across parsing, booking reconciliation, recovery, and the travel inbox. The parser 27 corpus replay and benchmark above remain results for commit `98d81bf`, not a full replay or performance measurement of this follow-up.
+
+Separately printed middle names already matched the shorter account name during parsing; the travel inbox now uses the same strict full-name comparison instead of creating an unnamed companion for that owner. Exact airline concatenation also works in natural-order names when the full given-name components are known. Unknown concatenated names and fused initials are not split by guessing.
+
+Known full names take precedence over their shorter equivalent, including explicit surname-first notation, matching suffixes, and weaker middle initials. An abbreviated profile name cannot override a conflicting known middle name. Suffixes remain distinct, arbitrary name-token reordering is rejected, and compound-family-name ambiguity remains retained for review. The stored profile names and existing recovery-job fingerprints are unchanged.
+
+This follow-up adds no AI requests, mailbox reads, migrations, or production writes. Existing historical unassigned items are retained; it does not silently clean up or rewrite prior travel records. Its private validation uses saved observation evidence, with the confirmed full name supplied only to the offline audit, and synthetic regression fixtures in the repository.
+
+Validation: the backend regression suite passed 2,655 tests with four existing skips and the same external smoke exclusions as above. After the final compound-family retention guard, all 169 affected inbox/import/recovery checks and 301 focused identity checks passed. Independent review verified suffix preservation and compact-initial ambiguity. The full mailbox replay was not repeated for this follow-up.
+
+The final read-only name audit covered 49 baseline observations and 758 replayed observations, excluding manual decisions and derived recovery evidence from automatic identity assertions. With the same confirmed full-name input, no other-person record became personal and no unheld personal record became another person's. Four malformed combined-person names in already-held, incomplete observations ceased matching as personal. Eight original observations for six already-supported dated legs match the confirmed full name; these are not newly discovered flights. Original snapshots and historical unassigned entries remain unchanged.

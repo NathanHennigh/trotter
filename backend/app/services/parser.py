@@ -18,13 +18,14 @@ from ..models import MessageStatus
 from .parser_preprocess import prepare_parser_text
 from .passenger_identity import (
     apply_passenger_identity,
+    identity_candidates,
     jsonld_passenger_evidence,
     merge_passenger_evidence,
     names_match,
 )
 
 logger = logging.getLogger(__name__)
-PARSER_VERSION = 27
+PARSER_VERSION = 28
 
 # ──────────────────────────── regex patterns ────────────────────────────────
 
@@ -6579,7 +6580,7 @@ def check_identity(
     if not passenger_name:
         return MessageStatus.REVIEW_REQUIRED
 
-    candidates = [c for c in [user_name] + aliases if c]
+    candidates = identity_candidates(user_name, aliases)
     for candidate in candidates:
         if names_match(passenger_name, candidate):
             return MessageStatus.ACCEPTED

@@ -233,9 +233,8 @@ sharing will require separate authorization and an explicit payload allowlist.
         if item.passenger_name and sources else item.reason
     status = "retained" if latest and item.passenger_name and not facts.get("force_review") else "needs_review"
     decision = max(decisions, key=_source_order).facts["user_decision"] if decisions else {}
-    owner_names = [user.name, *(user.travel_name_aliases or [])]
-
-    from .passenger_identity import full_names_match
+    from .passenger_identity import full_names_match, identity_candidates
+    owner_names = identity_candidates(user.name, user.travel_name_aliases or [])
     if (item.passenger_name and any(full_names_match(item.passenger_name, name) for name in owner_names if name)
             and not facts.get("force_review") and decision.get("ownership") != "other"
             and decision.get("status") not in {"canceled", "hold"}):

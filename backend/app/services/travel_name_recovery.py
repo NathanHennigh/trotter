@@ -17,7 +17,7 @@ from ..models import BookingObservation, FlightShare, TravelInboxEvidence, Trave
 from .booking_ledger import booking_code, event_time, user_decision_for_flight
 from .builder import _normalize_flight_number, build_segments_and_trips_detailed
 from .import_lock import ImportAlreadyRunning, user_import_lock
-from .passenger_identity import full_names_match
+from .passenger_identity import full_names_match, identity_candidates
 from .travel_inbox import _cancellation_state
 from .booking_reconciliation import observation_groups, resolve_group, current_document_versions
 
@@ -77,6 +77,7 @@ def original_source(observation):
 
 
 def matching_evidence(observation, names):
+    names = identity_candidates("", names)
     evidence = (observation.facts or {}).get("passenger_evidence") or []
     evidence = [evidence] if isinstance(evidence, dict) else evidence
     if not isinstance(evidence, list):
@@ -109,6 +110,7 @@ def active_shares_for_item(db, user_id, item_id):
 
 
 def recovery_blocked(db, user_id, observation, flight, names):
+    names = identity_candidates("", names)
     if (flight.force_review or not flight.pnr or not flight.dep_time or not flight.arr_time
             or flight.arr_time <= flight.dep_time or not flight.flight_number
             or not flight.dep_airport or not flight.arr_airport):

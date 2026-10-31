@@ -1,7 +1,7 @@
 """Identify people to retain alongside a mailbox owner's personal itinerary.
 
 This is a pure projection of one booking observation. It neither looks up other
-accounts nor equates different passenger spellings. Ambiguous people remain an
+accounts nor merges distinct retained names. Ambiguous people remain an
 unassigned record so the underlying flight can be reviewed without guessing.
 """
 
@@ -12,7 +12,7 @@ import unicodedata
 from collections.abc import Mapping
 from typing import Any, Literal, TypedDict
 
-from .passenger_identity import names_match
+from .passenger_identity import full_names_match, identity_candidates, names_match
 
 
 class RetainedPassenger(TypedDict):
@@ -23,6 +23,7 @@ class RetainedPassenger(TypedDict):
 
 _TITLES = {"mr", "mrs", "ms", "miss", "dr", "prof", "mstr"}
 _SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
+_FAMILY_PARTICLES = {"de", "del", "da", "di", "du", "la", "le", "van", "von", "der", "den", "bin", "ibn", "al"}
 _MAX_PASSENGER_IDENTITY_LENGTH = 255
 _PLACEHOLDERS = {
     "unknown", "unassigned", "unnamed", "none", "null", "n/a", "na", "tbd",
@@ -67,6 +68,34 @@ def _has_full_name(name: str) -> bool:
     return len(words) >= 2 and len(words[0]) > 1 and len(words[-1]) > 1
 
 
+def _preserves_explicit_family_name(name: str, candidate: str) -> bool:
+    """Omitting a middle name must not omit an explicit compound family name."""
+    def parts(value: str) -> tuple[list[str], list[str]]:
+        value = unicodedata.normalize("NFKD", value).casefold()
+        value = "".join(char for char in value if not unicodedata.combining(char))
+        value = value.replace("'", "").replace("’", "")
+        if len(re.findall(r"[/,]", value)) == 1:
+            family = _name_words(re.split(r"[/,]", value)[0])
+            return family, family if len(family) > 1 else []
+        words = _name_words(value)
+        if not words:
+            return [], []
+        printed = re.findall(r"[^\W\d_]+(?:[-–][^\W\d_]+)*", value, re.UNICODE)
+        while printed and printed[-1] in _SUFFIXES:
+            printed.pop()
+        if printed and re.search(r"[-–]", printed[-1]):
+            return words, _name_words(printed[-1])
+        start = len(words) - 1
+        while start > 1 and words[start - 1] in _FAMILY_PARTICLES:
+            start -= 1
+        return words, words[start:] if start < len(words) - 1 else []
+
+    left, left_family = parts(name)
+    right, right_family = parts(candidate)
+    return (not left_family or right[-len(left_family):] == left_family) and (
+        not right_family or left[-len(right_family):] == right_family)
+
+
 def _unassigned() -> RetainedPassenger:
     return {"passenger_name": None, "passenger_key": None, "reason": "unassigned"}
 
@@ -90,7 +119,7 @@ def retained_passengers(observation: Any, user: Any) -> list[RetainedPassenger]:
 
     raw_aliases = _field(user, "travel_name_aliases", [])
     aliases = raw_aliases if isinstance(raw_aliases, (list, tuple)) else []
-    candidates = [name for value in [_field(user, "name"), *aliases]
+    candidates = [name for value in identity_candidates(_field(user, "name"), aliases)
                   if (name := _display_name(value)) and "@" not in name]
     raw_evidence = facts.get("passenger_evidence")
     if isinstance(raw_evidence, Mapping):
@@ -129,8 +158,11 @@ def retained_passengers(observation: Any, user: Any) -> list[RetainedPassenger]:
             uncertain = True
             continue
         words = _name_words(name)
-        if any(names_match(name, candidate) and _has_full_name(candidate)
-               and sorted(words) == sorted(_name_words(candidate)) for candidate in candidates):
+        # Use the same strict full-name equivalence as ownership recovery.
+        # A safely matched middle name or confirmed airline spelling does not
+        # manufacture an unnamed companion on a verified personal flight.
+        if any(full_names_match(name, candidate) and _preserves_explicit_family_name(name, candidate)
+               for candidate in candidates):
             continue
         # An approved initial or a partial compound surname can still resemble
         # the owner, but is not sufficient to label a different person.

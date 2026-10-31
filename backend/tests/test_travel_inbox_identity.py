@@ -93,10 +93,74 @@ def test_approved_initial_does_not_hide_a_different_full_name():
     assert result == [UNASSIGNED]
 
 
-def test_unapproved_additional_middle_name_is_ambiguous_not_silently_owner():
-    assert retained_passengers(observation("self", [traveler("Alex Jordan Avery")]), user()) == [UNASSIGNED]
-    assert retained_passengers(observation("self", [traveler("Alex Jordan Avery")]),
-                               user(aliases=["Alex Jordan Avery"])) == []
+@pytest.mark.parametrize("owner,printed", [
+    ("Alex Avery", "Alex Jordan Avery"),
+    ("Alex Jordan Avery", "Alex Avery"),
+    ("Alex Avery", "AVERY/ALEX JORDAN"),
+])
+def test_full_middle_name_variant_on_self_flight_is_not_an_unassigned_companion(owner, printed):
+    assert retained_passengers(observation("self", [traveler(printed)]), user(name=owner)) == []
+
+
+@pytest.mark.parametrize("printed", ["AVERY/ALEXJORDAN", "AlexJordan Avery"])
+def test_confirmed_full_middle_name_accepts_exact_airline_fusion(printed):
+    account = user(aliases=["Alex Jordan Avery"])
+    assert retained_passengers(observation("self", [traveler(printed)]), account) == []
+
+
+@pytest.mark.parametrize("names", [["Alex Jordan Avery", OTHER], [OTHER, "Alex Jordan Avery"]])
+def test_middle_name_owner_variant_does_not_hide_distinct_companion(names):
+    assert retained_passengers(observation("self", [traveler(name) for name in names]), user()) == [named(OTHER, "companion")]
+
+
+@pytest.mark.parametrize("printed", ["Alex Taylor Avery", "AlexTaylor Avery", "AVERY/ALEXTAYLOR"])
+def test_confirmed_middle_name_prevents_short_primary_from_claiming_conflicting_person(printed):
+    result = retained_passengers(observation("self", [traveler(printed)]),
+                                 user(aliases=["Alex Jordan Avery"]))
+    assert result == [named(printed, "companion")]
+
+
+@pytest.mark.parametrize("printed", ["Alex Jordan Avery", "AVERY/ALEXJORDAN"])
+def test_explicit_other_with_only_full_owner_variant_remains_a_visible_conflict(printed):
+    assert retained_passengers(observation("other", [traveler(printed)]),
+                               user(aliases=["Alex Jordan Avery"])) == [UNASSIGNED]
+
+
+@pytest.mark.parametrize("printed", ["Alex J Avery", "A Jordan Avery", "AVERY/A. J."])
+def test_initial_variants_on_self_flight_remain_unassigned(printed):
+    assert retained_passengers(observation("self", [traveler(printed)]),
+                               user(aliases=["Alex Jordan Avery"])) == [UNASSIGNED]
+
+
+def test_partial_compound_surname_on_self_flight_is_not_discarded_as_owner():
+    assert retained_passengers(observation("self", [traveler("de la Cruz")]),
+                               user(name="Maria de la Cruz")) == [UNASSIGNED]
+
+
+@pytest.mark.parametrize("owner,printed", [
+    ("Maria de la Cruz", "Maria Cruz"),
+    ("Maria Cruz", "Maria de la Cruz"),
+    ("Alex Avery-Smith", "Alex Smith"),
+    ("Alex Smith", "AVERY-SMITH/ALEX"),
+    ("Alex van den Berg", "Alex Berg"),
+    ("Alex Avery-Smith Jr", "Alex Smith Jr"),
+])
+def test_full_given_name_does_not_make_partial_compound_family_name_safe(owner, printed):
+    assert retained_passengers(observation("self", [traveler(printed)]), user(name=owner)) == [UNASSIGNED]
+
+
+@pytest.mark.parametrize("owner,printed", [
+    ("Maria de la Cruz", "DE LA CRUZ/MARIA"),
+    ("Alex Avery-Smith", "AVERY-SMITH/ALEX"),
+    ("Alex Avery-Smith", "Alex Avery Smith"),
+    ("Alex García-López", "GARCIA-LOPEZ/ALEX"),
+])
+def test_complete_compound_family_name_remains_an_owner_match(owner, printed):
+    assert retained_passengers(observation("self", [traveler(printed)]), user(name=owner)) == []
+
+
+def test_matching_middle_name_in_an_unknown_observation_stays_visible_for_review():
+    assert retained_passengers(observation("unknown", [traveler("Alex Jordan Avery")]), user()) == [UNASSIGNED]
 
 
 def test_reordered_owner_name_can_be_excluded_without_grouping_other_people():
