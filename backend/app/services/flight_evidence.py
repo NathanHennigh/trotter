@@ -20,6 +20,19 @@ _FLIGHT_NUMBER = re.compile(
     r"|\bflight(?:\s+number)?\s*[:#]?\s*#?\s*(?P<number>\d{1,4}[A-Z]?)\b",
     re.IGNORECASE,
 )
+_CARRIER_CODES = {
+    "AMERICAN AIRLINES": "AA", "UNITED AIRLINES": "UA", "DELTA AIR LINES": "DL",
+    "DELTA AIRLINES": "DL", "SOUTHWEST AIRLINES": "WN", "SPIRIT AIRLINES": "NK",
+    "FRONTIER AIRLINES": "F9", "ALASKA AIRLINES": "AS", "JETBLUE": "B6",
+    "AEROMEXICO": "AM", "IBERIA": "IB", "EVA AIR": "BR",
+    "ALL NIPPON AIRWAYS": "NH", "SINGAPORE AIRLINES": "SQ", "EMIRATES": "EK",
+    "QATAR AIRWAYS": "QR", "BRITISH AIRWAYS": "BA", "AIR FRANCE": "AF",
+    "LUFTHANSA": "LH", "TURKISH AIRLINES": "TK",
+}
+_CARRIER_FLIGHT_NUMBER = re.compile(
+    r"\b(?P<carrier>" + "|".join(re.escape(name).replace(r"\ ", r"\s+") for name in _CARRIER_CODES)
+    + r")\s+(?:FLIGHT\s*#?\s*)?(?P<number>\d{1,4}[A-Z]?)\b(?!\s*\(\d{3}\))", re.I,
+)
 _PNR = re.compile(
     r"\b(?:record locator|confirmation code|confirmation number|booking reference|reservation code|pnr)\b|confirmation\s*#",
     re.IGNORECASE,
@@ -108,7 +121,7 @@ def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confi
         signals.append("airport_context")
 
     # Sender hostnames (for example mh1.evaair.com) are not flight evidence.
-    flight_numbers = _flight_numbers(route_upper)
+    flight_numbers = _flight_numbers(route_upper, include_named=bool(_PNR.search(compact) or _TICKET.search(compact)))
     if flight_numbers:
         score += 3
         signals.append("flight_number")
@@ -225,7 +238,7 @@ def _route_airport_codes(upper: str) -> list[str]:
     return codes
 
 
-def _flight_numbers(upper: str) -> list[str]:
+def _flight_numbers(upper: str, *, include_named: bool = False) -> list[str]:
     numbers: list[str] = []
     for match in _FLIGHT_NUMBER.finditer(upper):
         if match.group("airline"):
@@ -237,7 +250,56 @@ def _flight_numbers(upper: str) -> list[str]:
             numbers.append(number)
         if len(numbers) == 5:
             break
+    # Many real receipts spell out the carrier instead of its IATA prefix.
+    # These are still only evidence signals; ticket/date/booking requirements
+    # below keep an airline name and a number in an advertisement insufficient.
+    for match in _CARRIER_FLIGHT_NUMBER.finditer(upper) if include_named else ():
+        number = _CARRIER_CODES[" ".join(match["carrier"].upper().split())] + match["number"].upper()
+        if number not in numbers:
+            numbers.append(number)
     return numbers
+
+
+@lru_cache(maxsize=1)
+def _parser_carrier_number_evidence():
+    # Imported lazily because parser imports flight evidence during startup.
+    # Precision checks must recognize the same carrier aliases as extraction.
+    from .parser import _AIRLINE_NAME_TO_CODE
+    carriers = {**_CARRIER_CODES, **{name.upper(): code for name, code in _AIRLINE_NAME_TO_CODE.items()}}
+    expression = re.compile(r"\b(?P<carrier>" + "|".join(
+        re.escape(name).replace(r"\ ", r"\s+") for name in sorted(carriers, key=len, reverse=True))
+        + r")\s+(?:FLIGHT\s*#?\s*)?(?P<number>\d{1,4}[A-Z]?)\b(?!\s*\(\d{3}\))", re.I)
+    return carriers, expression
+
+
+def has_explicit_flight_number(number: str, text: str, *, detailed_text: str = "") -> bool:
+    """Generic summary extraction may not promote a stop count to a flight."""
+    def normalized(value):
+        found = re.fullmatch(r"([A-Z0-9]{2}|FLIGHT)\s*0*(\d{1,4})([A-Z]?)", value.upper())
+        return (found[1], int(found[2]), found[3]) if found else None
+    expected = normalized(str(number or ""))
+    if not expected:
+        return False
+    carriers, carrier_numbers = _parser_carrier_number_evidence()
+    def evidence(value):
+        # Tracking URLs and sender hostnames are not printed flight numbers.
+        value = re.sub(r"https?://\S+|\b[^\s<>@]+@[^\s<>@]+", " ", value, flags=re.I)
+        values = [normalized((m["airline"] or "FLIGHT") + (m["airline_number"] or m["number"]))
+                  for m in _FLIGHT_NUMBER.finditer(value)]
+        values += [normalized(carriers[" ".join(m["carrier"].upper().split())] + m["number"])
+                   for m in carrier_numbers.finditer(value)]
+        # Some airline receipts have adjacent FLIGHT / TERMINAL column headings.
+        values += [normalized("FLIGHT" + m[1]) for m in re.finditer(
+            r"\bFLIGHT\s+TERMINAL\s+(\d{1,4}[A-Z]?)\b", value, re.I)]
+        return [value for value in values if value]
+    values = evidence(text)
+    details = evidence(detailed_text) if detailed_text else []
+    # MIME plain parts sometimes collapse a two-leg itinerary into "Iberia 1"
+    # where 1 is a stop count. Prefer the detailed HTML's numbered carrier legs
+    # when it supplies them; plaintext-only and image-only HTML remain supported.
+    if any(value[0] == expected[0] for value in details):
+        values = details
+    return any(value[1:] == expected[1:] and value[0] in {expected[0], "FLIGHT"} for value in values)
 
 
 @lru_cache(maxsize=1)

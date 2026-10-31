@@ -165,6 +165,7 @@ class ObservationDecision:
     blocked_cancellation: int = 0
     removed_other: int = 0
     affected_trip_ids: set = field(default_factory=set)
+    removed_leg_scopes: list[dict] = field(default_factory=list)
 
 
 def record_flight_observations(db, user_id, flights, *, source_message_id=None, source_event_at=None, force_review=False):
@@ -233,6 +234,9 @@ def record_flight_observations(db, user_id, flights, *, source_message_id=None, 
                         snapshot_user_itinerary(db, user_id, reason="explicit_other_passenger",
                                                 segment_ids={segment.id}, trip_ids={segment.trip_id})
                         decision.affected_trip_ids.add(segment.trip_id)
+                        removed_scope = flight_scope(segment)
+                        if removed_scope not in decision.removed_leg_scopes:
+                            decision.removed_leg_scopes.append(removed_scope)
                         db.delete(segment)
                         db.flush()
                         decision.removed_other += 1

@@ -34,7 +34,7 @@ _LABEL = re.compile(
 )
 _PNR = re.compile(
     r"\b(?:confirmation(?:\s+(?:code|number))?|booking(?:\s+(?:reference|code|number))?|"
-    r"reservation(?:\s+(?:code|number))?|record\s+locator|pnr)\s*[:#-]?\s*([A-Z0-9]{5,8})\b",
+    r"reservation(?:\s+(?:code|number))?|record\s+locator|pnr)\s*[:#-]?\s*([A-Z0-9]{5,8})\b(?![-_/][A-Z0-9])",
     re.I,
 )
 _BOUNDARY = re.compile(
@@ -106,6 +106,36 @@ def full_names_match(passenger: str, candidate: str) -> bool:
             and names_match(passenger, candidate))
 
 
+def _ambiguous_compact_given_name(passenger: str, candidate: str) -> bool:
+    """A fused middle name is not proof that this is a different traveler.
+
+    This deliberately does not establish a match: ALEXANDRA may be a different
+    given name, while ALEXJORDAN may be the account holder with a middle name.
+    Only explicit aliases or independent booking evidence can resolve that.
+    """
+    def parts(value: str):
+        if len(re.findall(r"[/,]", value)) == 1:
+            family, given = re.split(r"[/,]", value)
+            family_tokens, given_tokens = _tokens(family), _tokens(given)
+        else:
+            tokens = _tokens(value)
+            family_tokens, given_tokens = tokens[-1:], tokens[:-1]
+        if (len(family_tokens) != 1 or not given_tokens
+                or family_tokens[0] in _SUFFIX
+                or any(len(token) < 2 or not token.isalpha() or token in _SUFFIX
+                       for token in [*family_tokens, *given_tokens])):
+            return None
+        return family_tokens[0], "".join(given_tokens), len(given_tokens)
+
+    left, right = parts(passenger), parts(candidate)
+    if not left or not right or left[0] != right[0]:
+        return False
+    # At least one side must actually be fused; conflicting separately printed
+    # middle names retain their existing, explicit non-match behavior.
+    return (left[1] != right[1] and min(left[2], right[2]) == 1
+            and (left[1].startswith(right[1]) or right[1].startswith(left[1])))
+
+
 def _name(value: str) -> str | None:
     value = re.sub(r"^\s*\d+\s*[.)-]?\s+", "", value).strip(" \t:*|-")
     value = re.sub(r"\s+Not\s+a\s+.{0,80}?Member\b.*$", "", value, flags=re.I)
@@ -118,7 +148,9 @@ def _name(value: str) -> str | None:
         return None
     if any(c in value for c in "@<>:="):
         return None
-    if re.fullmatch(r"[A-Z]{3}\s+(?:to|[-–→])\s+[A-Z]{3}", value, re.I):
+    if re.fullmatch(r"[A-Z]{3}(?:\s+to\s+|\s*[-–→]\s*)[A-Z]{3}", value, re.I):
+        return None
+    if re.fullmatch(r"purchase\s+summary", value, re.I):
         return None
     return value
 
@@ -201,6 +233,84 @@ def _html_lines(html: str) -> str:
     return soup.get_text("\n")
 
 
+def _traveler_detail_blocks(lines: list[str], start: int, markers: list[tuple[int, str]]) -> list[dict] | None:
+    """Read repeated name / flight / ancillary rows as one traveler manifest.
+
+    A flight row between names does not end this particular layout. Names must
+    directly precede an explicit flight-and-route row, so payment contacts and
+    greetings can never become travelers. Unknown or truncated rows make the
+    manifest incomplete: its first person cannot establish exclusive ownership.
+    """
+    if not re.fullmatch(r"travel(?:l?er)s?\s+details\s*[:|]?", lines[start], re.I):
+        return None
+
+    def clean(value: str) -> str:
+        return re.sub(r"\[image:[^\]]*\]", "", value, flags=re.I).replace("*", "").strip(" |•\t")
+
+    route = re.compile(r"^([A-Z0-9]{2}\s*\d{1,4})\s*\(([A-Z]{3})\s*[-–→]\s*([A-Z]{3})\)$", re.I)
+    end_section = re.compile(r"^(?:payments?|purchase summary|billing|contact|confirmation|booking|reservation|record locator|pnr|fare|total|receipt)\b", re.I)
+    ancillary = re.compile(r"^(?:seat|under seat item|personal item|carry[ -]?on(?: bag)?|checked bag(?:gage)?|baggage)\s*:", re.I)
+    stop = min(len(lines), start + 160)
+    if start + 2 >= len(lines) or not route.fullmatch(clean(lines[start + 2])):
+        return None
+
+    entries: list[tuple[str, tuple[str, str, str]]] = []
+    incomplete_routes: list[tuple[str, str, str]] = []
+    complete, terminated = True, False
+    current_name: str | None = None
+    end = start
+    at = start + 1
+    while at < stop:
+        current = clean(lines[at])
+        if end_section.match(current) or _LABEL.match(current):
+            terminated = True
+            break
+        flight_row = route.fullmatch(current)
+        if flight_row and current_name:
+            entries.append((current_name, tuple(value.upper().replace(" ", "") for value in flight_row.groups())))
+        elif current_name and ancillary.match(current):
+            pass
+        elif at + 1 < stop and (next_route := route.fullmatch(clean(lines[at + 1]))):
+            name = _name(current)
+            if name and len(_tokens(name)) >= 2:
+                current_name = name
+            else:
+                incomplete_routes.append(tuple(value.upper().replace(" ", "") for value in next_route.groups()))
+                complete = False
+                break
+        else:
+            complete = False
+            break
+        end = at
+        at += 1
+    if not entries and not incomplete_routes:
+        # The layout was recognized but no trustworthy traveler was found. Do
+        # not fall back to a partial generic list and label someone else's name
+        # as a complete manifest.
+        return []
+    complete = complete and terminated
+    pnrs = {pnr for _, pnr in markers}
+    booking_scope: dict[str, str] = {}
+    ambiguous = False
+    if len(pnrs) == 1:
+        booking_scope["pnr"] = next(iter(pnrs))
+    elif len(pnrs) > 1:
+        preceding = [(at, pnr) for at, pnr in markers if at <= start]
+        if preceding and start - preceding[-1][0] <= 8:
+            booking_scope["pnr"] = preceding[-1][1]
+        else:
+            ambiguous = True
+    by_route: dict[tuple[str, str, str], list[str]] = {}
+    for name, leg in entries:
+        by_route.setdefault(leg, []).append(name)
+    for leg in incomplete_routes:
+        by_route.setdefault(leg, [])
+    return [dict(names=list(dict.fromkeys(names)), complete=complete,
+                 scope={**booking_scope, "flight_number": leg[0], "dep_airport": leg[1], "arr_airport": leg[2]},
+                 ambiguous=ambiguous, index=start, end=end)
+            for leg, names in by_route.items()]
+
+
 def _text_evidence(text: str, source: str, flights: list) -> list[dict]:
     lines = [re.sub(r"\s+", " ", line).strip(" *\t") for line in text.splitlines() if line.strip()]
     markers: list[tuple[int, str]] = []
@@ -220,6 +330,10 @@ def _text_evidence(text: str, source: str, flights: list) -> list[dict]:
     for index, line in enumerate(lines):
         match = _LABEL.match(line)
         if not match:
+            continue
+        repeated = _traveler_detail_blocks(lines, index, markers)
+        if repeated is not None:
+            blocks.extend(repeated)
             continue
         raw = match.group("value").strip()
         names = _names(raw) if raw else []
@@ -298,6 +412,15 @@ def _text_evidence(text: str, source: str, flights: list) -> list[dict]:
                 block["scope"]["flight_number"] = ordered[0][0]
             else:
                 block["ambiguous"] = True
+    # Repeated detail headers still form one manifest for an exact booking leg.
+    # An unreadable person in another such section invalidates exclusivity, but
+    # must not weaken a separate booking's complete traveler evidence.
+    incomplete_scopes = {json.dumps(block["scope"], sort_keys=True) for block in blocks
+                         if not block["complete"] and block["scope"].get("flight_number")
+                         and not block["ambiguous"]}
+    for block in blocks:
+        if json.dumps(block["scope"], sort_keys=True) in incomplete_scopes:
+            block["complete"] = False
     labeled = [dict(name=name, source=source, role="traveler", complete=block["complete"],
                  scope=block["scope"], scope_ambiguous=block["ambiguous"])
             for block in blocks for name in block["names"]]
@@ -434,13 +557,16 @@ def apply_passenger_identity(flights: list, *, html: str, plain_text: str,
             and any(names_match(initial, name) for initial in names if any(len(t) == 1 for t in _tokens(initial)))
             for name in names
         )
+        ambiguous_compact = any(_ambiguous_compact_given_name(name, candidate)
+                                for name in names for candidate in candidates)
         flight.passenger_names = names
         flight.passenger_name = names[0] if names else None
         flight.passenger_evidence = attached
         if matched and not ambiguous_initial:
             flight.ownership = "self"
         elif (candidates and applicable and any(item.get("complete") for item in applicable)
-              and all(len(_tokens(name)) >= 2 for name in names) and not ambiguous_initial):
+              and all(len(_tokens(name)) >= 2 for name in names)
+              and not ambiguous_initial and not ambiguous_compact):
             flight.ownership = "other"
         else:
             flight.ownership = "unknown"

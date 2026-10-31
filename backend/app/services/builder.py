@@ -130,6 +130,7 @@ class BuildSegmentsResult:
     removed_other: int = 0
     affected_segment_ids: set[int] = field(default_factory=set)
     review_reasons: list[str] = field(default_factory=list)
+    removed_leg_scopes: list[dict] = field(default_factory=list)
 
 
 # ──────────────────────────── geometry helpers ───────────────────────────────
@@ -207,6 +208,7 @@ def build_segments_and_trips_detailed(
     result.held_unknown = decision.held_unknown
     result.blocked_cancellation = decision.blocked_cancellation
     result.removed_other = decision.removed_other
+    result.removed_leg_scopes = list(decision.removed_leg_scopes)
     result.held = decision.held_other + decision.held_unknown + decision.blocked_cancellation
     result.skipped = result.held
     affected_trip_ids = set(decision.affected_trip_ids)
@@ -1510,6 +1512,14 @@ def _belongs_to_current_trip(
     if gap < timedelta():
         return same_booking and _segments_can_overlap_in_same_booking(current, segment)
 
+    # A completed round trip has its own origin, even when the account's
+    # most-used airport is elsewhere. Returning there before a later departure
+    # should not join two journeys simply because that airport is less common.
+    if (len(current) > 1 and previous.arr_airport == current[0].dep_airport
+            and segment.dep_airport == current[0].dep_airport
+            and gap > timedelta(hours=48)):
+        return False
+
     if ended_at_home and starts_from_home:
         return same_booking and gap <= timedelta(hours=48)
     if ended_at_anchor and starts_from_anchor and gap > timedelta(hours=6):
@@ -1959,6 +1969,8 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
         return "updated"
     if existing is None and legacy_review:
         return "held_legacy_identity"
+    if existing is None and _has_unproven_legacy_booking_collision(db, user_id, flight):
+        return "held_legacy_identity"
     if existing is None:
         existing = _find_supersedable_segment(db, user_id, flight)
     if existing is None:
@@ -2093,6 +2105,43 @@ def _find_legacy_local_clock_segment(db: Session, user_id: int, flight):
     if not incoming_codes.intersection(_segment_pnr_set(segment)):
         return None, "ambiguous"
     return segment, False
+
+
+def _has_unproven_legacy_booking_collision(db: Session, user_id: int, flight) -> bool:
+    """Hold an incomplete booking identity instead of duplicating a saved leg.
+
+    Older rows can contain local wall clocks without a time-basis marker, so
+    comparing their timestamps to a new UTC receipt is not an identity check.
+    A matching service day/route/number is enough to stop a speculative insert,
+    but never enough to merge bookings or rewrite the original row.
+    """
+    provenance = getattr(flight, "time_provenance", None) or {}
+    number = _normalize_flight_number(flight.flight_number)
+    if (provenance.get("version") != 1 or provenance.get("status") != "normalized"
+            or not number or not getattr(flight, "source_message_id", None)
+            or getattr(flight, "ownership", None) != "self"
+            or getattr(flight, "force_review", False)):
+        return False
+    day = provenance.get("departure_local_date")
+    if not day:
+        return False
+    incoming_code = _normalize_pnr(flight.pnr)
+    for segment in db.query(Segment).join(Trip).filter(
+            Trip.user_id == user_id, Segment.dep_airport == flight.dep_airport,
+            Segment.arr_airport == flight.arr_airport).all():
+        meta = segment.meta_json or {}
+        if (meta.get("time_provenance")
+                or meta.get("source") in {"accepted_flight_share", "jsonld", "ics"}
+                or _normalize_flight_number(segment.flight_number) != number
+                or _local_service_day(segment) != day):
+            continue
+        # An extra alias can be genuine without proving which schedule should
+        # replace an unmarked legacy row. Changed-clock receipts with different
+        # primary references stay held until the original leg is disambiguated.
+        existing_code = _normalize_pnr(segment.pnr)
+        if not incoming_code or not existing_code or incoming_code != existing_code:
+            return True
+    return False
 
 
 def _existing_primary_is_protected(db: Session, user_id: int, segment: Segment, flight) -> bool:
@@ -2494,11 +2543,37 @@ def _segment_meta(flight) -> dict:
     return meta
 
 
+def _preserve_same_clock_date_evidence(previous, incoming):
+    """A corroborating receipt must not discard proof of unchanged flight dates."""
+    if not isinstance(previous, dict) or not isinstance(incoming, dict) or 'date_evidence' in incoming:
+        return incoming
+    proof = previous.get('date_evidence')
+    if not isinstance(proof, dict) or proof.get('kind') != 'printed_elapsed' or proof.get('status') != 'verified':
+        return incoming
+    for value in (previous, incoming):
+        if value.get('version') != 1 or value.get('status') != 'normalized' or not value.get('departure_local_date'):
+            return incoming
+    if previous['departure_local_date'] != incoming['departure_local_date']:
+        return incoming
+    for endpoint in ('departure', 'arrival'):
+        old, new = previous.get(endpoint), incoming.get(endpoint)
+        if not isinstance(old, dict) or not isinstance(new, dict) or old != new:
+            return incoming
+        for key in ('basis', 'airport', 'timezone', 'local', 'utc'):
+            if not old.get(key) or old[key] != new.get(key):
+                return incoming
+    # Copy instead of enriching the incoming parsed fact: its immutable source
+    # observation must continue to describe only what that receipt supplied.
+    return {**incoming, 'date_evidence': dict(proof)}
+
+
 def _merge_flight_provenance(meta: dict, flight, *, incoming_is_current: bool) -> None:
     if incoming_is_current:
         for key in ('time_provenance', 'source_time_provenance', 'parser_version'):
             value = getattr(flight, key, None)
             if value is not None:
+                if key == 'time_provenance':
+                    value = _preserve_same_clock_date_evidence(meta.get(key), value)
                 meta[key] = value
     for key in ('recovery_observation_ids', 'reconciles_observation_ids'):
         values = list(meta.get(key) or [])

@@ -24,7 +24,7 @@ from .passenger_identity import (
 )
 
 logger = logging.getLogger(__name__)
-PARSER_VERSION = 26
+PARSER_VERSION = 27
 
 # ──────────────────────────── regex patterns ────────────────────────────────
 
@@ -52,6 +52,30 @@ _PNR_LABEL = re.compile(
     (?:\s+is)?[:\s#*\-]*
     ([A-Z0-9]{5,8})
     \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+# Extra references can affect later booking reconciliation. Require an actual
+# reference field; bare "booking"/"confirmation" in prose is not evidence.
+# Keep this separate from primary-reference recall and avoid word blacklists:
+# even an ordinary all-letter word can be a legitimate explicitly labeled code.
+_PNR_ALIAS_LABEL = re.compile(
+    r"""
+    \b
+    (?:
+        (?:
+            record\s+locator|
+            confirmation\s+(?:code|number)|
+            booking\s+(?:reference|code|number)|
+            reservation\s+(?:code|number)|
+            airline\s+confirmation|
+            pnr
+        )
+        (?:\s+is)?[:\s#*\-]*
+        |
+        (?:booking|confirmation)\s*[:\#]\s*
+    )
+    ([A-Z0-9]{5,8})\b
     """,
     re.IGNORECASE | re.VERBOSE,
 )
@@ -3869,21 +3893,62 @@ def _shape_ota_multi_confirmation(
             arr_dt = _parse_partial_month_day_line(date_line, arr_time, received_at)
         if not dep_dt or not arr_dt or not _valid_route(dep_airport, arr_airport):
             continue
-        if arr_dt <= dep_dt:
-            arr_dt += timedelta(days=1)
-        flights.append(
-            ParsedFlight(
-                dep_airport=dep_airport,
-                arr_airport=arr_airport,
-                dep_time=dep_dt,
-                arr_time=arr_dt,
-                airline=airline,
-                flight_number=f"{airline}{match.group('number').upper()}",
-                pnr=pnr_by_airline.get(airline) or fallback_pnr,
-                source="shape_ota_multi_confirmation",
-                confidence=94,
-            )
+        # A bare duration is per-flight evidence only between this flight's
+        # two airport clocks. Totals and layovers after arrival are not proof.
+        stop = min(len(lines), index + 21)
+        next_flight = False
+        for cursor in range(index + 1, stop):
+            if re.search(r"\b[A-Za-z][A-Za-z .&'-]+\s*-\s*[A-Z0-9]{2}\s*\d{1,4}\b", lines[cursor], re.I):
+                stop = cursor
+                next_flight = True
+                break
+        leg_lines = lines[index + 1:stop]
+        endpoint_positions: list[int] = []
+        for position, value in enumerate(leg_lines):
+            if not _airport_token_from_line(value.lstrip("> ")):
+                continue
+            for clock_position in range(position + 1, min(len(leg_lines), position + 5)):
+                if _airport_token_from_line(leg_lines[clock_position].lstrip("> ")):
+                    break
+                if _parse_time_only(leg_lines[clock_position].lstrip("> ")):
+                    endpoint_positions.append(clock_position)
+                    break
+            if len(endpoint_positions) == 2:
+                break
+        duration_positions = (range(endpoint_positions[0] + 1, endpoint_positions[1])
+                              if len(endpoint_positions) == 2 else ())
+        durations = [duration for position in duration_positions if (duration := re.fullmatch(
+            r"(?:(\d{1,2})h(?:\s+|$))?(?:(\d{1,2})m)?", leg_lines[position].strip(), re.I))
+            and any(duration.groups())
+            and not any(re.search(r"\b(?:layover|total|journey|travel)\b", adjacent, re.I)
+                        for adjacent in leg_lines[max(0, position - 1):position]
+                        + leg_lines[position + 1:position + 2])]
+        flight = ParsedFlight(
+            dep_airport=dep_airport, arr_airport=arr_airport,
+            dep_time=dep_dt, arr_time=arr_dt, airline=airline,
+            flight_number=f"{airline}{match.group('number').upper()}",
+            pnr=pnr_by_airline.get(airline) or fallback_pnr,
+            source="shape_ota_multi_confirmation", confidence=94,
         )
+        if next_flight and len(endpoint_positions) < 2:
+            # The older endpoint extractor can borrow the next flight's
+            # airport when flattening drops this one's arrival airport.
+            flight.force_review = True
+            flight.time_provenance["date_evidence"] = {
+                "kind": "flight_endpoint_scope", "status": "needs_review",
+                "reason": "flight_endpoint_crosses_next_flight",
+            }
+        elif len(durations) == 1:
+            from .flight_times import resolve_printed_elapsed_arrival
+            duration = durations[0]
+            minutes = int(duration.group(1) or 0) * 60 + int(duration.group(2) or 0)
+            next_day = any(re.fullmatch(r"This flight arrives the next day\.?", value, re.I) for value in leg_lines)
+            resolve_printed_elapsed_arrival(flight, minutes=minutes, explicit_day_offset=1 if next_day else None)
+        elif arr_dt <= dep_dt:
+            # Preserve the existing no-duration path; this change only resolves
+            # dates with independent elapsed-time evidence.
+            flight.arr_time += timedelta(days=1)
+        flights.append(flight)
     return flights
 
 
@@ -4159,9 +4224,28 @@ def _extract_pnr(text: str) -> Optional[str]:
 def _extract_pnr_aliases(text: str, *, primary: Optional[str]) -> list[str]:
     primary = primary.upper() if primary else None
     aliases: list[str] = []
-    for pattern in (_AIRLINE_CONFIRMATION_LABEL, _CAPITAL_ONE_AIRLINE_CONFIRMATION, _PNR_LABEL):
+    for pattern in (_AIRLINE_CONFIRMATION_LABEL, _CAPITAL_ONE_AIRLINE_CONFIRMATION, _PNR_ALIAS_LABEL):
         for match in pattern.finditer(text):
             candidate = match.group(1).upper()
+            # A boundary before '-' or '/' can truncate an agency's longer ID.
+            # Such a fragment is not an independently printed booking reference.
+            if re.match(r"[-_/][A-Z0-9]", text[match.end(1):], re.I):
+                continue
+            # Some reference fields name the carrier before the actual value:
+            # "Airline Reservation Code / Royal Air Maroc: ABC123". The first
+            # word of that label is not a PNR; require an exact known carrier.
+            value_text = text[match.start(1):]
+            carrier_label = re.match(r"(?P<carrier>[A-Z][A-Z\s.&'-]{1,60}?)\s*[:#]", value_text, re.I)
+            if carrier_label:
+                carrier = re.sub(r"\s+", " ", carrier_label["carrier"]).strip().lower()
+                if carrier in _AIRLINE_NAME_TO_CODE:
+                    reference_text = value_text[carrier_label.end():].lstrip()
+                    reference = re.match(r"([A-Z0-9]{5,8})\b(?![-_/][A-Z0-9])", reference_text, re.I)
+                    # An empty/broken carrier field is unresolved, not a PNR
+                    # equal to the carrier's first word or the next field label.
+                    if not reference or _PNR_ALIAS_LABEL.match(reference_text):
+                        continue
+                    candidate = reference[1].upper()
             if candidate in _PNR_STOPWORDS or candidate in _KNOWN_AIRLINES:
                 continue
             if candidate == primary or candidate in aliases:

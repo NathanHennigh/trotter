@@ -126,7 +126,11 @@ def _extract_child() -> None:
     from io import BytesIO
     from pypdf import PdfReader
     reader = PdfReader(BytesIO(sys.stdin.buffer.read(MAX_DOCUMENT_BYTES + 1)), strict=True)
-    if reader.is_encrypted or len(reader.pages) > MAX_PAGES:
+    # Owner-permission encryption can still permit ordinary reading with an
+    # empty user password. Try only that standard opening path, never guesses.
+    if reader.is_encrypted and not reader.decrypt(""):
+        raise ValueError("password_protected_pdf")
+    if len(reader.pages) > MAX_PAGES:
         raise ValueError("unsupported_pdf")
     pages, chars = [], 0
     for number, page in enumerate(reader.pages, 1):

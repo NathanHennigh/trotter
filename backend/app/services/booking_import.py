@@ -11,6 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
+from types import SimpleNamespace
 
 from bs4 import BeautifulSoup
 
@@ -214,6 +215,148 @@ def _dated_canceled_legs(assertions: list[str], flights: list) -> tuple[bool, li
     return partial, selected
 
 
+def _new_self_scopes(db, user_id, flights):
+    """Capture only exact dated legs whose ownership is not established yet."""
+    from .booking_ledger import booking_code, flight_scope, has_verified_self_observation
+
+    scopes = {}
+    for flight in flights:
+        if getattr(flight, "ownership", None) != "self" or getattr(flight, "force_review", False):
+            continue
+        code, scope = booking_code(getattr(flight, "pnr", None)), flight_scope(flight)
+        if not code or not all(scope.values()):
+            continue
+        key = (code, scope["travel_date"], scope["dep_airport"], scope["arr_airport"], scope["flight_number"])
+        if key not in scopes and not has_verified_self_observation(db, user_id, code, scope):
+            scopes[key] = flight
+    return scopes
+
+
+def _retained_flight(observation, *, ownership="unknown"):
+    """Restore exactly one immutable fact set, never reparse or infer its times."""
+    from .booking_ledger import _key, booking_code, event_time, flight_facts, flight_scope
+
+    facts = observation.facts
+    if (not isinstance(facts, dict) or facts.get("ownership") != ownership
+            or observation.ownership != ownership
+            or facts.get("force_review") or facts.get("user_decision")
+            or not observation.source_message_id or observation.source_event_at is None):
+        return None
+    provenance = facts.get("time_provenance") or {}
+    if (not isinstance(provenance, dict) or provenance.get("version") != 1
+            or provenance.get("status") != "normalized"):
+        return None
+    restored = deepcopy(facts)
+    try:
+        for field in ("dep_time", "arr_time", "source_received_at", "mail_received_at"):
+            if restored.get(field) is not None:
+                restored[field] = datetime.fromisoformat(restored[field].replace("Z", "+00:00"))
+        flight = SimpleNamespace(**restored)
+        if (booking_code(flight.pnr) != observation.pnr
+                or flight_scope(flight) != {
+                    "travel_date": observation.travel_date, "dep_airport": observation.dep_airport,
+                    "arr_airport": observation.arr_airport, "flight_number": observation.flight_number}
+                or flight.dep_time.tzinfo is None or flight.arr_time.tzinfo is None
+                or not 0 < (flight.arr_time - flight.dep_time).total_seconds() <= 48 * 3600
+                or event_time(provenance["departure"]["utc"]) != event_time(flight.dep_time)
+                or event_time(provenance["arrival"]["utc"]) != event_time(flight.arr_time)
+                or provenance["departure"]["local"][:10] != observation.travel_date):
+            return None
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+    # The ledger canonicalizes the source event before calculating its key.
+    # Requiring the old key prevents schema/default changes from producing a
+    # second observation or silently modifying the original evidence.
+    flight.source_received_at = event_time(observation.source_event_at)
+    flight.force_review = False
+    key = _key({"message": observation.source_message_id, "event_at": flight.source_received_at,
+                "facts": flight_facts(flight)})
+    return flight if key == observation.evidence_key else None
+
+
+def _reconcile_new_self_scopes(db, user_id, scopes):
+    """Project earlier unnamed notices once their exact leg gains self proof.
+
+    Queries are scoped to this import's newly proven legs, never the mailbox or
+    the whole account. Replay keeps the original unknown ownership: the normal
+    ledger establishes the connection and applies all manual/cancellation holds.
+    Its result deliberately does not change the current email's review status.
+    """
+    from ..models import BookingObservation
+    from .booking_ledger import (cancellation_blocks_flight, flight_scope,
+                                has_verified_self_observation, user_decision_for_flight)
+
+    pending = {}
+    for (code, day, dep, arr, number), proof in scopes.items():
+        decision = user_decision_for_flight(db, user_id, proof)
+        if (decision and (decision.get("status") in {"hold", "canceled"}
+                          or decision.get("ownership") == "other")):
+            continue
+        if (not has_verified_self_observation(db, user_id, code, flight_scope(proof))
+                or cancellation_blocks_flight(db, user_id, proof)):
+            continue
+        observations = db.query(BookingObservation).filter_by(
+            user_id=user_id, pnr=code, travel_date=day, dep_airport=dep,
+            arr_airport=arr, flight_number=number, ownership="unknown",
+        ).order_by(BookingObservation.source_event_at.desc(), BookingObservation.id.desc()).limit(129).all()
+        # Abnormally large/conflicting histories remain retained for review;
+        # don't perform an unbounded import or pick an arbitrary partial set.
+        if len(observations) > 128:
+            continue
+        for observation in observations:
+            flight = _retained_flight(observation)
+            if flight is not None:
+                pending[observation.id] = (observation, flight)
+    return _replay_retained(db, user_id, pending)
+
+
+def _reconcile_removed_self_scopes(db, user_id, scopes):
+    """A removed other-passenger row may have blocked a real personal receipt.
+
+    Only explicit self evidence is eligible across booking references. The
+    removed leg supplies a bounded lookup scope, never passenger identity or
+    aliases; all ownership and cancellation decisions still run in the builder.
+    """
+    from ..models import BookingObservation
+
+    pending = {}
+    for scope in scopes:
+        if not all(scope.get(field) for field in ("travel_date", "dep_airport", "arr_airport", "flight_number")):
+            continue
+        observations = db.query(BookingObservation).filter_by(
+            user_id=user_id, ownership="self", **scope,
+        ).order_by(BookingObservation.source_event_at.desc(), BookingObservation.id.desc()).limit(129).all()
+        if len(observations) > 128:
+            continue
+        for observation in observations:
+            if not isinstance(observation.facts, dict) or observation.facts.get("source") in {
+                    "travel_name_recovery", "user_review", "accepted_flight_share"}:
+                continue
+            flight = _retained_flight(observation, ownership="self")
+            if flight is not None:
+                pending[observation.id] = (observation, flight)
+    return _replay_retained(db, user_id, pending)
+
+
+def _merge_successful_replay(result, replay):
+    result.inserted += replay.inserted
+    result.updated += replay.updated
+    result.deduped += replay.deduped
+    result.affected_segment_ids.update(replay.affected_segment_ids)
+    # The same affected trip can be rebuilt more than once, not added anew.
+    result.trips = max(result.trips, replay.trips)
+
+
+def _replay_retained(db, user_id, pending):
+    result = BuildSegmentsResult()
+    ordered = sorted(pending.values(), key=lambda item: (item[0].source_event_at, item[0].id))
+    for observation, flight in ordered:
+        replay = build_segments_and_trips_detailed(db, user_id, [flight],
+            source_message_id=observation.source_message_id, source_event_at=observation.source_event_at)
+        _merge_successful_replay(result, replay)
+    return result
+
+
 def apply_booking_message(db, user_id: int, parsed, *, source_message_id: str,
                           subject: str = "", plain_text: str = "", html: str = "",
                           received_at=None) -> AppliedBooking:
@@ -274,10 +417,14 @@ def apply_booking_message(db, user_id: int, parsed, *, source_message_id: str,
             for flight in flights:
                 flight.force_review = True
 
+    new_self_scopes = _new_self_scopes(db, user_id, flights) if not cancellation else {}
     result = build_segments_and_trips_detailed(
         db, user_id, flights, source_message_id=source_message_id,
         source_event_at=event_at,
     ) if flights else BuildSegmentsResult()
+    _merge_successful_replay(result, _reconcile_new_self_scopes(db, user_id, new_self_scopes))
+    if result.removed_leg_scopes:
+        _merge_successful_replay(result, _reconcile_removed_self_scopes(db, user_id, result.removed_leg_scopes))
     if not review_reason and result.review_reasons:
         review_reason = result.review_reasons[0]
     return AppliedBooking(result, canceled, cancellation, review_reason)

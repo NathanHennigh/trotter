@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
-from .flight_evidence import assess_flight_evidence
+from .flight_evidence import assess_flight_evidence, has_explicit_flight_number
 from .gmail import extract_attachments, extract_headers, extract_message_body
 
 
@@ -14,6 +14,25 @@ def message_internal_time(message: dict):
         return datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc) if milliseconds > 0 else None
     except (TypeError, ValueError, OverflowError, OSError):
         return None
+
+
+def _hold_incomplete_extractions(result, text: str, *, detailed_text: str = "") -> list[str]:
+    """Retain uncertain facts without creating timed flights from placeholders."""
+    reasons = []
+    for flight in result.flights:
+        source = getattr(flight, "source", None)
+        reason = ("subject_only_itinerary_requires_review" if source == "subject" else
+                  "summary_flight_number_not_supported" if source == "v5"
+                  and getattr(flight, "flight_number", None)
+                  and not has_explicit_flight_number(flight.flight_number, text, detailed_text=detailed_text) else None)
+        if reason:
+            flight.force_review = True
+            # This survives the immutable ledger and explains why normalized
+            # clocks alone do not establish a complete itinerary.
+            flight.time_provenance = {**(getattr(flight, "time_provenance", None) or {}),
+                                      "extraction_review_reason": reason}
+            reasons.append(reason)
+    return list(dict.fromkeys(reasons))
 
 
 def prepare_flight_message(full_msg: dict, *, user_name: str, aliases: list[str],
@@ -37,6 +56,10 @@ def prepare_flight_message(full_msg: dict, *, user_name: str, aliases: list[str]
         result = parse_email(html=html, plain_text=plain_text, attachments=extract_attachments(full_msg),
                              user_name=user_name, aliases=aliases, received_at=received_at,
                              subject=subject, from_email=sender)
+        if any(getattr(flight, "source", None) in {"subject", "v5"} for flight in result.flights):
+            from .booking_import import visible_message_text
+            _hold_incomplete_extractions(result, visible_message_text(plain_text, html),
+                                        detailed_text=visible_message_text("", html) if html else "")
     provenance = []
     for document in documents:
         # Keep document ownership independent from body greetings and other PDFs.
@@ -47,6 +70,9 @@ def prepare_flight_message(full_msg: dict, *, user_name: str, aliases: list[str]
         cancellation_document = _cancellation_intent("", text)
         provenance.append({key: document.get(key) for key in ("filename", "attachment_id", "part", "sha256")}
                           | {"pages": [page["number"] for page in document["pages"]], "flight_count": len(parsed.flights)})
+        incomplete = _hold_incomplete_extractions(parsed, text)
+        if incomplete:
+            provenance[-1]["review_reasons"] = incomplete
         if cancellation_document:
             provenance[-1]["review_reason"] = "cancellation_document_requires_review"
             for flight in parsed.flights:

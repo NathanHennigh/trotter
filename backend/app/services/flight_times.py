@@ -5,7 +5,7 @@ metadata or adjusts an existing database row without reparsing source evidence.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -57,6 +57,37 @@ def _endpoint(value, airport, basis):
     return absolute, info, None
 
 
+def resolve_printed_elapsed_arrival(flight, *, minutes, explicit_day_offset=None):
+    """Resolve only an arrival day independently supported by a printed duration.
+
+    The parser supplies the printed heading's departure date and both clocks,
+    before any wall-clock rollover. No clock or departure date is adjusted.
+    Explicit arrival-day markers constrain rather than compete with elapsed time.
+    """
+    evidence = {"kind": "printed_elapsed", "minutes": minutes,
+                "departure_date": flight.dep_time.date().isoformat(),
+                "printed_arrival_clock": flight.arr_time.strftime("%H:%M:%S"),
+                "explicit_day_offset": explicit_day_offset}
+    flight.time_provenance = dict(getattr(flight, "time_provenance", None) or {})
+    flight.time_provenance["date_evidence"] = evidence
+    departure, _, error = _endpoint(flight.dep_time, flight.dep_airport, "airport_local")
+    choices = []
+    if not error and isinstance(minutes, int) and 0 < minutes <= 48 * 60:
+        offsets = (explicit_day_offset,) if explicit_day_offset is not None else (-1, 0, 1, 2)
+        for offset in offsets:
+            local_arrival = flight.arr_time + timedelta(days=offset)
+            arrival, _, arrival_error = _endpoint(local_arrival, flight.arr_airport, "airport_local")
+            if not arrival_error and (arrival - departure).total_seconds() == minutes * 60:
+                choices.append((offset, local_arrival))
+    if len(choices) != 1:
+        evidence.update(status="needs_review", reason="printed_flight_duration_conflict")
+        flight.force_review = True
+        return
+    offset, flight.arr_time = choices[0]
+    evidence.update(status="verified", arrival_day_offset=offset,
+                    arrival_date=flight.arr_time.date().isoformat())
+
+
 def normalize_flight_times(flight):
     """Normalize a newly parsed flight, or hold ambiguous facts for review."""
     previous = getattr(flight, "time_provenance", None) or {}
@@ -66,12 +97,17 @@ def normalize_flight_times(flight):
         previous.get("departure", {}).get("basis", "airport_local"))
     arr, arr_info, arr_error = _endpoint(flight.arr_time, flight.arr_airport,
         previous.get("arrival", {}).get("basis", "airport_local"))
+    date_evidence = previous.get("date_evidence")
     error = dep_error or arr_error
+    if not error and isinstance(date_evidence, dict) and date_evidence.get("status") == "needs_review":
+        error = date_evidence.get("reason") or "unresolved_arrival_date"
     if not error and (arr <= dep or (arr - dep).total_seconds() > 48 * 3600):
         error = "inconsistent_flight_times"
     flight.time_provenance = {"version": 1, "status": "needs_review" if error else "normalized",
         "departure_local_date": dep_info["local"][:10] if dep_info["local"] else None,
         "departure": dep_info, "arrival": arr_info}
+    if isinstance(date_evidence, dict):
+        flight.time_provenance["date_evidence"] = date_evidence
     if error:
         flight.time_provenance["reason"] = error
         flight.force_review = True
