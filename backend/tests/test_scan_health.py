@@ -208,3 +208,11 @@ def test_cli_requires_explicit_account_scope(capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main([])
     assert exc.value.code == 2
+
+
+def test_cli_never_echoes_unexpected_persisted_value_error(monkeypatch, capsys):
+    def corrupt_value(*args, **kwargs):
+        raise LookupError(SECRET)
+    monkeypatch.setattr(cli, "read_report", corrupt_value)
+    assert cli.main(["--all-users"]) == 2
+    assert SECRET not in capsys.readouterr().err

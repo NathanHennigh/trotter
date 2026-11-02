@@ -10,7 +10,6 @@ import sys
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -65,7 +64,7 @@ def main(argv=None):
         report = read_report(os.environ.get("DATABASE_URL"), user_ids=args.user_ids,
             lookback_hours=args.hours, stale_minutes=args.stale_minutes,
             pending_minutes=args.pending_minutes, max_jobs=args.max_jobs)
-    except (SQLAlchemyError, ValueError, OSError, sqlite3.Error):
+    except Exception:
         # Connection and SQL errors may include passwords, URLs, or parameters.
         print("Scan-health report failed. Check DATABASE_URL, read access, schema availability, and positive report limits. No database changes were made.", file=sys.stderr)
         return 2
