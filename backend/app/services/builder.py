@@ -223,7 +223,32 @@ def build_segments_and_trips_detailed(
     trip_groups = _group_into_trips(sorted_flights)
 
     for group in trip_groups:
-        trip = _find_or_create_trip(db, user_id, group)
+        from .booking_leg_lineage import find as find_document_leg
+        ready, linked_trips = [], set()
+        for flight in group:
+            lineage = find_document_leg(db, user_id, flight)
+            if lineage.status == "stale":
+                result.skipped += 1
+                continue
+            if lineage.status == "held":
+                result.held += 1
+                result.held_unknown += 1
+                result.skipped += 1
+                if "document_leg_identity_conflict" not in result.review_reasons:
+                    result.review_reasons.append("document_leg_identity_conflict")
+                continue
+            ready.append(flight)
+            if lineage.segment is not None:
+                linked_trips.add(lineage.segment.trip_id)
+        if not ready:
+            continue
+        group = ready
+        from .carrier_travel_recovery import existing_projection_trip
+        trip = db.get(Trip, next(iter(linked_trips))) if len(linked_trips) == 1 else None
+        if trip is None:
+            trip = existing_projection_trip(db, user_id, group)
+        if trip is None:
+            trip = _find_or_create_trip(db, user_id, group)
         affected_trip_ids.add(trip.id)
         for flight in group:
             action = _upsert_segment(db, trip.id, user_id, flight)
@@ -414,6 +439,9 @@ def rebuild_affected_trips(db: Session, user_id: int, affected_trip_ids: set[int
     affected_trip_ids = set(affected_trip_ids)
     if not affected_trip_ids:
         return 0
+    from .flight_import_rollout import enabled as account_enabled
+    if account_enabled("BOOKING_CONTEXTUAL_TRIP_GROUPING_ENABLED", user_id):
+        return _rebuild_contextual_trips(db, user_id, affected_trip_ids)
     all_segments = db.query(Segment).join(Trip).filter(Trip.user_id == user_id).all()
     home_airport = _infer_home_airport(all_segments)
     changed = True
@@ -466,6 +494,143 @@ def rebuild_affected_trips(db: Session, user_id: int, affected_trip_ids: set[int
         snapshot_user_itinerary(db, user_id, reason="empty_trip_after_booking_reconciliation",
                                 segment_ids=set(), trip_ids={trip.id for trip in empty})
         for trip in empty:
+            db.delete(trip)
+    db.flush()
+    return len(clusters)
+
+
+def _rebuild_contextual_trips(db: Session, user_id: int, affected_trip_ids: set[int]) -> int:
+    """Plan with the whole timeline, apply only connected affected memberships.
+
+    A return alone does not carry the origin/closure of its outbound. Clustering
+    only a changed subset can consequently attach the return to a later journey.
+    The full timeline supplies that context without running global legacy
+    pruning or authorizing edits to unrelated, shared or manually held travel.
+    """
+    from ..models import BookingObservation, FlightShare
+
+    all_segments = db.query(Segment).join(Trip).filter(Trip.user_id == user_id).all()
+    trips = {trip.id: trip for trip in db.query(Trip).filter(Trip.user_id == user_id).all()}
+    # Any explicit decision remains a boundary for automatic regrouping. Read
+    # once rather than issuing a decision query for every segment/connection.
+    manual_scopes = {
+        (_normalize_pnr(row.pnr), row.travel_date, row.dep_airport, row.arr_airport,
+         _normalize_flight_number(row.flight_number))
+        for row in db.query(BookingObservation).filter_by(user_id=user_id).all()
+        if (row.facts or {}).get("user_decision")
+    }
+    shared_segment_ids = {segment_id
+        for share in db.query(FlightShare).filter_by(recipient_user_id=user_id).all()
+        for segment_id in (share.accepted_segment_ids or [])}
+    protected = {trip.id for trip in trips.values() if trip.visibility not in {None, "private"}}
+    for segment in all_segments:
+        meta = segment.meta_json or {}
+        scope = flight_scope(segment)
+        codes = {_normalize_pnr(segment.pnr), *(_normalize_pnr(code) for code in (meta.get("pnr_aliases") or []))}
+        keys = {(code, scope["travel_date"], segment.dep_airport,
+                 segment.arr_airport, _normalize_flight_number(segment.flight_number)) for code in codes}
+        if (keys.intersection(manual_scopes) or segment.id in shared_segment_ids
+                or meta.get("source") in {"manual", "user_review", "accepted_flight_share"}
+                or meta.get("user_decision")
+                or meta.get("manual_grouping")
+                or meta.get("trip_grouping_locked")
+                or meta.get("manual_trip_id")
+                or meta.get("trip_assignment_source") == "manual"):
+            protected.add(segment.trip_id)
+
+    home_airport = _infer_home_airport(all_segments)
+    affected = (set(affected_trip_ids) & trips.keys()) - protected
+    if not affected:
+        return 0
+    contextual = _cluster_saved_segments(all_segments, home_airport)
+    # A protected flight is context, never a bridge through which independent
+    # editable travel can be silently combined.
+    available_clusters: list[list[Segment]] = []
+    for cluster in contextual:
+        run: list[Segment] = []
+        for segment in cluster:
+            if segment.trip_id in protected:
+                if run:
+                    available_clusters.append(run)
+                    run = []
+            else:
+                run.append(segment)
+        if run:
+            available_clusters.append(run)
+
+    # Preserve the existing bounded connection rule for bringing another trip
+    # into scope, additionally requiring the complete timeline to agree that
+    # the legs belong together. This cannot jump a known roundtrip boundary.
+    changed = True
+    while changed:
+        changed = False
+        for cluster in available_clusters:
+            selected = [segment for segment in cluster if segment.trip_id in affected]
+            for candidate in cluster:
+                if candidate.trip_id in affected:
+                    continue
+                meta = candidate.meta_json or {}
+                if meta.get("ownership") != "self" or not meta.get("observation_ids"):
+                    continue
+                for segment in selected:
+                    earlier, later = sorted((candidate, segment), key=_segment_sort_key)
+                    gap = _segment_dep_time(later) - _segment_arr_time(earlier)
+                    if (_airports_are_near(earlier.arr_airport, later.dep_airport)
+                            and not _airports_are_near(earlier.arr_airport, home_airport)
+                            and timedelta(0) <= gap <= timedelta(days=14)):
+                        affected.add(candidate.trip_id)
+                        changed = True
+                        break
+
+    clusters = [[segment for segment in cluster if segment.trip_id in affected]
+                for cluster in available_clusters]
+    clusters = [cluster for cluster in clusters if cluster]
+    old_members = {
+        trip_id: {segment.id for segment in all_segments if segment.trip_id == trip_id}
+        for trip_id in affected
+    }
+    used_ids: set[int] = set()
+    plan = []
+    for cluster in clusters:
+        reusable = _select_reusable_trip_id(cluster, used_ids)
+        trip = trips.get(reusable) if reusable else None
+        if trip is not None:
+            used_ids.add(trip.id)
+        ordered = sorted(cluster, key=_segment_sort_key)
+        members = {segment.id for segment in ordered}
+        membership_changed = trip is None or old_members[trip.id] != members
+        start = min(_segment_dep_time(segment) for segment in ordered)
+        end = max(_segment_arr_time(segment) for segment in ordered)
+        # A stable membership must not erase a custom/previously chosen title.
+        title = (_trip_title_for_segments(ordered, home_airport=home_airport)
+                 if membership_changed else trip.title)
+        plan.append((ordered, trip, start, end, title, membership_changed))
+    removed_trip_ids = affected - used_ids
+    has_change = bool(removed_trip_ids) or any(
+        membership_changed or _db_datetime(trip.start_ts) != start
+        or _db_datetime(trip.end_ts) != end
+        for _, trip, start, end, _, membership_changed in plan
+    )
+    if not has_change:
+        return len(clusters)
+
+    snapshot_user_itinerary(db, user_id, reason="recluster_changed_booking_trips",
+                            segment_ids={segment.id for segment in all_segments if segment.trip_id in affected},
+                            trip_ids=affected)
+    for ordered, trip, start, end, title, _ in plan:
+        if trip is None:
+            trip = Trip(user_id=user_id)
+            db.add(trip)
+            db.flush()
+        trip.start_ts, trip.end_ts, trip.title = start, end, title
+        for segment in ordered:
+            segment.trip_id = trip.id
+    db.flush()
+    # All former members are assigned above. Remove only affected empty shells,
+    # retaining the full pre-change snapshots and every independent draft.
+    for trip_id in removed_trip_ids:
+        trip = trips[trip_id]
+        if not db.query(Segment.id).filter(Segment.trip_id == trip_id).first():
             db.delete(trip)
     db.flush()
     return len(clusters)
@@ -1949,6 +2114,17 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     existing = _find_same_source_segment(db, user_id, flight)
     if existing is not None and _existing_primary_is_protected(db, user_id, existing, flight):
         return "held_legacy_protection"
+    from .booking_leg_lineage import find as find_document_leg
+    lineage = find_document_leg(db, user_id, flight)
+    if lineage.status == "held":
+        return "held_legacy_identity"
+    if lineage.status == "stale":
+        return "skipped"
+    if lineage.segment is not None:
+        if not _refresh_existing_segment(db, lineage.segment, flight, user_id=user_id,
+                                         allow_overwrite=lineage.overwrite):
+            return "held_legacy_protection"
+        return "updated"
     legacy, legacy_review = _find_legacy_local_clock_segment(db, user_id, flight)
     if legacy_review == "protected":
         # A source link can disambiguate identity, but cannot overrule a user's
@@ -2569,9 +2745,9 @@ def _preserve_same_clock_date_evidence(previous, incoming):
 
 def _merge_flight_provenance(meta: dict, flight, *, incoming_is_current: bool) -> None:
     if incoming_is_current:
-        for key in ('time_provenance', 'source_time_provenance', 'parser_version'):
+        for key in ('time_provenance', 'source_time_provenance', 'parser_version', 'source_leg'):
             value = getattr(flight, key, None)
-            if value is not None:
+            if value is not None and (key != 'source_leg' or value):
                 if key == 'time_provenance':
                     value = _preserve_same_clock_date_evidence(meta.get(key), value)
                 meta[key] = value

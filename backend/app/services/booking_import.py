@@ -126,13 +126,14 @@ class AppliedBooking:
     canceled: int = 0
     is_cancellation: bool = False
     review_reason: str | None = None
+    enrichment_audit: list | None = None
 
     @property
     def status(self):
         return MessageStatus.REVIEW_REQUIRED if self.review_reason or getattr(self.build, "held_unknown", 0) else MessageStatus.ACCEPTED
 
     def evidence(self, source: str, tier: str) -> dict:
-        return {
+        result = {
             "reason": self.review_reason or ("cancellation_notice" if self.is_cancellation else "reconciled_flights"),
             "resolved": self.status == MessageStatus.ACCEPTED,
             "source": source,
@@ -144,6 +145,9 @@ class AppliedBooking:
             "blocked_cancellation": getattr(self.build, "blocked_cancellation", 0),
             "canceled_segments": self.canceled,
         }
+        if self.enrichment_audit:
+            result["strict_enrichment"] = self.enrichment_audit
+        return result
 
 
 _NONFINAL_CANCELLATION = re.compile(
@@ -307,6 +311,30 @@ def _reconcile_new_self_scopes(db, user_id, scopes):
             flight = _retained_flight(observation)
             if flight is not None:
                 pending[observation.id] = (observation, flight)
+        from .booking_enrichment import enabled
+        if enabled(user_id):
+            # Supplement only zero-padded equivalents (UA0123 / UA123) under
+            # the same primary booking and dated route. Original exact-number
+            # behavior above is unchanged. The ledger independently requires
+            # strict original passenger proof before any new inheritance.
+            from .builder import _normalize_flight_number
+            equivalents = db.query(BookingObservation).filter_by(
+                user_id=user_id, pnr=code, travel_date=day, dep_airport=dep,
+                arr_airport=arr, ownership="unknown",
+            ).order_by(BookingObservation.source_event_at.desc(), BookingObservation.id.desc()).limit(129).all()
+            if len(equivalents) <= 128:
+                for observation in equivalents:
+                    if (observation.flight_number != number
+                            and _normalize_flight_number(observation.flight_number) == _normalize_flight_number(number)):
+                        flight = _retained_flight(observation)
+                        # This additional replay must always use the strict
+                        # fallback in the ledger. A missing-number legacy proof
+                        # can make its older wildcard verifier true after the
+                        # current batch is stored; that does not authorize this
+                        # newly introduced replay path.
+                        if (flight is not None and not has_verified_self_observation(
+                                db, user_id, code, flight_scope(flight))):
+                            pending[observation.id] = (observation, flight)
     return _replay_retained(db, user_id, pending)
 
 
@@ -358,6 +386,22 @@ def _replay_retained(db, user_id, pending):
 
 
 def apply_booking_message(db, user_id: int, parsed, *, source_message_id: str,
+                          subject: str = "", plain_text: str = "", html: str = "",
+                          received_at=None) -> AppliedBooking:
+    from .booking_enrichment import enabled, current_source
+    from .carrier_travel_recovery import enabled as carrier_enabled
+    from .parser import PARSER_VERSION
+    kwargs = dict(source_message_id=source_message_id, subject=subject,
+                  plain_text=plain_text, html=html, received_at=received_at)
+    if not (enabled(user_id) or carrier_enabled(user_id)):
+        return _apply_booking_message(db, user_id, parsed, **kwargs)
+    with current_source(db, user_id, source_message_id, PARSER_VERSION) as context:
+        applied = _apply_booking_message(db, user_id, parsed, **kwargs)
+        applied.enrichment_audit = list(context["audit"])
+        return applied
+
+
+def _apply_booking_message(db, user_id: int, parsed, *, source_message_id: str,
                           subject: str = "", plain_text: str = "", html: str = "",
                           received_at=None) -> AppliedBooking:
     from .parser import _extract_pnr
@@ -430,11 +474,43 @@ def apply_booking_message(db, user_id: int, parsed, *, source_message_id: str,
     return AppliedBooking(result, canceled, cancellation, review_reason)
 
 
+def preserve_partial_evidence(previous, replacement) -> dict:
+    """Retain prior partial facts when a normal parse replaces its outcome.
+
+    Historical annotations are supporting records only. They cannot resolve a
+    message, identify its passenger, or create a flight. A successful new partial
+    extraction supplies the current annotation; older distinct facts stay here
+    even if the feature is disabled or a later extraction fails.
+    """
+    previous = previous if isinstance(previous, dict) else {}
+    result = dict(replacement)
+    history = []
+    for evidence in (previous, result):
+        stored = evidence.get("partial_flight_evidence_history", [])
+        for item in stored if isinstance(stored, list) else []:
+            if isinstance(item, dict) and item not in history:
+                history.append(deepcopy(item))
+    prior = previous.get("partial_flight_evidence")
+    if isinstance(prior, dict) and prior not in history:
+        history.append(deepcopy(prior))
+    current = result.get("partial_flight_evidence")
+    history = [item for item in history if item != current]
+    if history:
+        result["partial_flight_evidence_history"] = history
+    else:
+        result.pop("partial_flight_evidence_history", None)
+    return result
+
+
 def set_message_outcome(message, applied: AppliedBooking, *, source: str, tier: str) -> None:
+    existing_evidence = getattr(message, "parse_evidence", None)
+    carrier_marker = existing_evidence.get("carrier_evidence") if isinstance(existing_evidence, dict) else None
     message.status = applied.status
     message.ignored = False
     message.parse_error = applied.review_reason or (
         "passenger_identity_unresolved" if getattr(applied.build, "held_unknown", 0)
         else "cancellation_notice" if applied.is_cancellation else None
     )
-    message.parse_evidence = applied.evidence(source, tier)
+    message.parse_evidence = preserve_partial_evidence(existing_evidence, applied.evidence(source, tier))
+    if carrier_marker is not None:
+        message.parse_evidence = {**message.parse_evidence, "carrier_evidence": carrier_marker}

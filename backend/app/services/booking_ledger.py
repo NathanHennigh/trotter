@@ -79,7 +79,10 @@ def flight_facts(flight):
         "reconciles_observation_ids", "mail_received_at",
         "document_provenance",
     )
-    return {name: _json_value(getattr(flight, name, None)) for name in names}
+    facts = {name: _json_value(getattr(flight, name, None)) for name in names}
+    if getattr(flight, "source_leg", None):
+        facts["source_leg"] = _json_value(flight.source_leg)
+    return facts
 
 
 def snapshot_user_itinerary(db: Session, user_id: int, *, reason: str,
@@ -244,14 +247,36 @@ def record_flight_observations(db, user_id, flights, *, source_message_id=None, 
         if cancellation_blocks_flight(db, user_id, flight):
             decision.blocked_cancellation += 1
             continue
-        if flight.ownership == "unknown" and source_message_id and not verified:
-            decision.held_unknown += 1
-            continue
+        enrichment = None
+        if flight.ownership == "unknown" and source_message_id:
+            from .booking_enrichment import enabled, evaluate, record_audit
+            # Preserve the established import/correction path completely. The
+            # candidate only supplies additional authority where that path held
+            # an unnamed notice; it never vetoes an existing verified link.
+            if enabled(user_id) and not verified:
+                enrichment = evaluate(db, user_id, flight)
+                record_audit(db, user_id, enrichment, flight.observation_id)
+                verified = enrichment.allowed
+            if not verified:
+                from .carrier_travel_recovery import enabled as carrier_enabled, evaluate as evaluate_carrier
+                if carrier_enabled(user_id):
+                    carrier_decision = evaluate_carrier(db, user_id, flight)
+                    record_audit(db, user_id, carrier_decision, flight.observation_id)
+                    if carrier_decision.allowed:
+                        enrichment = carrier_decision
+                        verified = True
+            if not verified:
+                decision.held_unknown += 1
+                continue
         if flight.ownership == "unknown" and verified:
             flight.ownership = "self"
             original = getattr(flight, "passenger_evidence", None) or []
             flight.passenger_evidence = (list(original) if isinstance(original, list) else [original]) + [
-                {"reason": "verified_same_booking_dated_leg"},
+                ({"reason": enrichment.reason,
+                  "proof_observation_ids": list(enrichment.proof_observation_ids),
+                  **({"carrier_evidence_ids": list(enrichment.carrier_evidence_ids)}
+                     if getattr(enrichment, "carrier_evidence_ids", ()) else {})}
+                 if enrichment else {"reason": "verified_same_booking_dated_leg"}),
             ]
         decision.flights.append(flight)
     return decision

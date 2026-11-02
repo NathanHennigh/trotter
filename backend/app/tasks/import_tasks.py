@@ -257,6 +257,24 @@ def _message_skip_reason(existing_msg: Message | None, parser_version: int, *, f
         return None
 
     evidence = existing_msg.parse_evidence or {}
+    # A feature-specific marker revisits only supported carrier templates once;
+    # it does not invalidate every parsed email or bump the flight parser.
+    from app.services.carrier_travel_recovery import enabled as carrier_recovery_enabled
+    if carrier_recovery_enabled(existing_msg.user_id):
+        from app.services.carrier_travel_evidence import EVIDENCE_VERSION, may_have_carrier_travel_evidence
+        marker = evidence.get("carrier_evidence", {}) if isinstance(evidence, dict) else {}
+        if (isinstance(marker, dict) and marker.get("version") == EVIDENCE_VERSION
+                and marker.get("analyzed_no_flights") is True
+                and "how was your flight?" in (existing_msg.subject or "").lower()
+                and may_have_carrier_travel_evidence(existing_msg.subject or "", existing_msg.from_email or "")):
+            # A supporting survey is not an incomplete flight. The immutable
+            # source has been examined; parser/evidence version changes and
+            # explicit retries still run before this completion shortcut.
+            return "carrier_support_examined"
+        if (existing_msg.status != MessageStatus.IGNORED
+                and may_have_carrier_travel_evidence(existing_msg.subject or "", existing_msg.from_email or "")
+                and (not isinstance(marker, dict) or marker.get("version") != EVIDENCE_VERSION)):
+            return None
     if isinstance(evidence, dict) and evidence.get("resolved"):
         return str(evidence.get("reason") or "resolved")
 
@@ -463,7 +481,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
     global _ACTIVE_PROGRESS_PHASE
     _ACTIVE_PROGRESS_PHASE = None
     # Lazy imports so the module loads without the optional heavy packages installed
-    from app.services.booking_import import apply_booking_message, set_message_outcome
+    from app.services.booking_import import apply_booking_message, set_message_outcome, preserve_partial_evidence
     from app.services.import_lock import user_import_lock
     from app.services.gmail_connection import connection_status, mark_gmail_reconnect, is_gmail_authorization_error
     from app.services.enrichment import enrich_user_segments
@@ -687,13 +705,13 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             existing_msg.ignored = True
             existing_msg.parse_version = PARSER_VERSION
             existing_msg.parse_error = parse_miss.reason
-            existing_msg.parse_evidence = {
+            existing_msg.parse_evidence = preserve_partial_evidence(existing_msg.parse_evidence, {
                 **parse_miss.as_dict(),
                 "reason": parse_miss.reason,
                 "resolved": True,
                 "ignored_reason": parse_miss.reason,
                 "tier": tier,
-            }
+            })
             return existing_msg
 
         def mark_unresolved_review_required(
@@ -727,15 +745,16 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             existing_msg.ignored = False
             existing_msg.parse_version = PARSER_VERSION
             existing_msg.parse_error = parse_miss.reason
-            existing_msg.parse_evidence = {
+            existing_msg.parse_evidence = preserve_partial_evidence(existing_msg.parse_evidence, {
                 **parse_miss.as_dict(),
                 "resolved": False,
                 "tier": tier,
                 **({"evidence_gate": evidence_gate} if evidence_gate else {}),
-            }
+            })
             return existing_msg
 
         def process_payload(payload: dict, existing_msg: Message | None) -> None:
+            nonlocal updated_segments, skipped_segments
             _process_payload(payload, existing_msg)
             provenance = payload.get("document_provenance") or []
             errors = payload.get("document_errors") or []
@@ -750,6 +769,33 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     db.commit()
             if "pdf_fetch_failed" in errors:
                 failed_message_ids.add(payload["msg_id"])
+            from app.services.carrier_travel_recovery import enabled as carrier_recovery_enabled
+            if carrier_recovery_enabled(user_id):
+                from app.services.carrier_travel_evidence import may_have_carrier_travel_evidence
+                if may_have_carrier_travel_evidence(payload["subject"], payload["from_email"]):
+                    from app.services.carrier_travel_recovery import record_payload, reconcile
+                    # The ordinary message outcome and original flight facts are
+                    # already persisted. Typed supporting evidence never bypasses
+                    # those parsing gates and never supplies missing schedules.
+                    rows = record_payload(db, user_id, payload)
+                    recovered = reconcile(db, user_id, rows)
+                    touched_segment_ids.update(recovered.affected_segment_ids)
+                    job.segment_count += recovered.inserted
+                    updated_segments += recovered.updated
+                    skipped_segments += recovered.skipped
+                    if recovered.inserted or recovered.updated:
+                        reporter.count(payload["candidate"].tier, "carrier_travel_reconciled")
+                    db.commit()
+                from app.services.partial_flight_evidence import extract_partial_flight_evidence
+                partial = extract_partial_flight_evidence(payload["full_msg"])
+                if partial:
+                    row = db.query(Message).filter_by(user_id=user_id, provider_msg_id=payload["msg_id"]).one_or_none()
+                    if row is not None:
+                        # Preserve the normal review outcome. These stated facts
+                        # cannot create a timed flight or establish ownership.
+                        row.parse_evidence = preserve_partial_evidence(row.parse_evidence,
+                            {**(row.parse_evidence or {}), "partial_flight_evidence": partial})
+                        db.commit()
 
         def _process_payload(payload: dict, existing_msg: Message | None) -> None:
             nonlocal canceled_segments, skipped_segments, updated_segments
@@ -831,13 +877,13 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 existing_msg.status = MessageStatus.ACCEPTED
                 existing_msg.parse_version = PARSER_VERSION
                 existing_msg.parse_error = "cancellation_notice"
-                existing_msg.parse_evidence = {
+                existing_msg.parse_evidence = preserve_partial_evidence(existing_msg.parse_evidence, {
                     "reason": "cancellation_notice",
                     "pnr": pnr,
                     "canceled_segments": canceled_count,
                     "resolved": True,
                     "tier": candidate.tier,
-                }
+                })
                 set_message_outcome(existing_msg, applied, source=parse_result.source, tier=candidate.tier)
                 job.segment_count += applied.build.inserted
                 updated_segments += applied.build.updated
@@ -877,14 +923,14 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     existing_msg.status = MessageStatus.ACCEPTED
                     existing_msg.parse_version = PARSER_VERSION
                     existing_msg.parse_error = "ancillary_existing_pnr"
-                    existing_msg.parse_evidence = {
+                    existing_msg.parse_evidence = preserve_partial_evidence(existing_msg.parse_evidence, {
                         "reason": "ancillary_email_matches_existing_pnr",
                         "pnr": pnr,
                         "existing_segments": existing_pnr_segments,
                         "parse_miss": parse_miss.as_dict(),
                         "resolved": True,
                         "tier": candidate.tier,
-                    }
+                    })
                     reporter.count(candidate.tier, "ancillary")
                     job.updated_at = datetime.now(timezone.utc)
                     db.commit()
@@ -914,11 +960,11 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     existing_msg.ignored = False
                     existing_msg.parse_version = PARSER_VERSION
                     existing_msg.parse_error = parse_miss.reason
-                    existing_msg.parse_evidence = {
+                    existing_msg.parse_evidence = preserve_partial_evidence(existing_msg.parse_evidence, {
                         **parse_miss.as_dict(),
                         "resolved": False,
                         "tier": candidate.tier,
-                    }
+                    })
                     mutated = True
                 elif flight_like_candidate:
                     from_domain = from_email.split("@")[-1].rstrip(">").strip() if "@" in from_email else ""
@@ -946,11 +992,11 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                     existing_msg.status = MessageStatus.REVIEW_REQUIRED
                     existing_msg.parse_version = PARSER_VERSION
                     existing_msg.parse_error = parse_miss.reason
-                    existing_msg.parse_evidence = {
+                    existing_msg.parse_evidence = preserve_partial_evidence(existing_msg.parse_evidence, {
                         **parse_miss.as_dict(),
                         "resolved": False,
                         "tier": candidate.tier,
-                    }
+                    })
                     mutated = True
                 if mutated:
                     reporter.parser_miss(candidate.tier, parse_miss.reason)
@@ -984,13 +1030,13 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             existing_msg.ignored = False
             existing_msg.parse_version = PARSER_VERSION
             existing_msg.parse_error = None
-            existing_msg.parse_evidence = {
+            existing_msg.parse_evidence = preserve_partial_evidence(existing_msg.parse_evidence, {
                 "reason": "parsed_flights",
                 "resolved": True,
                 "flight_count": len(parse_result.flights),
                 "source": parse_result.source,
                 "tier": candidate.tier,
-            }
+            })
 
             job.parsed_count += 1
             record_flight_discovery_signals(db, user_id, headers)

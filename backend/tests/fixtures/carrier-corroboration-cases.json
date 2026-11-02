@@ -1,0 +1,384 @@
+{
+  "description": "Synthetic carrier corroboration acceptance fixtures. All identities, references, dates, flight numbers and itineraries are invented. Brand/template semantics are retained; no private source bodies or identifiers.",
+  "schema_version": 1,
+  "user": {
+    "name": "Maya Reed",
+    "email": "maya@example.test",
+    "aliases": [
+      "Maya June Vale",
+      "Maya Vale",
+      "Maya June Reed"
+    ]
+  },
+  "messages": [
+    {
+      "id": "aa-connection",
+      "sender": "American Airlines <no-reply@info.email.aa.com>",
+      "subject": "Your connecting flight to Nassau",
+      "received_at": "2027-02-10T13:00:00Z",
+      "text": "American Airlines\nConfirmation code: AX7Q2M\nWednesday, February 10, 2027\nCLT\nCharlotte\n10:15 AM\nAA 804\nNAS\nNassau\n12:20 PM\nYour connecting flight is ready.\nYour connecting flight to NAS"
+    },
+    {
+      "id": "aa-gate-update",
+      "sender": "American Airlines <no-reply@info.email.aa.com>",
+      "subject": "Your flight to Nassau - Departure Gate Change",
+      "received_at": "2027-02-10T13:20:00Z",
+      "text": "American Airlines\nFlight 804 to NAS departs from gate D12\nConfirmation code: AX7Q2M\nUPDATED\nWednesday, February 10, 2027\nCLT\nCharlotte\n10:15 AM\nAA 804\nNAS\nNassau\n12:35 PM"
+    },
+    {
+      "id": "aa-survey",
+      "sender": "American Airlines <AmericanAirlines@survey.na.aa.com>",
+      "subject": "MAYA, how was your flight?",
+      "received_at": "2027-02-12T20:00:00Z",
+      "text": "American Airlines\nThank you for flying with American Airlines.\nOur records show that you flew from BOS to NAS on February 10, 2027.\nBased on this trip, how likely are you to recommend American Airlines to a friend or colleague?\nThis is a customer opinion survey."
+    },
+    {
+      "id": "aa-checkin",
+      "sender": "American Airlines <no-reply@info.email.aa.com>",
+      "subject": "It's time to check in - AX7Q2M",
+      "received_at": "2027-02-16T20:00:00Z",
+      "text": "American Airlines\nAAdvantage Member QX8****\nIt's time to check in\nConfirmation code: AX7Q2M\nWednesday, February 17, 2027\nNAS\nNassau\n4:10 PM\nAA 0805\nJFK\nNew York\n7:25 PM\nCheck in now\nHi Maya June Ms,\nYour trip is almost here and we're excited to see you on board.\nCheck in to add your bags, choose your seats, and get your boarding pass.\nManage your trip"
+    },
+    {
+      "id": "aa-return",
+      "sender": "American Airlines <no-reply@info.email.aa.com>",
+      "subject": "Your flight to New York - AX7Q2M",
+      "received_at": "2027-02-17T18:00:00Z",
+      "text": "American Airlines\nFlight 805 to JFK\nConfirmation code: AX7Q2M\nWednesday, February 17, 2027\nNAS\nNassau\n4:10 PM\nAA 805\nJFK\nNew York\n7:25 PM"
+    },
+    {
+      "id": "sun-update-1",
+      "sender": "Sun Country Flight Information <suncountry@info.suncountry.com>",
+      "subject": "An important message regarding flight SY811",
+      "received_at": "2027-03-11T13:00:00Z",
+      "text": "Important information about your booking.\nReservation code: SZ4K8P\nDear Maya Vale,\nOne or more of your flights has been affected by a schedule change.\nMinneapolis to Cancun\nSY811\nFlight Delayed\nNonstop\n9:00AM\n8:00AM\nMinneapolis (MSP)\nMarch 11, 2027\n3h 20m\n1:20PM\n12:20PM\nCancun (CUN)\nMarch 11, 2027\nReservation Code: SZ4K8P"
+    },
+    {
+      "id": "sun-update-2",
+      "sender": "Sun Country Flight Information <suncountry@info.suncountry.com>",
+      "subject": "An important message regarding flight SY811",
+      "received_at": "2027-03-11T14:00:00Z",
+      "text": "Important information about your booking.\nReservation code: SZ4K8P\nDear Maya Vale,\nOne or more of your flights has been affected by a schedule change.\nMinneapolis to Cancun\nSY811\nFlight Delayed\nNonstop\n10:00AM\n8:00AM\nMinneapolis (MSP)\nMarch 11, 2027\n3h 20m\n2:20PM\n12:20PM\nCancun (CUN)\nMarch 11, 2027\nReservation Code: SZ4K8P"
+    },
+    {
+      "id": "sun-update-3",
+      "sender": "Sun Country Flight Information <suncountry@info.suncountry.com>",
+      "subject": "An important message regarding flight SY811",
+      "received_at": "2027-03-11T15:00:00Z",
+      "text": "Important information about your booking.\nReservation code: SZ4K8P\nDear Maya Vale,\nOne or more of your flights has been affected by a schedule change.\nMinneapolis to Cancun\nSY811\nFlight Delayed\nNonstop\n11:00AM\n8:00AM\nMinneapolis (MSP)\nMarch 11, 2027\n3h 20m\n3:20PM\n12:20PM\nCancun (CUN)\nMarch 11, 2027\nReservation Code: SZ4K8P"
+    },
+    {
+      "id": "sun-survey",
+      "sender": "Sun Country Airlines Customer Experience <suncountryairlines@express.sea1.medallia.com>",
+      "subject": "Maya, how was your flight?",
+      "received_at": "2027-03-11T22:00:00Z",
+      "text": "Hi Maya,\nThank you for flying with Sun Country Airlines from Minneapolis, MN to Cancun, Mexico on March 11, 2027.\nYour feedback helps us continuously improve and we'd love to hear about your experience."
+    },
+    {
+      "id": "sun-survey-reminder",
+      "sender": "Sun Country Airlines Customer Experience <suncountryairlines@express.sea1.medallia.com>",
+      "subject": "Maya, how was your flight? - We still want to hear from you",
+      "received_at": "2027-03-13T22:00:00Z",
+      "text": "Hi Maya,\nThank you for flying with Sun Country Airlines from Minneapolis, MN to Cancun, Mexico on March 11, 2027.\nYour feedback helps us continuously improve and we'd love to hear about your experience."
+    },
+    {
+      "id": "aa-other-survey",
+      "sender": "American Airlines <AmericanAirlines@survey.na.aa.com>",
+      "subject": "TAYLORJUNE, how was your flight?",
+      "received_at": "2027-02-19T20:00:00Z",
+      "text": "American Airlines\nOur records show that you flew from NAS to JFK on February 17, 2027.\nBased on this trip, how likely are you to recommend American Airlines to a friend or colleague?"
+    },
+    {
+      "id": "bilt-other-openjaw",
+      "sender": "Bilt <notifications@members.bilt.com>",
+      "subject": "Your flight booking is confirmed!",
+      "received_at": "2027-03-01T12:00:00Z",
+      "text": "Bilt\nMaya Reed\nHome base\nBooking confirmed!\nAirline confirmation\nBY7Q2C\nPassengers 1\nOutbound Itinerary\nAA901\n1h 30m\nSFO\nOrigin city\n11:00am\nWed, 7 Apr 2027\nDCA\nDestination city\n07:00pm\nWed, 7 Apr 2027\nOutbound Itinerary\nAA902\n1h 30m\nBWI\nOrigin city\n02:00pm\nFri, 9 Apr 2027\nCLT\nDestination city\n03:30pm\nFri, 9 Apr 2027\nOutbound Itinerary\nAA903\n1h 30m\nCLT\nOrigin city\n05:00pm\nFri, 9 Apr 2027\nSFO\nDestination city\n07:30pm\nFri, 9 Apr 2027\nPayment summary\nCardholder: Maya Reed",
+      "source_context": "Account header only; no passenger identity",
+      "operational_legs": [
+        {
+          "number": "AA901",
+          "dep": "SFO",
+          "arr": "DCA",
+          "date": "Wed, 7 Apr 2027"
+        },
+        {
+          "number": "AA902",
+          "dep": "BWI",
+          "arr": "CLT",
+          "date": "Fri, 9 Apr 2027"
+        },
+        {
+          "number": "AA903",
+          "dep": "CLT",
+          "arr": "SFO",
+          "date": "Fri, 9 Apr 2027"
+        }
+      ],
+      "existing_manual_self": false
+    },
+    {
+      "id": "bilt-other-return",
+      "sender": "Bilt <notifications@members.bilt.com>",
+      "subject": "Your flight booking is confirmed!",
+      "received_at": "2027-03-01T12:00:00Z",
+      "text": "Bilt\nMaya Reed\nHome base\nBooking confirmed!\nAirline confirmation\nBZ8R3D\nPassengers 1\nOutbound Itinerary\nDL901\n1h 30m\nDTW\nOrigin city\n10:00am\nWed, 7 Apr 2027\nDCA\nDestination city\n11:30am\nWed, 7 Apr 2027\nOutbound Itinerary\nDL902\n1h 30m\nDCA\nOrigin city\n01:00pm\nFri, 9 Apr 2027\nDTW\nDestination city\n02:30pm\nFri, 9 Apr 2027\nPayment summary\nCardholder: Maya Reed",
+      "source_context": "Account header only; no passenger identity",
+      "operational_legs": [
+        {
+          "number": "DL901",
+          "dep": "DTW",
+          "arr": "DCA",
+          "date": "Wed, 7 Apr 2027"
+        },
+        {
+          "number": "DL902",
+          "dep": "DCA",
+          "arr": "DTW",
+          "date": "Fri, 9 Apr 2027"
+        }
+      ],
+      "existing_manual_self": false
+    },
+    {
+      "id": "bilt-confirmed-own",
+      "sender": "Bilt <notifications@members.bilt.com>",
+      "subject": "Your flight booking is confirmed!",
+      "received_at": "2027-03-01T12:00:00Z",
+      "text": "Bilt\nMaya Reed\nHome base\nBooking confirmed!\nAirline confirmation\nBW6P1B\nPassengers 1\nOutbound Itinerary\nAA911\n1h 30m\nSAT\nOrigin city\n05:00am\nWed, 7 Apr 2027\nDFW\nDestination city\n06:00am\nWed, 7 Apr 2027\nOutbound Itinerary\nAA912\n1h 30m\nDFW\nOrigin city\n07:00am\nWed, 7 Apr 2027\nDCA\nDestination city\n11:00am\nWed, 7 Apr 2027\nOutbound Itinerary\nAA913\n1h 30m\nDCA\nOrigin city\n05:00pm\nFri, 9 Apr 2027\nDFW\nDestination city\n07:30pm\nFri, 9 Apr 2027\nOutbound Itinerary\nAA914\n1h 30m\nDFW\nOrigin city\n09:00pm\nFri, 9 Apr 2027\nSAT\nDestination city\n10:00pm\nFri, 9 Apr 2027\nPayment summary\nCardholder: Maya Reed",
+      "source_context": "Account header only; no passenger identity",
+      "operational_legs": [
+        {
+          "number": "AA911",
+          "dep": "SAT",
+          "arr": "DFW",
+          "date": "Wed, 7 Apr 2027"
+        },
+        {
+          "number": "AA912",
+          "dep": "DFW",
+          "arr": "DCA",
+          "date": "Wed, 7 Apr 2027"
+        },
+        {
+          "number": "AA913",
+          "dep": "DCA",
+          "arr": "DFW",
+          "date": "Fri, 9 Apr 2027"
+        },
+        {
+          "number": "AA914",
+          "dep": "DFW",
+          "arr": "SAT",
+          "date": "Fri, 9 Apr 2027"
+        }
+      ],
+      "existing_manual_self": true
+    },
+    {
+      "id": "emirates-other",
+      "sender": "Emirates <Emirates@email.emirates.com>",
+      "subject": "Check in online for your flight EK912",
+      "received_at": "2027-04-01T12:00:00Z",
+      "text": "Check in for your flight online\nHello Taylor,\nPassengers\nMr Taylor Reed\nEmirates Skywards number XX999999\nFlight EK912\nJFK to DXB\nApril 2, 2027\nManage your booking"
+    },
+    {
+      "id": "emirates-other-compact",
+      "sender": "Emirates <Emirates@email.emirates.com>",
+      "subject": "Check in online for your flight EK912",
+      "received_at": "2027-04-01T12:00:00Z",
+      "text": "Check in for your flight online\nHello Taylor,\nPassengers\nMr Taylorjune Reed\nEmirates Skywards number XX999999\nFlight EK912\nJFK to DXB\nApril 2, 2027\nManage your booking"
+    }
+  ],
+  "positive_cases": [
+    {
+      "id": "aa-connecting-and-return",
+      "sources": [
+        "aa-connection",
+        "aa-gate-update",
+        "aa-survey",
+        "aa-checkin",
+        "aa-return"
+      ],
+      "expected_legs": [
+        {
+          "carrier": "AA",
+          "number": "AA804",
+          "dep": "CLT",
+          "arr": "NAS",
+          "date": "2027-02-10",
+          "departure_utc": "2027-02-10T15:15:00+00:00",
+          "arrival_utc": "2027-02-10T17:35:00+00:00"
+        },
+        {
+          "carrier": "AA",
+          "number": "AA805",
+          "dep": "NAS",
+          "arr": "JFK",
+          "date": "2027-02-17",
+          "departure_utc": "2027-02-17T21:10:00+00:00",
+          "arrival_utc": "2027-02-18T00:25:00+00:00"
+        }
+      ],
+      "forbidden_inferred_routes": [
+        [
+          "BOS",
+          "CLT"
+        ]
+      ],
+      "policy": "Only reviewed carrier connecting-journey and bounded personal booking scoping; no general destination or unlimited PNR propagation."
+    },
+    {
+      "id": "sun-explicit-post-travel",
+      "sources": [
+        "sun-update-1",
+        "sun-update-2",
+        "sun-update-3",
+        "sun-survey",
+        "sun-survey-reminder"
+      ],
+      "expected_legs": [
+        {
+          "carrier": "SY",
+          "number": "SY811",
+          "dep": "MSP",
+          "arr": "CUN",
+          "date": "2027-03-11",
+          "departure_utc": "2027-03-11T17:00:00+00:00",
+          "arrival_utc": "2027-03-11T20:20:00+00:00"
+        }
+      ],
+      "latest_schedule_source": "sun-update-3"
+    }
+  ],
+  "negative_cases": [
+    {
+      "id": "bilt-account-is-not-passenger",
+      "sources": [
+        "bilt-other-openjaw",
+        "bilt-other-return"
+      ],
+      "expected_added_personal_legs": 0,
+      "expected_retained_unknown_legs": 5
+    },
+    {
+      "id": "own-bilt-decision-preserved",
+      "sources": [
+        "bilt-confirmed-own"
+      ],
+      "expected_existing_self_legs": 4,
+      "expected_added_personal_legs": 0
+    },
+    {
+      "id": "survey-other-person-in-own-inbox",
+      "sources": [
+        "aa-other-survey",
+        "aa-return"
+      ],
+      "expected_added_personal_legs": 0
+    },
+    {
+      "id": "same-family-other-passengers",
+      "sources": [
+        "emirates-other",
+        "emirates-other-compact"
+      ],
+      "expected_added_personal_legs": 0
+    }
+  ],
+  "mutation_matrix": [
+    {
+      "id": "cancelled-leg",
+      "change": "Add original scoped cancellation for target leg",
+      "expected": "No promotion; keep cancellation and originals"
+    },
+    {
+      "id": "manual-other",
+      "change": "Add exact target manual other/hold decision",
+      "expected": "No promotion; preserve decision and segment"
+    },
+    {
+      "id": "active-share",
+      "change": "Create pending or accepted share for target retained item",
+      "expected": "No promotion or share reassignment"
+    },
+    {
+      "id": "competing-booking",
+      "change": "Clone complete matching operational dated leg with different primary PNR",
+      "expected": "Ambiguous join stays held; no arbitrary first match"
+    },
+    {
+      "id": "conflicting-passenger",
+      "change": "Add applicable explicit other traveler to target leg",
+      "expected": "Hold; do not let weaker corroboration override"
+    },
+    {
+      "id": "conflicting-survey-name",
+      "change": "Change only survey person to another known traveler",
+      "expected": "Hold"
+    },
+    {
+      "id": "same-first-name",
+      "change": "Add known different traveler sharing owner's first name",
+      "expected": "Partial-name assertion cannot disambiguate"
+    },
+    {
+      "id": "wrong-carrier",
+      "change": "Change survey carrier while keeping route/date",
+      "expected": "No cross-carrier assertion link"
+    },
+    {
+      "id": "wrong-travel-day",
+      "change": "Change survey local travel day by one",
+      "expected": "No date-nearness authority"
+    },
+    {
+      "id": "opposite-direction",
+      "change": "Reverse survey origin/destination",
+      "expected": "No reverse-route authority"
+    },
+    {
+      "id": "stale-source",
+      "change": "Supersede indexed source with a contradictory or invalid current revision",
+      "expected": "Currentness failure; no inherited stale authority"
+    },
+    {
+      "id": "future-survey",
+      "change": "Survey source event precedes asserted flight completion",
+      "expected": "Do not treat as post-travel evidence"
+    },
+    {
+      "id": "duplicate-survey",
+      "change": "Repeat survey/reminder with same assertion",
+      "expected": "Deduplicate; not two independent identities"
+    },
+    {
+      "id": "same-pnr-distant",
+      "change": "Add unrelated dated leg months later with same PNR",
+      "expected": "No unlimited booking or year-crossing propagation"
+    },
+    {
+      "id": "missing-leg-facts",
+      "change": "Remove opposite airport or a required clock from operational source",
+      "expected": "Retain partial evidence; do not fabricate completion"
+    },
+    {
+      "id": "marketing-template",
+      "change": "Keep name/date/place words but replace completed-travel assertion with offers",
+      "expected": "No corroboration"
+    },
+    {
+      "id": "recipient-and-footer",
+      "change": "Only owner identity is destination email or footer",
+      "expected": "No ownership"
+    }
+  ],
+  "invariants": [
+    "Both complete input orders converge in one bounded import cycle",
+    "Shuffled input order gives same final latest source schedule",
+    "Second import does not add segments, assertions or immutable evidence",
+    "Existing segment IDs/privacy/trip membership/shares/manual decisions survive outside intended additions",
+    "No network or AI calls",
+    "Synthetic fixture assertions must fail if zero positive recoveries"
+  ]
+}

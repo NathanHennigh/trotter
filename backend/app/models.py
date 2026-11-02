@@ -290,7 +290,10 @@ class Segment(Base):
 class BookingObservation(Base):
     """Immutable extracted facts, including facts held outside the active itinerary."""
     __tablename__ = "booking_observations"
-    __table_args__ = (UniqueConstraint("user_id", "evidence_key", name="uq_booking_observation_evidence"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "evidence_key", name="uq_booking_observation_evidence"),
+        Index("ix_booking_observation_user_date", "user_id", "travel_date"),
+    )
 
     id = Column(BigInteger().with_variant(Integer, 'sqlite'), primary_key=True)
     user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -303,6 +306,37 @@ class BookingObservation(Base):
     arr_airport = Column(String(8), nullable=True)
     flight_number = Column(String(16), nullable=True)
     ownership = Column(String(16), nullable=False)
+    facts = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class CarrierTravelEvidence(Base):
+    """Immutable carrier assertions; never a flight or a passenger manifest.
+
+    A named post-travel assertion can corroborate independently extracted flight
+    facts. Keep this authority separate from BookingObservation SELF decisions.
+    """
+    __tablename__ = "carrier_travel_evidence"
+    __table_args__ = (
+        UniqueConstraint("user_id", "evidence_key", name="uq_carrier_travel_evidence"),
+        Index("ix_carrier_evidence_user_date", "user_id", "carrier", "local_day"),
+        Index("ix_carrier_evidence_user_booking", "user_id", "carrier", "pnr"),
+        Index("ix_carrier_evidence_user_source", "user_id", "source_message_id"),
+    )
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    evidence_key = Column(String(64), nullable=False)
+    source_message_id = Column(String(255), nullable=False)
+    source_sha256 = Column(String(64), nullable=False)
+    evidence_version = Column(Integer, nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False)
+    kind = Column(String(40), nullable=False)
+    carrier = Column(String(8), nullable=False)
+    name = Column(String(255), nullable=True)
+    local_day = Column(String(10), nullable=True)
+    dep_airport = Column(String(8), nullable=True)
+    arr_airport = Column(String(8), nullable=True)
+    pnr = Column(String(16), nullable=True)
     facts = Column(JSON, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 

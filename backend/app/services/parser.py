@@ -7,6 +7,7 @@ import logging
 import re
 import time
 import unicodedata
+from hashlib import sha256
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -1195,6 +1196,7 @@ class ParsedFlight:
     passenger_evidence: list[dict] = field(default_factory=list)
     ownership: str = "unknown"
     time_provenance: dict = field(default_factory=dict)
+    source_leg: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -2428,8 +2430,11 @@ def _shape_numbered_flight_cards(text: str, *, pnr: Optional[str]) -> list[Parse
                 pnr=pnr,
                 source="shape_numbered_flight_cards",
                 confidence=95,
+                source_leg=_document_leg_pointer(
+                    lines[index:index + 8], template="numbered_flight_card", sequence=len(flights) + 1),
             )
         )
+    _mark_ambiguous_document_legs(flights)
     return flights
 
 
@@ -3855,13 +3860,87 @@ def _parse_short_month_day_time(
     return _parse_partial_date_time(month, match.group("day"), time_line, received_at)
 
 
+def _document_leg_pointer(lines: list[str], *, template: str, sequence: int) -> dict:
+    """A source-local block fingerprint, never authority to join two emails.
+
+    This excludes parsed airports/dates so improving their interpretation does
+    not change the pointer. The importer must also establish source, account,
+    booking, passenger and parser revision before correcting any stored leg.
+    """
+    block = "\n".join(re.sub(r"\s+", " ", line.lstrip("> ").strip()) for line in lines)
+    return {"version": 1, "template": template, "sequence": sequence,
+            "key": sha256(("1\0" + template + "\0" + block).encode()).hexdigest(),
+            "ambiguous": False}
+
+
+def _mark_ambiguous_document_legs(flights: list[ParsedFlight]) -> None:
+    facts: dict[str, set[tuple]] = {}
+    for flight in flights:
+        if key := flight.source_leg.get("key"):
+            # Plain text, HTML and compact evidence may contain the same
+            # original leg. Identical representations are not competing legs.
+            # The same raw block under different dated headings/bookings is.
+            facts.setdefault(key, set()).add((flight.pnr, flight.flight_number,
+                flight.airline, flight.dep_airport, flight.arr_airport,
+                flight.dep_time, flight.arr_time))
+    for flight in flights:
+        if len(facts.get(flight.source_leg.get("key"), ())) > 1:
+            flight.source_leg["ambiguous"] = True
+
+
+def _ota_section_boundary(line: str) -> bool:
+    return bool(re.match(r"(?:outbound\s+to|inbound\s+to|return\s+to|fare\s+details|"
+                         r"payment\s+info|seat\s+selection|helpful\s+links)\b", line, re.I))
+
+
+def _ota_printed_connection(previous: ParsedFlight, intervening: list[str],
+                            dep_airport: str, dep_clock: str):
+    """Use a printed layover after a proven arrival, not a heading-date guess."""
+    proof = previous.time_provenance.get("date_evidence") or {}
+    if (getattr(previous, "force_review", False) or proof.get("status") != "verified"
+            or previous.arr_airport != dep_airport or any(_ota_section_boundary(line) for line in intervening)):
+        return None
+    layovers = [match for line in intervening if (match := re.fullmatch(
+        r"(?:(\d{1,2})h\s*)?(?:(\d{1,2})m\s*)?layover\s+in\s+(.+)", line, re.I))
+        and (match.group(1) or match.group(2))]
+    if len(layovers) != 1:
+        return None
+    layover = layovers[0]
+    if _airport_from_layover_line("Layover in " + layover.group(3)) != dep_airport:
+        return None
+    if int(layover.group(2) or 0) >= 60:
+        return None
+    minutes = int(layover.group(1) or 0) * 60 + int(layover.group(2) or 0)
+    if not 0 < minutes <= 72 * 60:
+        return None
+    from .flight_times import _endpoint, _zone
+    arrival, _, error = _endpoint(previous.arr_time, previous.arr_airport, "airport_local")
+    if error:
+        return None
+    expected = (arrival + timedelta(minutes=minutes)).astimezone(_zone(dep_airport))
+    printed = _parse_time_only(dep_clock)
+    if not printed or (expected.hour, expected.minute) != (printed.hour, printed.minute):
+        return None
+    wall = expected.replace(tzinfo=timezone.utc)
+    # Also reject a fall-back DST clock that has two possible absolute instants.
+    actual, _, error = _endpoint(wall, dep_airport, "airport_local")
+    if error or actual != arrival + timedelta(minutes=minutes):
+        return None
+    return wall, {"kind": "printed_connection", "status": "verified",
+                  "previous_leg_key": previous.source_leg.get("key"),
+                  "connection_airport": dep_airport, "layover_minutes": minutes,
+                  "previous_departure_date": previous.dep_time.date().isoformat(),
+                  "previous_arrival_date": previous.arr_time.date().isoformat(),
+                  "departure_date": wall.date().isoformat()}
+
+
 def _shape_ota_multi_confirmation(
     text: str,
     *,
     fallback_pnr: Optional[str],
     received_at: Optional[datetime],
 ) -> list[ParsedFlight]:
-    if "confirmation codes" not in text.lower():
+    if "confirmation code" not in text.lower():
         return []
     lines = _normalized_lines(text)
     pnr_by_airline = _airline_confirmation_codes_from_lines(lines)
@@ -3869,6 +3948,9 @@ def _shape_ota_multi_confirmation(
         return []
 
     flights: list[ParsedFlight] = []
+    previous = None
+    previous_index = None
+    sequence = 0
     for index, line in enumerate(lines):
         match = re.search(
             r"\b(?P<airline_name>[A-Z][A-Za-z .&'-]{2,35})\s*-\s*"
@@ -3878,6 +3960,9 @@ def _shape_ota_multi_confirmation(
         )
         if not match:
             continue
+        preceding, preceding_index = previous, previous_index
+        previous, previous_index = None, None
+        sequence += 1
         airline = match.group("airline").upper()
         inferred_airline = _airline_code_from_name(match.group("airline_name")) or airline
         if airline not in _KNOWN_AIRLINES and inferred_airline not in _KNOWN_AIRLINES:
@@ -3885,11 +3970,25 @@ def _shape_ota_multi_confirmation(
         airline = inferred_airline if inferred_airline in _KNOWN_AIRLINES else airline
         date_line = _nearest_prior_date_line(lines, index)
         dep_airport, dep_time, arr_airport, arr_time = _next_two_airport_time_pairs(lines, index + 1)
-        if not date_line or not dep_airport or not arr_airport or not dep_time or not arr_time:
+        if not dep_airport or not arr_airport or not dep_time or not arr_time:
             continue
-        dep_dt = _parse_date_time(date_line, dep_time)
-        arr_dt = _parse_date_time(date_line, arr_time)
-        if (not dep_dt or not arr_dt) and received_at:
+        connection = None
+        connection_context = False
+        if preceding is not None:
+            intervening = lines[preceding_index + 1:index]
+            # A fresh date or direction heading starts a new dated journey.
+            fresh_date = any(_nearest_prior_date_line([value], 1) for value in intervening)
+            connection_context = not fresh_date and not any(_ota_section_boundary(value) for value in intervening)
+            if connection_context:
+                connection = _ota_printed_connection(preceding, intervening, dep_airport, dep_time)
+        if connection:
+            dep_dt = connection[0]
+            clock = _parse_time_only(arr_time)
+            arr_dt = dep_dt.replace(hour=clock.hour, minute=clock.minute) if clock else None
+        else:
+            dep_dt = _parse_date_time(date_line, dep_time) if date_line else None
+            arr_dt = _parse_date_time(date_line, arr_time) if date_line else None
+        if not connection and (not dep_dt or not arr_dt) and received_at and date_line:
             dep_dt = _parse_partial_month_day_line(date_line, dep_time, received_at)
             arr_dt = _parse_partial_month_day_line(date_line, arr_time, received_at)
         if not dep_dt or not arr_dt or not _valid_route(dep_airport, arr_airport):
@@ -3904,6 +4003,11 @@ def _shape_ota_multi_confirmation(
                 next_flight = True
                 break
         leg_lines = lines[index + 1:stop]
+        pointer_end = stop
+        for boundary in range(index + 1, stop):
+            if _ota_section_boundary(lines[boundary]):
+                pointer_end = boundary
+                break
         endpoint_positions: list[int] = []
         for position, value in enumerate(leg_lines):
             if not _airport_token_from_line(value.lstrip("> ")):
@@ -3930,6 +4034,8 @@ def _shape_ota_multi_confirmation(
             flight_number=f"{airline}{match.group('number').upper()}",
             pnr=pnr_by_airline.get(airline) or fallback_pnr,
             source="shape_ota_multi_confirmation", confidence=94,
+            source_leg=_document_leg_pointer(lines[index:pointer_end],
+                template="ota_multi_confirmation", sequence=sequence),
         )
         if next_flight and len(endpoint_positions) < 2:
             # The older endpoint extractor can borrow the next flight's
@@ -3949,7 +4055,20 @@ def _shape_ota_multi_confirmation(
             # Preserve the existing no-duration path; this change only resolves
             # dates with independent elapsed-time evidence.
             flight.arr_time += timedelta(days=1)
+        if connection:
+            date_proof = flight.time_provenance.setdefault("date_evidence", {
+                "kind": "printed_connection", "status": "verified"})
+            date_proof["departure_evidence"] = connection[1]
+        elif connection_context and (preceding.time_provenance.get("date_evidence") or {}).get("status") == "verified":
+            # A heading belongs to the first departure. It cannot silently
+            # date a later connection when its printed layover does not agree.
+            flight.force_review = True
+            flight.time_provenance["date_evidence"] = {
+                "kind": "printed_connection", "status": "needs_review",
+                "reason": "unresolved_connection_date"}
         flights.append(flight)
+        previous, previous_index = flight, index
+    _mark_ambiguous_document_legs(flights)
     return flights
 
 
@@ -3960,6 +4079,14 @@ def _airline_confirmation_codes_from_lines(lines: list[str]) -> dict[str, str]:
     for index, line in enumerate(lines):
         clean = line.lstrip("> ").strip()
         lower = clean.lower()
+        labeled = re.fullmatch(r"(?:here['’]s\s+)?your\s+(.+?)\s+confirmation\s+code\s*[:#]\s*([A-Z0-9]{5,8})?", clean, re.I)
+        if labeled:
+            airline = _AIRLINE_NAME_TO_CODE.get(labeled.group(1).strip().lower())
+            if airline:
+                candidate = (labeled.group(2) or (lines[index + 1] if index + 1 < len(lines) else "")).strip(" *:|#")
+                if re.fullmatch(r"[A-Z0-9]{5,8}", candidate) and candidate not in _PNR_STOPWORDS and candidate not in _KNOWN_AIRLINES:
+                    codes.setdefault(airline, set()).add(candidate)
+            continue
         if ("confirmation codes" in lower or "confirmation code" in lower
                 or re.fullmatch(r"cancelled|canceled", lower)):
             in_section = True
@@ -6876,7 +7003,32 @@ def _better_flight(current: Optional[ParsedFlight], candidate: ParsedFlight) -> 
             -flight.dep_time.timestamp(),
         )
 
-    winner = candidate if quality(candidate) > quality(current) else current
+    def complete_copy(complete: ParsedFlight, incomplete: ParsedFlight) -> bool:
+        # One original email is parsed through multiple visible representations.
+        # A compact representation can borrow an endpoint from its next flight,
+        # while the complete copy supplies a verified overnight arrival. Local
+        # wall-clock duration alone must not prefer that held partial copy.
+        if (complete.source != "shape_ota_multi_confirmation"
+                or incomplete.source != complete.source
+                or not complete.pnr or not complete.flight_number
+                or any(getattr(complete, key) != getattr(incomplete, key) for key in (
+                    "pnr", "flight_number", "dep_airport", "arr_airport", "dep_time"))):
+            return False
+        proof = complete.time_provenance.get("date_evidence") or {}
+        partial = incomplete.time_provenance.get("date_evidence") or {}
+        return (not getattr(complete, "force_review", False)
+                and proof.get("kind") == "printed_elapsed" and proof.get("status") == "verified"
+                and getattr(incomplete, "force_review", False)
+                and partial.get("kind") == "flight_endpoint_scope"
+                and partial.get("status") == "needs_review"
+                and partial.get("reason") == "flight_endpoint_crosses_next_flight")
+
+    if complete_copy(candidate, current):
+        winner = candidate
+    elif complete_copy(current, candidate):
+        winner = current
+    else:
+        winner = candidate if quality(candidate) > quality(current) else current
     names = [*current.passenger_names, *candidate.passenger_names]
     names.extend(name for name in (current.passenger_name, candidate.passenger_name) if name)
     winner.passenger_names = list(dict.fromkeys(names))

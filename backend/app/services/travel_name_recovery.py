@@ -100,7 +100,7 @@ def flight_from(observation):
         ownership="self", passenger_names=facts.get("passenger_names") or [],
         passenger_evidence=facts.get("passenger_evidence") or [], force_review=bool(facts.get("force_review")),
         **{key: facts.get(key) for key in ('time_provenance', 'source_time_provenance', 'parser_version',
-            'recovery_observation_ids', 'reconciles_observation_ids', 'document_provenance', 'mail_received_at')})
+            'recovery_observation_ids', 'reconciles_observation_ids', 'document_provenance', 'mail_received_at', 'source_leg')})
 
 
 def active_shares_for_item(db, user_id, item_id):
