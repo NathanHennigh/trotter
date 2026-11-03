@@ -1,5 +1,11 @@
 # Independent recovery pilot — 2026-11-03
 
+Follow-up: the manual deeper audit in `flight-recovery-deep-audit-2026-11-03.md`
+expands the incomplete six-missing-leg inventory to ten complete missing legs
+plus four partial legs. It also qualifies the 2023 Allegiant cancellation
+classification after inspecting the cancellation's timing. No live repair has
+been applied.
+
 ## Deployment state
 
 The designated third tester registered as account **12** and connected Gmail.
@@ -51,8 +57,10 @@ Source-backed findings on the unchanged live baseline:
   parser; Allegiant passenger scope is lost around “confirmation number is”;
   the Delta itinerary sources produce no flight facts. Simply enabling the
   recovery switches does not fix these extraction/association problems.
-- A superseded Alaska itinerary and a canceled 2023 Allegiant booking must not
-  be recovered as additional active trips. Two Amex attachment reviews are
+- A superseded Alaska itinerary must not be recovered as an additional active
+  trip. The 2023 Allegiant booking has a cancellation, but the deeper follow-up
+  found it arrived after both travel dates; its disposition is held as a
+  conflict, not conclusively unflown. Two Amex attachment reviews are
   hotel documents, not missing flight tickets. The Sun Country ANC–MSP–DFW
   return evidence lacks intermediate clocks and must remain incomplete.
 
