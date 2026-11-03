@@ -1,6 +1,11 @@
 # Controlled flight recovery release — 2026-11-02
 
 Runtime source: `94bd718` on `codex/flight-replay-hardening`.
+
+Follow-up: account 12 joined the limited cohort on November 3. The independent
+pilot uncovered correctness/coverage gaps, so global enablement is held. See
+`flight-recovery-pilot-2026-11-03.md` for the current state and acceptance limits.
+
 Image: `trotter-backend:readiness-94bd718`, SHA256
 `7192f27e312c74e4b37103a6ec83bd3a2c952b1c6ed2657047b08c2e729da171`.
 All six backend services use this image. Parser revision remains 28; no forced
@@ -9,7 +14,8 @@ full-history replay or parser-version bump was introduced. Schema head is
 
 ## Scope and verification
 
-- All four optional recovery switches are enabled only for account IDs 1 and 9.
+- At this initial release, all four optional recovery switches were enabled
+  only for account IDs 1 and 9 (see the follow-up above for the current cohort).
   Empty/malformed cohorts fail closed. The existing Gmail history-discovery
   enrollment and processing limits were preserved.
 - The complete backend suite passed 3,216 tests with four existing skips. The
