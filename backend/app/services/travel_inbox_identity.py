@@ -100,6 +100,32 @@ def _unassigned() -> RetainedPassenger:
     return {"passenger_name": None, "passenger_key": None, "reason": "unassigned"}
 
 
+def exact_airline_name_format_match(left: str, right: str) -> bool:
+    """Compare explicit family/given notation, without omitting any name part.
+
+    This only corroborates an independently identical issued ticket. It never
+    establishes ownership or a recipient account and never uses prefix matches.
+    """
+    from .passenger_identity import _compact_given_matches
+    if not all(isinstance(value, str) and _has_full_name(value) for value in (left, right)):
+        return False
+    for explicit, natural in ((left, right), (right, left)):
+        if len(re.findall(r"[/,]", explicit)) != 1 or re.search(r"[/,]", natural):
+            continue
+        if any(re.search(r"[-–]", value) or set(re.findall(r"[^\W\d_]+", value.casefold())) & _SUFFIXES
+               for value in (explicit, natural)):
+            continue
+        family, given = (_name_words(value) for value in re.split(r"[/,]", explicit))
+        full = _name_words(natural)
+        if (len(family) != 1 or len(full) < 2 or family[0] != full[-1]
+                or any(len(part) < 2 for part in [*family, *given, *full])
+                or set(full[:-1]) & _FAMILY_PARTICLES):
+            continue
+        if given == full[:-1] or _compact_given_matches(given, full[:-1]):
+            return True
+    return False
+
+
 def retained_passengers(observation: Any, user: Any) -> list[RetainedPassenger]:
     """Return safely named companions/other travelers and one ambiguity marker.
 

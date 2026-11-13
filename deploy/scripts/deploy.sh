@@ -32,8 +32,19 @@ if [[ -n "${APPLE_KEY_ID:-}" || -n "${APPLE_TEAM_ID:-}" ]]; then
   }
   compose+=(-f "$DEPLOY_DIR/compose.ios.yml")
 fi
+if [[ -n "${TROTTER_PARSER_ROUTER_IMAGE:-}" || -n "${TROTTER_PARSER_PILOT_IMAGE:-}" ]]; then
+  # The pilot and routing images are prepared from a verified release. Building
+  # API or worker here would overwrite the pinned routing tag with ordinary code.
+  : "${TROTTER_PARSER_ROUTER_IMAGE:?Missing routing image}" "${TROTTER_PARSER_PILOT_IMAGE:?Missing pilot image}"
+  docker image inspect "$TROTTER_PARSER_ROUTER_IMAGE" "$TROTTER_PARSER_PILOT_IMAGE" >/dev/null
+  compose+=(-f "$DEPLOY_DIR/compose.parser-pilot.yml")
+fi
 "${compose[@]}" config --quiet
-"${compose[@]}" build
+if [[ -n "${TROTTER_PARSER_PILOT_IMAGE:-}" ]]; then
+  "${compose[@]}" build db migrate web
+else
+  "${compose[@]}" build
+fi
 "${compose[@]}" rm -sf migrate >/dev/null 2>&1 || true
 "${compose[@]}" up -d
 

@@ -17,6 +17,10 @@ from bs4 import BeautifulSoup
 
 from ..models import MessageStatus
 from .parser_preprocess import prepare_parser_text
+from .html_visibility import permitted_jsonld_scripts, visible_html_soup
+from .priceline_itinerary import extract_priceline_itinerary
+from .frontier_itinerary import extract_frontier_connection_cards
+from .booking_references import extract_primary_reference, extract_reference_fields
 from .passenger_identity import (
     apply_passenger_identity,
     identity_candidates,
@@ -272,10 +276,10 @@ _SOUTHWEST_FLIGHT_SECTION = re.compile(
 _SOUTHWEST_SEGMENT = re.compile(
     r"""
     \bFLIGHT\s*\#\s*(?P<number>\d{1,4}[A-Z]?)
-    .{0,500}?
+    (?:(?!\bFLIGHT\s*\#|\#\s*\d).){0,500}?
     DEPARTS\s+\W*(?P<dep_airport>[A-Z]{3})\W+
     (?P<dep_time>\d{1,2}:\d{2})\W*(?P<dep_ampm>AM|PM)
-    .{0,500}?
+    (?:(?!\bFLIGHT\s*\#|\#\s*\d).){0,500}?
     ARRIVES\s+\W*(?P<arr_airport>[A-Z]{3})\W+
     (?P<arr_time>\d{1,2}:\d{2})\W*(?P<arr_ampm>AM|PM)
     """,
@@ -1256,12 +1260,12 @@ def parse_email(
             if not flight.airline and re.fullmatch(r"\d{1,4}", flight.flight_number or ""):
                 flight.airline = sender_airline
                 flight.flight_number = sender_airline + flight.flight_number
-    if any(not flight.pnr for flight in result.flights):
+    if any(not flight.pnr and not flight.source_leg.get("booking_references") for flight in result.flights):
         reference_text = "\n".join([plain_text or "", _html_to_parser_text(html) if html else ""])
         references = _airline_confirmation_codes_from_lines(_normalized_lines(reference_text))
         for flight in result.flights:
             airline = flight.airline or (flight.flight_number or "")[:2]
-            if not flight.pnr and airline in references:
+            if not flight.pnr and not flight.source_leg.get("booking_references") and airline in references:
                 flight.pnr = references[airline]
     apply_passenger_identity(
         result.flights, html=html, plain_text=plain_text, user_name=user_name, aliases=aliases,
@@ -1354,6 +1358,48 @@ def _parse_email_flights(
         diagnostics["is_forwarded"] = text_bundle.is_forwarded
     base_text = text_bundle.forwarded_text or text_bundle.clean_text
     header_context = "\n".join(part for part in [from_email, subject] if part)
+    frontier_cards = extract_frontier_connection_cards(text_bundle.structural_text)
+    if frontier_cards is not None:
+        # A numbered connection summary is not itself a flight. Recognized
+        # partial cards stay held instead of falling through to its endpoints.
+        flights = [ParsedFlight(**value) for value in frontier_cards]
+        _mark_ambiguous_document_legs(flights)
+        _stamp_source_received_at(flights, received_at)
+        return ParseResult(flights=flights, source="shape")
+    trip_cards = extract_priceline_itinerary(text_bundle.structural_text, airline_codes=_AIRLINE_NAME_TO_CODE)
+    if trip_cards is not None:
+        # A recognized dated document cannot fall back to loose cross-products
+        # when one of its source-local cards or connection dates is unproven.
+        flights = [ParsedFlight(**value) for value in trip_cards]
+        carrier_references: dict[str, set[str]] = {}
+        for field in extract_reference_fields(text_bundle.structural_text):
+            carrier = _AIRLINE_NAME_TO_CODE.get((field.airline or "").strip().lower())
+            if carrier:
+                carrier_references.setdefault(carrier, set()).add(field.code)
+        for flight in flights:
+            references = carrier_references.get(flight.airline, set())
+            if len(references) == 1:
+                # Only an explicit, unambiguous carrier field belongs to its
+                # cards. Agency locators and other carriers never become aliases.
+                flight.pnr = next(iter(references))
+                flight.source_leg["booking_references"] = {"primary": flight.pnr, "aliases": []}
+        _mark_ambiguous_document_legs(flights)
+        _stamp_source_received_at(flights, received_at)
+        return ParseResult(flights=flights, source="shape")
+    structured = _shape_scoped_booking_cards(text_bundle.structural_text)
+    if structured is not None:
+        _mark_ambiguous_document_legs(structured)
+        _stamp_source_received_at(structured, received_at)
+        return ParseResult(flights=structured, source="shape")
+    if _southwest_itinerary_card_sections(text_bundle.structural_text):
+        # These cards repeat standalone AM/PM cells. The compact views can
+        # erase them, so only this lossless view may supply their clocks.
+        # An incomplete recognized card must not fall back to guessed clocks.
+        pnr = _extract_pnr(text_bundle.structural_text.upper())
+        flights = _shape_southwest_itinerary_blocks(text_bundle.structural_text, pnr=pnr)
+        _attach_pnr_aliases(flights, _extract_pnr_aliases(text_bundle.structural_text.upper(), primary=pnr))
+        _stamp_source_received_at(flights, received_at)
+        return ParseResult(flights=flights, source="shape")
     compact_parser_text = text_bundle.evidence_text or text_bundle.table_text or text_bundle.clean_text
     v5_parts = [header_context, compact_parser_text]
     if text_bundle.clean_text and text_bundle.clean_text != compact_parser_text:
@@ -1380,6 +1426,11 @@ def _parse_email_flights(
         pnr_aliases = _extract_pnr_aliases(v5_text.upper(), primary=pnr)
         stage_started = time.perf_counter()
         shape_flights = extract_shape_flights(v5_text, pnr=pnr, received_at=received_at)
+        # These layouts repeat identical date/meridiem cells within one
+        # itinerary. Line-level deduplication must not erase the second leg.
+        shape_flights = _dedupe_flights([*shape_flights,
+            *_shape_numbered_flight_cards(text_bundle.structural_text, pnr=pnr),
+            *_shape_allegiant_labeled_itinerary(text_bundle.structural_text, pnr=pnr)])
         _attach_pnr_aliases(shape_flights, pnr_aliases)
         if diagnostics is not None:
             diagnostics["shape_seconds"] = round(time.perf_counter() - stage_started, 6)
@@ -1388,6 +1439,7 @@ def _parse_email_flights(
         if diagnostics is not None:
             diagnostics["shape_covers_message"] = shape_covers_message
         if shape_covers_message:
+            _scope_purchase_receipt_references(shape_flights, subject, text_bundle.structural_text)
             _stamp_source_received_at(shape_flights, received_at)
             passenger_name = shape_flights[0].passenger_name
             return ParseResult(
@@ -1434,6 +1486,7 @@ def _parse_email_flights(
             diagnostics["v5_seconds"] = round(time.perf_counter() - stage_started, 6)
         if v5_flights:
             _attach_pnr_aliases(v5_flights, pnr_aliases)
+            _scope_purchase_receipt_references(v5_flights, subject, text_bundle.structural_text)
             _stamp_source_received_at(v5_flights, received_at)
             passenger_name = v5_flights[0].passenger_name
             return ParseResult(
@@ -1461,6 +1514,7 @@ def _parse_email_flights(
                 flights,
                 _extract_pnr_aliases(text.upper(), primary=flights[0].pnr if flights else None),
             )
+            _scope_purchase_receipt_references(flights, subject, text_bundle.structural_text)
             _stamp_source_received_at(flights, received_at)
             passenger_name = flights[0].passenger_name
             return ParseResult(
@@ -1497,10 +1551,38 @@ def _stamp_source_received_at(flights: list[ParsedFlight], received_at: Optional
         flight.source_received_at = received_at
 
 
+def _scope_purchase_receipt_references(flights: list[ParsedFlight], subject: str | None, text: str) -> None:
+    """An Expedia purchase can put each carrier's locator on its first leg only."""
+    if not re.match(r"^(?:(?:re|fw|fwd):\s*){0,4}expedia flight purchase confirmation\b", subject or "", re.I):
+        return
+    if not re.search(r"\bflight\s+duration\b", text, re.I):
+        return
+    by_carrier: dict[str, set[str]] = {}
+    for field in extract_reference_fields(text):
+        carrier = _AIRLINE_NAME_TO_CODE.get((field.airline or "").strip().lower())
+        if carrier and field.label == "airline confirmation":
+            by_carrier.setdefault(carrier, set()).add(field.code)
+    if not by_carrier:
+        return
+    for flight in flights:
+        if flight.source_leg.get("booking_references"):
+            continue
+        codes = by_carrier.get(flight.airline, set())
+        flight.pnr = next(iter(codes)) if len(codes) == 1 else None
+        flight.pnr_aliases = []
+        flight.source_leg["booking_references"] = {
+            "primary": flight.pnr, "aliases": [], "basis": "carrier_labeled_purchase_receipt",
+        }
+        if not flight.pnr:
+            flight.force_review = True
+
+
 def _attach_pnr_aliases(flights: list[ParsedFlight], aliases: list[str]) -> None:
     if not aliases:
         return
     for flight in flights:
+        if flight.source_leg.get("booking_references"):
+            continue
         existing = list(getattr(flight, "pnr_aliases", []) or [])
         primary = (flight.pnr or "").upper()
         for alias in aliases:
@@ -1613,9 +1695,8 @@ def _parse_compact_day_month_year(value: str) -> Optional[datetime]:
 
 def extract_jsonld_flights(html: str) -> list[ParsedFlight]:
     """Find all <script type=application/ld+json> blocks and extract FlightReservations."""
-    soup = BeautifulSoup(html, "html.parser")
     flights: list[ParsedFlight] = []
-    for script in soup.find_all("script", type="application/ld+json"):
+    for script in permitted_jsonld_scripts(html):
         try:
             data = json.loads(script.string or "")
         except (json.JSONDecodeError, Exception):
@@ -1627,7 +1708,7 @@ def extract_jsonld_flights(html: str) -> list[ParsedFlight]:
 
 
 def _html_to_parser_text(html: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
+    soup = visible_html_soup(html)
     table_text = _extract_html_table_text(soup)
     body_text = soup.get_text(separator="\n")
     return "\n".join(part for part in [table_text, body_text] if part)
@@ -1670,7 +1751,7 @@ def _is_minimal_justfly_confirmation(text: str) -> bool:
 
 
 def _html_table_text_only(html: str) -> str:
-    return _extract_html_table_text(BeautifulSoup(html, "html.parser"))
+    return _extract_html_table_text(visible_html_soup(html))
 
 
 def _extract_html_table_text(soup: BeautifulSoup) -> str:
@@ -1979,6 +2060,261 @@ def extract_shape_flights(
     flights.extend(_shape_lifemiles_flight_details(text, pnr=pnr))
     flights.extend(_shape_vertical_itinerary_lines(text, pnr=pnr, received_at=received_at))
     flights.extend(_shape_ota_multi_confirmation(text, fallback_pnr=pnr, received_at=received_at))
+    return _dedupe_flights(flights)
+
+
+_CARD_DATE = re.compile(
+    r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?"
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}", re.I)
+_CARD_FIELD = re.compile(
+    r"^(From|To|Depart(?:ure)?|Arriv(?:e|al)|Flight Number|Airline Confirmation(?:\s*#)?|"
+    r"Duration|Status|Class(?: of Travel)?|Equipment|Aircraft Type|Seats?|Policies|Operated by)(?=\s|:|$)\s*:?(.*)$", re.I)
+
+
+def _card_fields(lines: list[str]) -> dict[str, list[str]]:
+    fields: dict[str, list[str]] = {}
+    current = None
+    for line in lines:
+        match = _CARD_FIELD.fullmatch(line)
+        if match:
+            current = match[1].lower().rstrip(" #")
+            fields.setdefault(current, [])
+            if match[2].strip(" :"):
+                fields[current].append(match[2].strip(" :"))
+        elif current and line.strip(" :"):
+            fields[current].append(line.strip(" :"))
+    return fields
+
+
+def _card_airport(values: list[str]) -> Optional[str]:
+    for value in values:
+        match = re.search(r"\(([A-Z]{3})(?:\)|-)", value)
+        airport = match[1] if match else (value if re.fullmatch(r"[A-Z]{3}", value) else None)
+        if airport and (not _VALID_IATA or airport in _VALID_IATA):
+            return airport
+    return None
+
+
+def _card_clock(values: list[str]) -> Optional[str]:
+    return _card_clock_selection(values)[0]
+
+
+def _card_clock_selection(values: list[str]) -> tuple[Optional[str], Optional[dict]]:
+    """Read one clock, or the uniquely marked changed clock in this field."""
+    clock = re.compile(r"(\d{1,2}:\d{2}\s*[ap]\.?m\.?)(?:\s*(\(change\)))?", re.I)
+    found: list[tuple[int, str]] = []
+    marked: list[tuple[int, str]] = []
+    invalid_marker = False
+    for index, value in enumerate(values):
+        match = clock.fullmatch(value)
+        if match:
+            found.append((index, match[1]))
+            if match[2]:
+                marked.append(found[-1])
+        elif value.casefold() == "(change)":
+            if found and found[-1][0] == index - 1 and not clock.fullmatch(values[index - 1])[2]:
+                marked.append(found[-1])
+            else:
+                invalid_marker = True
+    if invalid_marker or len(marked) > 1:
+        return None, None
+    if marked:
+        if len(found) not in (1, 2):
+            return None, None
+        chosen = marked[0]
+        return chosen[1], {"kind": "explicit_changed_clock", "status": "verified",
+            "selected": chosen[1], "other_printed_clocks": [value for index, value in found if index != chosen[0]],
+            "marker": "(change)"}
+    return (found[0][1], None) if len(found) == 1 else (None, None)
+
+
+def _scoped_card_flight(lines: list[str], *, number: str, pnr: Optional[str],
+                        aliases: list[str], dep: str, arr: str, dep_dt: datetime,
+                        arr_dt: datetime, template: str, sequence: int,
+                        duration: Optional[int] = None, day_offset: Optional[int] = None) -> ParsedFlight:
+    pointer = _document_leg_pointer(lines, template=template, sequence=sequence)
+    pointer["booking_references"] = {"primary": pnr, "aliases": aliases}
+    flight = ParsedFlight(dep, arr, dep_dt, arr_dt, airline=number[:2], flight_number=number,
+        pnr=pnr, pnr_aliases=aliases, source="shape_" + template, confidence=98, source_leg=pointer)
+    if duration is not None:
+        from .flight_times import resolve_printed_elapsed_arrival
+        resolve_printed_elapsed_arrival(flight, minutes=duration, explicit_day_offset=day_offset)
+    elif day_offset is not None:
+        flight.arr_time += timedelta(days=day_offset)
+    elif arr_dt <= dep_dt:
+        flight.force_review = True
+        flight.time_provenance["date_evidence"] = {
+            "kind": "explicit_card_clocks", "status": "needs_review", "reason": "unresolved_arrival_date"}
+    return flight
+
+
+def _shape_scoped_booking_cards(text: str) -> Optional[list[ParsedFlight]]:
+    """Read complete cards before lossy table/line deduplication or loose scans.
+
+    Every endpoint and clock belongs to one bounded card. References are local
+    to a booking, so a second one-way fare cannot become an alias of the first.
+    Missing clocks remain absent; none are inferred from a journey summary.
+    """
+    lines = _normalized_lines(text)
+    overview = _shape_booking_overviews(lines)
+    overview_layout = (any(line.lower() == "flight overview" for line in lines)
+                       and any(line.lower() == "travel dates" for line in lines)
+                       and any((match := re.fullmatch(r"(.+?)\s+(\d{1,4}[A-Z]?)", line))
+                               and _AIRLINE_NAME_TO_CODE.get(match[1].lower()) for line in lines))
+    if overview or overview_layout:
+        return overview
+    dates = [index for index, value in enumerate(lines) if _CARD_DATE.fullmatch(value)]
+    flights: list[ParsedFlight] = []
+    recognized = False
+    for sequence, start in enumerate(dates, 1):
+        stop = dates[sequence] if sequence < len(dates) else len(lines)
+        card = lines[start:min(stop, start + 85)]
+        fields = _card_fields(card[1:])
+        numbers = [match for value in fields.get("flight number", [])
+                   if (match := re.fullmatch(r"([A-Z0-9]{2})\s*(\d{1,4}[A-Z]?)", value))]
+        if len(numbers) != 1 or numbers[0][1] not in _KNOWN_AIRLINES or "from" not in fields or "to" not in fields:
+            continue
+        recognized = True
+        number = numbers[0]
+        dep, arr = _card_airport(fields["from"]), _card_airport(fields["to"])
+        dep_clock, dep_clock_proof = _card_clock_selection(fields.get("depart", fields.get("departure", fields["from"])))
+        arr_clock, arr_clock_proof = _card_clock_selection(fields.get("arrive", fields.get("arrival", fields["to"])))
+        if not dep or not arr or not dep_clock or not arr_clock or not _valid_route(dep, arr):
+            continue
+        dep_dt, arr_dt = _parse_date_time(card[0], dep_clock), _parse_date_time(card[0], arr_clock)
+        if not dep_dt or not arr_dt:
+            continue
+        refs = extract_reference_fields("\n".join(card))
+        header_refs = False
+        if not refs:
+            # A seat-assignment message lists its carrier/agency pair above
+            # the dated cards. Only one explicit carrier booking can supply
+            # the unnamed agency alias; several carrier bookings remain apart.
+            refs = extract_reference_fields("\n".join(lines[:dates[0]]))
+            header_refs = True
+        carrier_refs = [ref for ref in refs if ref.airline]
+        matching = [ref for ref in carrier_refs if _airline_code_from_name(ref.airline) == number[1]]
+        primary = (matching[0].code if len({ref.code for ref in matching}) == 1 else
+                   extract_primary_reference("\n".join(card)) if not header_refs else None)
+        compatible_family = len({ref.code for ref in carrier_refs}) <= 1
+        aliases = list(dict.fromkeys(ref.code for ref in refs if primary and ref.code != primary
+                                    and compatible_family))
+        duration_match = re.search(r"\b(\d{1,2})H\s*(\d{1,2})M\b", " ".join(fields.get("duration", [])), re.I)
+        duration = int(duration_match[1]) * 60 + int(duration_match[2]) if duration_match else None
+        flight = _scoped_card_flight(card, number=number[1] + number[2], pnr=primary,
+            aliases=aliases, dep=dep, arr=arr, dep_dt=dep_dt, arr_dt=arr_dt,
+            template="labeled_agency_card", sequence=sequence, duration=duration)
+        clock_proof = {key: proof for key, proof in (("departure", dep_clock_proof), ("arrival", arr_clock_proof)) if proof}
+        if clock_proof:
+            # Preserve the printed old/new relationship through normalization,
+            # without overriding an existing unresolved day/duration conflict.
+            flight.time_provenance.setdefault("date_evidence", {
+                "kind": "explicit_card_clocks", "status": "verified",
+                "departure_date": dep_dt.date().isoformat()})["clock_evidence"] = clock_proof
+        flights.append(flight)
+    if flights or recognized:
+        return _dedupe_flights(flights)
+    operated = _shape_operated_schedule_cards(lines)
+    operated_layout = any(re.fullmatch(r"\d{1,4}[A-Z]?", lines[index])
+        and lines[index + 1].lower() == "operated by"
+        and _airline_code_from_name(lines[index + 2]) and _CARD_DATE.fullmatch(lines[index + 3])
+        for index in range(max(0, len(lines) - 3)))
+    return operated if operated or operated_layout else None
+
+
+def _shape_booking_overviews(lines: list[str]) -> list[ParsedFlight]:
+    starts = [index for index, line in enumerate(lines) if line.lower() == "flight overview"]
+    flights: list[ParsedFlight] = []
+    for position, start in enumerate(starts):
+        end = starts[position + 1] if position + 1 < len(starts) else len(lines)
+        block = lines[start:end]
+        dates = [block[index + 1] for index, line in enumerate(block[:-1]) if line.lower() == "travel dates"
+                 and re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", block[index + 1])]
+        refs = [re.fullmatch(r"([A-Z0-9]{5,8})\s*\(([^)]+)\)", block[index + 1])
+                for index, line in enumerate(block[:-1]) if line.lower() == "confirmation"]
+        refs = [match for match in refs if match and _airline_code_from_name(match[2])]
+        if len(set(dates)) != 1 or len({match[1] for match in refs}) != 1:
+            continue
+        primary, carrier = refs[0][1], _airline_code_from_name(refs[0][2])
+        aliases = list(dict.fromkeys(block[index + 1] for index, line in enumerate(block[:-1])
+            if line.lower() == "booking id" and re.fullmatch(r"[A-Z0-9]{5,8}", block[index + 1])
+            and block[index + 1] != primary))
+        from .passenger_identity import _name
+        ticket_holders = []
+        for at, value in enumerate(block[:-1]):
+            if re.fullmatch(r"Ticket\s*(?:#|Number):?", value, re.I):
+                ticket = re.fullmatch(r"\d{13}\s*\(([^)]+)\)", block[at + 1])
+                if ticket and (name := _name(ticket[1])):
+                    ticket_holders.append(name)
+        markers = []
+        for index, line in enumerate(block):
+            match = re.fullmatch(r"(.+?)\s+(\d{1,4}[A-Z]?)", line)
+            if match and _AIRLINE_NAME_TO_CODE.get(match[1].lower()) == carrier:
+                markers.append((index, carrier + match[2]))
+        for sequence, (index, number) in enumerate(markers, 1):
+            stop = markers[sequence][0] if sequence < len(markers) else len(block)
+            card = block[index:min(stop, index + 35)]
+            for cutoff, value in enumerate(card):
+                if re.match(r"(?:Total duration|Traveler\(s\)|Price summary|Additional information)\b", value, re.I):
+                    card = card[:cutoff]
+                    break
+            endpoints = []
+            for at, value in enumerate(card):
+                airport = re.search(r"\(([A-Z]{3})\)$", value)
+                if airport and at + 1 < len(card) and _card_clock([card[at + 1]]):
+                    endpoints.append((airport[1], card[at + 1]))
+            if len(endpoints) != 2 or not _valid_route(endpoints[0][0], endpoints[1][0]):
+                continue
+            dep_dt, arr_dt = (_parse_date_time(dates[0], endpoint[1]) for endpoint in endpoints)
+            if not dep_dt or not arr_dt:
+                continue
+            duration_match = next((m for value in card if (m := re.fullmatch(r"(\d{1,2})h\s*(\d{1,2})m duration", value, re.I))), None)
+            duration = int(duration_match[1]) * 60 + int(duration_match[2]) if duration_match else None
+            offset_match = next((m for value in card if (m := re.fullmatch(r"\+(\d) days?", value, re.I))), None)
+            offset = int(offset_match[1]) if offset_match else None
+            flight = _scoped_card_flight(card, number=number, pnr=primary, aliases=aliases,
+                dep=endpoints[0][0], arr=endpoints[1][0], dep_dt=dep_dt, arr_dt=arr_dt,
+                template="booking_overview", sequence=len(flights) + 1, duration=duration, day_offset=offset)
+            flight.passenger_evidence = [dict(name=name, source="booking_ticket_holder", role="traveler",
+                complete=False, scope={"pnr": primary, "flight_number": number,
+                    "dep_airport": flight.dep_airport, "arr_airport": flight.arr_airport,
+                    "departure_date": dep_dt.date().isoformat()}) for name in ticket_holders]
+            flights.append(flight)
+    return _dedupe_flights(flights)
+
+
+def _shape_operated_schedule_cards(lines: list[str]) -> list[ParsedFlight]:
+    flights: list[ParsedFlight] = []
+    for index, line in enumerate(lines[:-4]):
+        if not re.fullmatch(r"\d{1,4}[A-Z]?", line) or lines[index + 1].lower() != "operated by":
+            continue
+        carrier = _airline_code_from_name(lines[index + 2])
+        if not carrier or not _CARD_DATE.fullmatch(lines[index + 3]):
+            continue
+        card = lines[index:index + 23]
+        # Stop before another numbered card, rather than borrowing its airport.
+        for stop in range(4, len(card) - 1):
+            if re.fullmatch(r"\d{1,4}[A-Z]?", card[stop]) and card[stop + 1].lower() == "operated by":
+                card = card[:stop]
+                break
+        clocks = [(at, value) for at, value in enumerate(card[4:], 4) if _card_clock([value])]
+        if len(clocks) != 2:
+            continue
+        dep = _card_airport(card[clocks[0][0] + 1:clocks[1][0]])
+        arr = _card_airport(card[clocks[1][0] + 1:])
+        if not dep or not arr or not _valid_route(dep, arr):
+            continue
+        refs = []
+        for at, value in enumerate(lines[:-1]):
+            if _AIRLINE_NAME_TO_CODE.get(value.rstrip(":").lower()) == carrier and re.fullmatch(r"[A-Z0-9]{5,8}", lines[at + 1]):
+                refs.append(lines[at + 1])
+        if len(set(refs)) != 1:
+            continue
+        dep_dt, arr_dt = (_parse_date_time(card[3], clock[1]) for clock in clocks)
+        if dep_dt and arr_dt:
+            flights.append(_scoped_card_flight(card, number=carrier + line, pnr=refs[0], aliases=[],
+                dep=dep, arr=arr, dep_dt=dep_dt, arr_dt=arr_dt,
+                template="operated_schedule_card", sequence=len(flights) + 1))
     return _dedupe_flights(flights)
 
 
@@ -2952,14 +3288,14 @@ def _shape_alaska_trip_detail_blocks(
     lines = _normalized_lines(text)
     pnr = pnr or _extract_pnr("\n".join(lines).upper())
     flight_header = re.compile(
-        r"Flight\s+\d+\s*(?:[·•:|\-–—]\s*)?"
+        r"Flight\s+\d+\s*(?:[.·•:|\-–—]\s*)?"
         r"(?P<date>(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\.?\s+"
         r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})",
         re.IGNORECASE,
     )
     flight_row = re.compile(
         r"(?P<airline>[A-Z0-9]{2})\s+(?P<number>\d{1,4}[A-Z]?)\b"
-        r"(?:\s*[·•|\-–—]\s*.*)?",
+        r"(?:\s*[.·•|\-–—]\s*.*)?",
         re.IGNORECASE,
     )
     short_date = re.compile(
@@ -3043,7 +3379,7 @@ def _shape_alaska_trip_detail_blocks(
     return _dedupe_flights(flights)
 
 
-def _shape_southwest_itinerary_blocks(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+def _southwest_itinerary_card_sections(text: str) -> list[tuple[list[str], int, int, str]]:
     lower = text.lower()
     if not (
         "your itinerary" in lower
@@ -3052,24 +3388,29 @@ def _shape_southwest_itinerary_blocks(text: str, *, pnr: Optional[str]) -> list[
     ):
         return []
     lines = [_clean_southwest_line(line) for line in _normalized_lines(text)]
-    pnr = pnr or _extract_pnr("\n".join(lines).upper())
-    flights: list[ParsedFlight] = []
+    sections: list[tuple[list[str], int, int, str]] = []
     for index, line in enumerate(lines):
         flight_header = re.fullmatch(
-            r"Flight(?:\s+\d+)?:\s*(?P<date>[A-Za-z]+,?\s+\d{1,2}/\d{1,2}/\d{4})?",
+            r"Flight(?:\s+\d+)?\s*:\s*(?P<date>[A-Za-z]+,?\s+\d{1,2}/\d{1,2}/\d{4})?",
             line,
             re.IGNORECASE,
         )
         if not flight_header:
             continue
         date_line = flight_header.group("date") or (lines[index + 1] if index + 1 < len(lines) else "")
-        if not re.fullmatch(r"[A-Za-z]+,?\s+\d{1,2}/\d{1,2}/\d{4}", date_line):
-            continue
-        block_start = index + 1 if flight_header.group("date") else index + 2
+        date_on_next_line = not flight_header.group("date") and bool(
+            re.fullmatch(r"[A-Za-z]+,?\s+\d{1,2}/\d{1,2}/\d{4}", date_line))
+        block_start = index + 1 + int(date_on_next_line)
         block_end = _next_southwest_block_end(lines, block_start)
-        first = _parse_southwest_segment_from_labels(lines, block_start, block_end, date_line, pnr=pnr)
-        if first:
-            flights.append(first)
+        if any(re.fullmatch(r"#\s*\d{1,4}", line) for line in lines[block_start:block_end]):
+            sections.append((lines, block_start, block_end, date_line))
+    return sections
+
+
+def _shape_southwest_itinerary_blocks(text: str, *, pnr: Optional[str]) -> list[ParsedFlight]:
+    flights: list[ParsedFlight] = []
+    for lines, block_start, block_end, date_line in _southwest_itinerary_card_sections(text):
+        pnr = pnr or _extract_pnr("\n".join(lines).upper())
         flights.extend(_parse_southwest_connection_segments(lines, block_start, block_end, date_line, pnr=pnr))
     return flights
 
@@ -3084,7 +3425,7 @@ def _clean_southwest_line(value: str) -> str:
 
 def _next_southwest_block_end(lines: list[str], start: int) -> int:
     for index in range(start, len(lines)):
-        if re.fullmatch(r"Flight(?:\s+\d+)?:.*", lines[index], re.IGNORECASE):
+        if re.fullmatch(r"Flight(?:\s+\d+)?\s*:.*", lines[index], re.IGNORECASE):
             return index
         if lines[index].lower() in {"payment information", "trip receipt", "fare rules"}:
             return index
@@ -3102,11 +3443,18 @@ def _parse_southwest_segment_from_labels(
     number = _southwest_flight_number_after(lines, start, end)
     dep_index = _find_next_line(lines, "DEPARTS", start, end)
     arr_index = _find_next_line(lines, "ARRIVES", start, end)
-    if not number or dep_index is None or arr_index is None:
+    if not number:
         return None
-    dep_airport, dep_time = _parse_southwest_airport_time(lines, dep_index + 1, end)
-    arr_default = dep_time.rsplit(" ", 1)[1] if dep_time and " " in dep_time else None
-    arr_airport, arr_time = _parse_southwest_airport_time(lines, arr_index + 1, end, default_meridiem=arr_default)
+    if dep_index is not None and arr_index is not None:
+        if dep_index >= arr_index:
+            return None
+        dep_airport, dep_time = _parse_southwest_airport_time(lines, dep_index + 1, arr_index)
+        arr_airport, arr_time = _parse_southwest_airport_time(lines, arr_index + 1, end)
+    elif dep_index is None and arr_index is None:
+        dep_airport, dep_time = _parse_southwest_airport_time(lines, start + 1, end)
+        arr_airport, arr_time = _parse_southwest_airport_time(lines, start + 3, end)
+    else:
+        return None
     if not dep_airport or not arr_airport or not dep_time or not arr_time or not _valid_route(dep_airport, arr_airport):
         return None
     dep_dt = _parse_southwest_weekday_date_time(date_line, dep_time)
@@ -3137,60 +3485,12 @@ def _parse_southwest_connection_segments(
     pnr: Optional[str],
 ) -> list[ParsedFlight]:
     flights: list[ParsedFlight] = []
-    for index in range(start, end):
-        number_match = re.fullmatch(r"#\s*(\d{1,4})", lines[index])
-        if not number_match or index + 3 >= end:
-            continue
-        dep_index = _find_next_line(lines, "DEPARTS", index + 1, min(end, index + 6))
-        arr_index = _find_next_line(lines, "ARRIVES", index + 1, min(end, index + 10))
-        if dep_index is not None and arr_index is not None:
-            dep_airport, dep_time = _parse_southwest_airport_time(lines, dep_index + 1, end)
-            if dep_airport and not dep_time:
-                dep_time = _southwest_time_from_compact_lines(
-                    lines,
-                    number_match.group(1),
-                    dep_airport,
-                    lines[dep_index + 1],
-                )
-            dep_time = dep_time or _with_default_southwest_meridiem(lines[dep_index + 1], "PM")
-            arr_default = dep_time.rsplit(" ", 1)[1] if dep_time and " " in dep_time else "PM"
-            arr_airport, arr_time = _parse_southwest_airport_time(
-                lines,
-                arr_index + 1,
-                end,
-            )
-            if arr_airport and not arr_time:
-                arr_time = _southwest_time_from_compact_lines(
-                    lines,
-                    number_match.group(1),
-                    arr_airport,
-                    lines[arr_index + 1],
-                )
-            arr_time = arr_time or _with_default_southwest_meridiem(lines[arr_index + 1], arr_default)
-        else:
-            dep_airport, dep_time = _parse_southwest_airport_time(lines, index + 1, end, default_meridiem="PM")
-            arr_airport, arr_time = _parse_southwest_airport_time(lines, index + 3, end, default_meridiem="PM")
-        if not dep_airport or not arr_airport or not dep_time or not arr_time or not _valid_route(dep_airport, arr_airport):
-            continue
-        dep_dt = _parse_southwest_weekday_date_time(date_line, dep_time)
-        arr_dt = _parse_southwest_weekday_date_time(date_line, arr_time)
-        if not dep_dt or not arr_dt:
-            continue
-        if arr_dt <= dep_dt:
-            arr_dt += timedelta(days=1)
-        flights.append(
-            ParsedFlight(
-                dep_airport=dep_airport,
-                arr_airport=arr_airport,
-                dep_time=dep_dt,
-                arr_time=arr_dt,
-                airline="WN",
-                flight_number=f"WN{number_match.group(1).lstrip('0') or '0'}",
-                pnr=pnr,
-                source="shape_southwest_itinerary_blocks",
-                confidence=92,
-            )
-        )
+    card_starts = [index for index in range(start, end) if re.fullmatch(r"#\s*\d{1,4}", lines[index])]
+    for offset, index in enumerate(card_starts):
+        card_end = card_starts[offset + 1] if offset + 1 < len(card_starts) else end
+        flight = _parse_southwest_segment_from_labels(lines, index, card_end, date_line, pnr=pnr)
+        if flight:
+            flights.append(flight)
     return flights
 
 
@@ -3206,8 +3506,6 @@ def _parse_southwest_airport_time(
     lines: list[str],
     index: int,
     end: int,
-    *,
-    default_meridiem: Optional[str] = None,
 ) -> tuple[Optional[str], Optional[str]]:
     if index >= min(len(lines), end):
         return None, None
@@ -3220,41 +3518,9 @@ def _parse_southwest_airport_time(
         next_line = lines[index + 1].strip().upper()
         if next_line in {"AM", "PM"}:
             meridiem = next_line
-    meridiem = meridiem or default_meridiem
     if not meridiem:
         return airport, None
     return airport, f"{match.group(2)} {meridiem.upper()}"
-
-
-def _with_default_southwest_meridiem(value: str, default_meridiem: str) -> Optional[str]:
-    match = re.fullmatch(r"([A-Z]{3})\s+(\d{1,2}:\d{2})(?:\s*([AP]M))?", value, re.IGNORECASE)
-    if not match:
-        return None
-    meridiem = (match.group(3) or default_meridiem).upper()
-    return f"{match.group(2)} {meridiem}"
-
-
-def _southwest_time_from_compact_lines(
-    lines: list[str],
-    number: str,
-    airport: str,
-    split_line: str,
-) -> Optional[str]:
-    time_match = re.search(r"\b(\d{1,2}:\d{2})\b", split_line)
-    if not time_match:
-        return None
-    flight_number = (number.lstrip("0") or "0").lstrip("# ")
-    airport = airport.upper()
-    time_part = time_match.group(1)
-    compact_pattern = re.compile(
-        rf"\#\s*0*{re.escape(flight_number)}\b.*?\b{re.escape(airport)}\s+{re.escape(time_part)}\s*([AP]M)\b",
-        re.IGNORECASE,
-    )
-    for line in lines:
-        match = compact_pattern.search(line)
-        if match:
-            return f"{time_part} {match.group(1).upper()}"
-    return None
 
 
 def _parse_southwest_weekday_date_time(date_line: str, time_part: str) -> Optional[datetime]:
@@ -3301,7 +3567,7 @@ def extract_v5_flights(
     evidence.extend(_v5_frontier_departing_rows(text))
     evidence.extend(_v5_southwest_sparse_trip_rows(text, received_at))
     accepted = [item for item in evidence if item.score >= 7]
-    return _dedupe_flights(
+    flights = _dedupe_flights(
         [
             ParsedFlight(
                 dep_airport=item.dep_airport,
@@ -3313,10 +3579,20 @@ def extract_v5_flights(
                 pnr=pnr,
                 source=item.source,
                 confidence=min(100, max(0, item.score * 10)),
+                time_provenance=({"date_evidence": {"kind": "sparse_trip_banner",
+                                 "status": "needs_review", "reason": "missing_explicit_flight_clocks"}}
+                                 if item.source == "v5_southwest_sparse" else {}),
             )
             for item in accepted
         ]
     )
+    for flight in flights:
+        if flight.source == "v5_southwest_sparse":
+            flight.force_review = True
+    return [flight for flight in flights if flight.source != "v5_southwest_sparse" or not any(
+        other.source != "v5_southwest_sparse" and other.dep_airport == flight.dep_airport
+        and other.arr_airport == flight.arr_airport and other.dep_time.date() == flight.dep_time.date()
+        for other in flights)]
 
 
 def _shape_jetblue_compact_itinerary(
@@ -3906,7 +4182,15 @@ def _ota_printed_connection(previous: ParsedFlight, intervening: list[str],
     if len(layovers) != 1:
         return None
     layover = layovers[0]
-    if _airport_from_layover_line("Layover in " + layover.group(3)) != dep_airport:
+    # The adjacent cards already identify the same airport. A city may serve
+    # several airports, so global city-to-airport uniqueness is unnecessary
+    # here. Require an exact metadata name for that established airport; do
+    # not use this contextual match to infer an otherwise missing endpoint.
+    place = _normalize_place_key(layover.group(3))
+    lookup = _city_airport_lookup()
+    if (lookup.get(place) != dep_airport
+            and {"ADDIS ABABA": "ADD", "DULLES": "IAD"}.get(place) != dep_airport
+            and place not in _AIRPORT_PLACE_KEYS.get(dep_airport, ())):
         return None
     if int(layover.group(2) or 0) >= 60:
         return None
@@ -3946,6 +4230,7 @@ def _shape_ota_multi_confirmation(
     pnr_by_airline = _airline_confirmation_codes_from_lines(lines)
     if not pnr_by_airline:
         return []
+    separate_bookings = len(set(pnr_by_airline.values())) > 1
 
     flights: list[ParsedFlight] = []
     previous = None
@@ -4032,11 +4317,15 @@ def _shape_ota_multi_confirmation(
             dep_airport=dep_airport, arr_airport=arr_airport,
             dep_time=dep_dt, arr_time=arr_dt, airline=airline,
             flight_number=f"{airline}{match.group('number').upper()}",
-            pnr=pnr_by_airline.get(airline) or fallback_pnr,
+            pnr=pnr_by_airline.get(airline) or (None if separate_bookings else fallback_pnr),
             source="shape_ota_multi_confirmation", confidence=94,
             source_leg=_document_leg_pointer(lines[index:pointer_end],
                 template="ota_multi_confirmation", sequence=sequence),
         )
+        if separate_bookings:
+            # A carrier-keyed confirmation table describes distinct bookings.
+            # A later document-wide reference pass must not alias their codes.
+            flight.source_leg["booking_references"] = {"primary": flight.pnr, "aliases": []}
         if next_flight and len(endpoint_positions) < 2:
             # The older endpoint extractor can borrow the next flight's
             # airport when flattening drops this one's arrival airport.
@@ -4059,9 +4348,10 @@ def _shape_ota_multi_confirmation(
             date_proof = flight.time_provenance.setdefault("date_evidence", {
                 "kind": "printed_connection", "status": "verified"})
             date_proof["departure_evidence"] = connection[1]
-        elif connection_context and (preceding.time_provenance.get("date_evidence") or {}).get("status") == "verified":
+        elif connection_context:
             # A heading belongs to the first departure. It cannot silently
-            # date a later connection when its printed layover does not agree.
+            # date a later connection when either the prior arrival or the
+            # printed layover is unproven.
             flight.force_review = True
             flight.time_provenance["date_evidence"] = {
                 "kind": "printed_connection", "status": "needs_review",
@@ -4334,52 +4624,13 @@ def _jsonld_should_yield_to_text(
 
 
 def _extract_pnr(text: str) -> Optional[str]:
-    for match in _AIRLINE_CONFIRMATION_LABEL.finditer(text):
-        candidate = match.group(1).upper()
-        if candidate not in _PNR_STOPWORDS and candidate not in _KNOWN_AIRLINES:
-            return candidate
-    for match in _CAPITAL_ONE_AIRLINE_CONFIRMATION.finditer(text):
-        candidate = match.group(1).upper()
-        if candidate not in _PNR_STOPWORDS and candidate not in _KNOWN_AIRLINES:
-            return candidate
-    for match in _PNR_LABEL.finditer(text):
-        candidate = match.group(1).upper()
-        if candidate not in _PNR_STOPWORDS and candidate not in _KNOWN_AIRLINES:
-            return candidate
-    return None
+    return extract_primary_reference(text)
 
 
 def _extract_pnr_aliases(text: str, *, primary: Optional[str]) -> list[str]:
     primary = primary.upper() if primary else None
-    aliases: list[str] = []
-    for pattern in (_AIRLINE_CONFIRMATION_LABEL, _CAPITAL_ONE_AIRLINE_CONFIRMATION, _PNR_ALIAS_LABEL):
-        for match in pattern.finditer(text):
-            candidate = match.group(1).upper()
-            # A boundary before '-' or '/' can truncate an agency's longer ID.
-            # Such a fragment is not an independently printed booking reference.
-            if re.match(r"[-_/][A-Z0-9]", text[match.end(1):], re.I):
-                continue
-            # Some reference fields name the carrier before the actual value:
-            # "Airline Reservation Code / Royal Air Maroc: ABC123". The first
-            # word of that label is not a PNR; require an exact known carrier.
-            value_text = text[match.start(1):]
-            carrier_label = re.match(r"(?P<carrier>[A-Z][A-Z\s.&'-]{1,60}?)\s*[:#]", value_text, re.I)
-            if carrier_label:
-                carrier = re.sub(r"\s+", " ", carrier_label["carrier"]).strip().lower()
-                if carrier in _AIRLINE_NAME_TO_CODE:
-                    reference_text = value_text[carrier_label.end():].lstrip()
-                    reference = re.match(r"([A-Z0-9]{5,8})\b(?![-_/][A-Z0-9])", reference_text, re.I)
-                    # An empty/broken carrier field is unresolved, not a PNR
-                    # equal to the carrier's first word or the next field label.
-                    if not reference or _PNR_ALIAS_LABEL.match(reference_text):
-                        continue
-                    candidate = reference[1].upper()
-            if candidate in _PNR_STOPWORDS or candidate in _KNOWN_AIRLINES:
-                continue
-            if candidate == primary or candidate in aliases:
-                continue
-            aliases.append(candidate)
-    return aliases
+    fields = sorted(extract_reference_fields(text), key=lambda item: (item.priority, item.start))
+    return list(dict.fromkeys(item.code for item in fields if item.code != primary))
 
 
 def _v5_route_rows(text: str, received_at: Optional[datetime]) -> list[_FlightEvidence]:
@@ -4714,6 +4965,7 @@ def _v5_labeled_depart_arrive_rows(text: str) -> list[_FlightEvidence]:
         if not airline:
             continue
         previous_arrival: Optional[datetime] = None
+        seen_segments: set[tuple] = set()
         for match in _SOUTHWEST_SEGMENT.finditer(section.group("body")):
             dep_airport = match.group("dep_airport").upper()
             arr_airport = match.group("arr_airport").upper()
@@ -4729,6 +4981,10 @@ def _v5_labeled_depart_arrive_rows(text: str) -> list[_FlightEvidence]:
             )
             if not dep_time or not arr_time:
                 continue
+            segment_key = (match.group("number").upper(), dep_airport, arr_airport, dep_time, arr_time)
+            if segment_key in seen_segments:
+                continue
+            seen_segments.add(segment_key)
             if previous_arrival:
                 while dep_time < previous_arrival - timedelta(minutes=5):
                     dep_time += timedelta(days=1)
@@ -6725,6 +6981,7 @@ _AIRLINE_NAME_TO_CODE = {
     "united airlines": "UA",
     "united": "UA",
     "delta air lines": "DL",
+    "delta": "DL",
     "delta airlines": "DL",
     "frontier airlines": "F9",
     "frontier": "F9",
@@ -6808,6 +7065,7 @@ _PLACE_AIRPORT_OVERRIDES = {
     "TAIPEI TAOYUAN": "TPE",
 }
 _CITY_AIRPORT_LOOKUP: Optional[dict[str, str]] = None
+_AIRPORT_PLACE_KEYS: dict[str, set[str]] = {}
 
 
 def _valid_route(dep_airport: str, arr_airport: str) -> bool:
@@ -6914,10 +7172,11 @@ def _airport_code_from_place_fragment(fragment: str) -> Optional[str]:
 
 
 def _city_airport_lookup() -> dict[str, str]:
-    global _CITY_AIRPORT_LOOKUP
+    global _CITY_AIRPORT_LOOKUP, _AIRPORT_PLACE_KEYS
     if _CITY_AIRPORT_LOOKUP is not None:
         return _CITY_AIRPORT_LOOKUP
     candidates: dict[str, set[str]] = {}
+    airport_places: dict[str, set[str]] = {}
     try:
         import airportsdata
 
@@ -6928,18 +7187,22 @@ def _city_airport_lookup() -> dict[str, str]:
                 continue
             subd = airport.get("subd") or ""
             country = airport.get("country") or ""
-            for key in {
+            keys = {
                 _normalize_place_key(city),
                 _normalize_place_key(name),
                 _normalize_place_key(f"{city} {subd}"),
                 _normalize_place_key(f"{city} {country}"),
                 _normalize_place_key(f"{city} {subd} {country}"),
                 _normalize_place_key(f"{city} {name}"),
-            }:
+            }
+            airport_places[code] = (keys | {code}) - {""}
+            for key in keys:
                 if key:
                     candidates.setdefault(key, set()).add(code)
     except Exception:
         candidates = {}
+        airport_places = {}
+    _AIRPORT_PLACE_KEYS = airport_places
     _CITY_AIRPORT_LOOKUP = {
         key: next(iter(codes))
         for key, codes in candidates.items()
@@ -7115,6 +7378,7 @@ def _parse_date_time(date_part: str, time_part: str) -> Optional[datetime]:
         "%a %d %B %Y %I:%M %p",
         "%A %B %d %Y %H:%M",
         "%A %B %d %Y %I:%M %p",
+        "%A %b %d %Y %I:%M %p",
         "%a %b %d %Y %I:%M %p",
         "%a %B %d %Y %I:%M %p",
         "%B %d %Y %H:%M",

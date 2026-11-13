@@ -127,7 +127,7 @@ def test_forward_and_reply_do_not_promote_old_receipt_to_new_booking():
     assert booking_event_time("Fri, 7 Feb 2025 20:00:00 +0000", "Fwd: Receipt",
         "---------- Forwarded message ---------\nFrom: Airline\nDate: Wed, 1 Jan 2025 20:00:00 +0000\nSubject: Receipt") == datetime(2025, 1, 1, 20, tzinfo=timezone.utc)
     assert booking_event_time("Fri, 7 Feb 2025 20:00:00 +0000", "Fwd: Receipt",
-        "---------- Forwarded message ---------\nDate: Jan 1, 2025 2:00 PM\nSubject: Receipt") is None
+        "---------- Forwarded message ---------\nFrom: Airline\nDate: Jan 1, 2025 2:00 PM\nSubject: Receipt") is None
     assert booking_event_time("Fri, 7 Feb 2025 20:00:00 +0000", "Re: Receipt", "Old receipt") is None
 
 
@@ -184,7 +184,7 @@ def test_normal_history_reparse_corrects_utc_day_using_same_original_segment(ses
 
 def test_multipart_forward_preserves_original_date_without_double_counting_headers(session):
     db, user = session
-    text = '---------- Forwarded message ---------\nDate: Jan 1, 2025 14:00:00 +0000\nSubject: Receipt'
+    text = '---------- Forwarded message ---------\nFrom: Airline\nDate: Jan 1, 2025 14:00:00 +0000\nSubject: Receipt'
     apply_booking_message(db, user.id, ParseResult(flights=[flight('self')]), source_message_id='multipart',
         subject='Fwd: Flight receipt', plain_text=text, html='<div>' + text.replace('\n', '<br>') + '</div>',
         received_at='2025-02-01T12:00:00Z')

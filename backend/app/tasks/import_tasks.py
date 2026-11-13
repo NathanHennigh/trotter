@@ -251,15 +251,23 @@ def _message_skip_reason(existing_msg: Message | None, parser_version: int, *, f
     """Return why an existing message is resolved, or None when it should parse."""
     if force_parse or not existing_msg:
         return None
+    evidence = existing_msg.parse_evidence or {}
+    from app.services.flight_template_recovery import unavailable_or_waiting
+    if waiting := unavailable_or_waiting(evidence):
+        return waiting
     if existing_msg.status == MessageStatus.PENDING:
         return None
     if (existing_msg.parse_version or 0) < parser_version:
         return None
 
-    evidence = existing_msg.parse_evidence or {}
+    from app.services.flight_template_recovery import active, eligible, current_for_user
+    from app.services.carrier_travel_recovery import enabled as carrier_recovery_enabled
+    template_done = active(existing_msg.user_id) and eligible(existing_msg.subject, existing_msg.from_email)
+    if template_done:
+        if not current_for_user(evidence, existing_msg.user_id, subject=existing_msg.subject):
+            return None
     # A feature-specific marker revisits only supported carrier templates once;
     # it does not invalidate every parsed email or bump the flight parser.
-    from app.services.carrier_travel_recovery import enabled as carrier_recovery_enabled
     if carrier_recovery_enabled(existing_msg.user_id):
         from app.services.carrier_travel_evidence import EVIDENCE_VERSION, may_have_carrier_travel_evidence
         marker = evidence.get("carrier_evidence", {}) if isinstance(evidence, dict) else {}
@@ -275,6 +283,8 @@ def _message_skip_reason(existing_msg: Message | None, parser_version: int, *, f
                 and may_have_carrier_travel_evidence(existing_msg.subject or "", existing_msg.from_email or "")
                 and (not isinstance(marker, dict) or marker.get("version") != EVIDENCE_VERSION)):
             return None
+    if template_done:
+        return "hardened_template_examined"
     if isinstance(evidence, dict) and evidence.get("resolved"):
         return str(evidence.get("reason") or "resolved")
 
@@ -342,6 +352,10 @@ def _has_transactional_flight_anchor(signals: set[str]) -> bool:
 
 def _heavy_tier_has_flight_anchor(evidence) -> bool:
     signals = set(getattr(evidence, "signals", ()) or ())
+    if "labeled_operational_block" in signals:
+        # The block recognizer has already checked colocated explicit fields.
+        # Never let unrelated promotions veto this narrower extraction gate.
+        return True
     has_booking = "booking_identifier" in signals
     has_route = "route_airport_pair" in signals
     has_flight_number = "flight_number" in signals
@@ -378,8 +392,11 @@ def _select_stale_reparse_messages(
     seen: set[str] = set()
     force_ids = set(force_ids or ())
     targeted_ids = set(targeted_ids) | force_ids
+    from app.services.flight_template_recovery import source_available_filter
+    available = source_available_filter(db)
     base_filters = (
         Message.user_id == user_id,
+        available,
         Message.status.in_([MessageStatus.ACCEPTED, MessageStatus.REVIEW_REQUIRED]),
         Message.parse_version < parser_version,
         or_(Message.ignored.is_(False), _ignored_bilt_confirmation_filter()),
@@ -390,6 +407,7 @@ def _select_stale_reparse_messages(
             db.query(Message)
             .filter(
                 Message.user_id == user_id,
+                or_(available, Message.provider_msg_id.in_(force_ids)),
                 or_(Message.parse_version < parser_version, Message.provider_msg_id.in_(force_ids)),
                 Message.provider_msg_id.in_(targeted_ids),
             )
@@ -452,10 +470,12 @@ def _select_stale_reparse_messages(
 
 
 def _count_remaining_stale_reparse_messages(db, *, user_id: int, parser_version: int) -> int:
+    from app.services.flight_template_recovery import source_available_filter
     return (
         db.query(Message)
         .filter(
             Message.user_id == user_id,
+            source_available_filter(db, include_backoff=False),
             Message.status.in_([MessageStatus.ACCEPTED, MessageStatus.REVIEW_REQUIRED]),
             Message.parse_version < parser_version,
             or_(Message.ignored.is_(False), _ignored_bilt_confirmation_filter()),
@@ -503,7 +523,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
         record_flight_discovery_signals,
     )
     from app.services.parser import PARSER_VERSION, _extract_pnr, parse_email
-    from app.services.parse_audit import assess_parse_miss
+    from app.services.parse_audit import assess_parse_miss, assess_skipped_parse_miss
     from app.services.tui import GmailImportReporter
 
     from app.services.flight_query_v2 import looks_like_flight_email
@@ -578,6 +598,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             run_gmail_import.apply_async(kwargs={"job_id": job_id, "user_id": user_id, "limit": limit, "mode": mode}, countdown=3, retry=False)
             return {"job_id": job_id, "state": "pending", "waiting_for_history": True}
 
+        from app.services.booking_projection_context import projection_run
+        import_guards.enter_context(projection_run(db, user_id))
         job.state = "running"
         job.started_at = datetime.now(timezone.utc)
         job.updated_at = job.started_at
@@ -755,6 +777,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
 
         def process_payload(payload: dict, existing_msg: Message | None) -> None:
             nonlocal updated_segments, skipped_segments
+            previous_evidence = existing_msg.parse_evidence if existing_msg is not None else None
+            previous_retry = previous_evidence.get("template_fetch_retry") if isinstance(previous_evidence, dict) else None
             _process_payload(payload, existing_msg)
             provenance = payload.get("document_provenance") or []
             errors = payload.get("document_errors") or []
@@ -796,6 +820,23 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                         row.parse_evidence = preserve_partial_evidence(row.parse_evidence,
                             {**(row.parse_evidence or {}), "partial_flight_evidence": partial})
                         db.commit()
+            # Set completion only after ordinary parsing and all evidence hooks
+            # succeed. A thrown exception must leave the source retryable.
+            from app.services.flight_template_recovery import active, eligible, completed_marker, MARKER
+            if active(user_id) and eligible(payload["subject"], payload["from_email"]):
+                row = db.query(Message).filter_by(user_id=user_id, provider_msg_id=payload["msg_id"]).one_or_none()
+                permanent_document_errors = {"too_many_ticket_documents", "oversized_pdf", "missing_pdf_bytes",
+                    "pdf_has_no_text", "pdf_extraction_failed"}
+                if row is not None and set(errors) <= permanent_document_errors:
+                    row.parse_evidence = {**(row.parse_evidence or {}), MARKER: completed_marker(user_id)}
+                    row.parse_evidence.pop("template_fetch_retry", None)
+                    db.commit()
+                elif row is not None:
+                    from app.services.flight_template_recovery import record_fetch_failure
+                    if previous_retry is not None:
+                        row.parse_evidence = {**(row.parse_evidence or {}), "template_fetch_retry": previous_retry}
+                    record_fetch_failure(row)
+                    db.commit()
 
         def _process_payload(payload: dict, existing_msg: Message | None) -> None:
             nonlocal canceled_segments, skipped_segments, updated_segments
@@ -813,10 +854,11 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 existing_msg.internal_ts = payload["internal_ts"]
 
             if payload.get("evidence_skipped"):
-                parse_miss = assess_parse_miss(
+                parse_miss = assess_skipped_parse_miss(
                     subject=subject,
                     sender=from_email,
                     body=body_for_filter,
+                    evidence=payload.get("evidence"),
                 )
                 if parse_miss.should_review:
                     mark_unresolved_review_required(
@@ -1163,6 +1205,8 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 # Deleted Gmail messages are terminal; transient failures retain coverage.
                 if getattr(getattr(exc, "resp", None), "status", None) != 404:
                     failed_message_ids.add(msg_id)
+                from app.services.flight_template_recovery import record_fetch_failure
+                record_fetch_failure(existing_by_id.get(msg_id), not_found=getattr(getattr(exc, "resp", None), "status", None) == 404)
                 logger.warning("Failed to fetch message %s", msg_id)
             if fetch_errors:
                 for msg_id in fetch_errors:
@@ -1253,8 +1297,11 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
 
         targeted_reparse_ids = _targeted_reparse_message_ids()
         stale_messages = []
+        if not limit_reached and not history_only and not exact_only:
+            from app.services.flight_template_recovery import select_messages
+            stale_messages = select_messages(db, user_id, limit=sync_limit or 25)
         if not limit_reached and reparse_only and not history_only and not exact_only:
-            stale_messages = _select_stale_reparse_messages(
+            ordinary_stale = _select_stale_reparse_messages(
                 db,
                 user_id=user_id,
                 parser_version=PARSER_VERSION,
@@ -1262,14 +1309,21 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 targeted_ids=targeted_reparse_ids,
                 force_ids=force_reparse_ids,
             )
+            known_stale = {row.provider_msg_id for row in stale_messages}
+            stale_messages.extend(row for row in ordinary_stale if row.provider_msg_id not in known_stale)
         if stale_messages:
             _ACTIVE_PROGRESS_PHASE = "reparse"
-            _print_phase("reparse", f"{len(stale_messages):,} previously parsed messages below parser v{PARSER_VERSION}")
+            _print_phase("reparse", f"{len(stale_messages):,} messages selected for versioned recovery")
             reporter.tier_started("stale_reparse", "refetching stale DB message IDs")
         from app.services.flight_query_v4 import DiscoveryCandidate
         for stale_msg in stale_messages:
+            if sync_limit and job.scanned_count >= sync_limit:
+                limit_reached = True
+                break
             msg_id = stale_msg.provider_msg_id
             if msg_id in processed_msg_ids:
+                continue
+            if _message_skip_reason(stale_msg, PARSER_VERSION, force_parse=msg_id in force_reparse_ids):
                 continue
             processed_msg_ids.add(msg_id)
             job.scanned_count += 1
@@ -1279,7 +1333,13 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             except Exception as exc:
                 if is_gmail_authorization_error(exc):
                     raise
-                failed_message_ids.add(msg_id)
+                if getattr(getattr(exc, "resp", None), "status", None) == 404:
+                    from app.services.flight_template_recovery import record_fetch_failure
+                    record_fetch_failure(stale_msg, not_found=True)
+                else:
+                    failed_message_ids.add(msg_id)
+                    from app.services.flight_template_recovery import record_fetch_failure
+                    record_fetch_failure(stale_msg)
                 logger.warning("Failed to refetch stale message %s", msg_id)
                 flush_progress()
                 continue
@@ -1368,5 +1428,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             pass
     finally:
         _ACTIVE_PROGRESS_PHASE = None
-        db.close()
-        import_guards.close()
+        try:
+            db.close()
+        finally:
+            import_guards.close()

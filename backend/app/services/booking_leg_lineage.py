@@ -2,7 +2,8 @@
 
 A document-local fingerprint is independent of parsed dates and airports. It is
 never a cross-message booking ID and never authorizes passenger inference.
-Old records without this pointer require a separately reviewed repair.
+Old records without this pointer require a separately reviewed repair, except
+an exact same-original numbered connection whose prior aggregate is proven.
 """
 from __future__ import annotations
 
@@ -54,6 +55,8 @@ protects later schedule messages. Queries are scoped to one account/document.
 """
     if not getattr(flight, "source_leg", None):
         return LegMatch()
+    if _protected_frontier_summary(db, user_id, flight):
+        return LegMatch(status='held')
     correction_enabled = enabled(user_id)
     if not correction_enabled:
         # Parsing can establish an overnight connection even when automatic
@@ -109,13 +112,16 @@ protects later schedule messages. Queries are scoped to one account/document.
     rows = db.query(BookingObservation).filter_by(user_id=user_id, source_message_id=source).limit(501).all()
     if len(rows) > 500:
         return LegMatch(status="held")
+    from .frontier_connection_evidence import same_original_summary_rows
+    summary_rows = same_original_summary_rows(current, rows, names)
+    summary_ids = {row.id for row in summary_rows}
     uncertain_ids = {row.id for row in rows if (row.facts or {}).get('source_leg', {}).get('key') == pointer
                      and not key((row.facts or {}).get('source_leg'))}
     # A prior interpretation of this very document may predate fingerprints.
     # It cannot authorize a cross-date correction, but its linked active flight
     # must not be silently duplicated either. Leave an explicit legacy review.
     from .builder import _normalize_flight_number
-    uncertain_ids.update(row.id for row in rows if not (row.facts or {}).get('source_leg')
+    uncertain_ids.update(row.id for row in rows if row.id not in summary_ids and not (row.facts or {}).get('source_leg')
         and booking_code(row.pnr) == booking_code(current.pnr)
         and _normalize_flight_number(row.flight_number) == _normalize_flight_number(current.flight_number))
     if uncertain_ids and any(uncertain_ids.intersection((segment.meta_json or {}).get('observation_ids') or [])
@@ -133,7 +139,7 @@ protects later schedule messages. Queries are scoped to one account/document.
     if _revision(current.facts or {}) < revision:
         return LegMatch(status="stale")
 
-    ids = {row.id for row in rows}
+    ids = {row.id for row in rows} | summary_ids
     segments = db.query(Segment).join(Trip).filter(Trip.user_id == user_id).all()
     linked = [segment for segment in segments if ids.intersection((segment.meta_json or {}).get("observation_ids") or [])]
     if len(linked) > 1:
@@ -142,6 +148,12 @@ protects later schedule messages. Queries are scoped to one account/document.
         return LegMatch()
     segment = linked[0]
     meta = segment.meta_json or {}
+    # A newly typed connection can correct the same original's older aggregate
+    # only while the linked row still has that exact summary (or this leg).
+    # Another source's changed schedule must not inherit this exception.
+    if summary_ids.intersection(meta.get('observation_ids') or []) and _segment_schedule(segment) not in {
+            _schedule(current), *(_schedule(row) for row in summary_rows)}:
+        return LegMatch(status='held')
     from .booking_ledger import user_decision_for_flight, cancellation_blocks_flight
     from .travel_name_recovery import flight_from, recovery_blocked, active_shares_for_item
     from ..models import TravelInboxEvidence, TravelInboxItem, TravelInboxAssignment, FlightShare
@@ -153,7 +165,7 @@ protects later schedule messages. Queries are scoped to one account/document.
     if any(user_decision_for_flight(db, user_id, segment, pnr=code)
            or cancellation_blocks_flight(db, user_id, segment, pnr=code) for code in segment_codes if code):
         return LegMatch(status="held")
-    for row in rows:
+    for row in [*rows, *summary_rows]:
         previous = flight_from(row)
         codes = {previous.pnr, *(booking_code(code) for code in previous.pnr_aliases or [])}
         if (any(user_decision_for_flight(db, user_id, previous, pnr=code) for code in codes if code)
@@ -180,6 +192,65 @@ protects later schedule messages. Queries are scoped to one account/document.
 def _segment_schedule(segment):
     return (segment.dep_airport, segment.arr_airport, segment.flight_number,
             event_time(segment.dep_time), event_time(segment.arr_time))
+
+
+def _protected_frontier_summary(db, user_id, flight):
+    """Hold both new card siblings if their exact original aggregate is protected.
+
+    This never authorizes a correction, including outside the rollout cohort.
+    The original source and every summary schedule field must match; the local
+    alternative recognizes only the historical unnormalized representation.
+    """
+    pointer = getattr(flight, 'source_leg', None)
+    if not isinstance(pointer, dict) or pointer.get('template') != 'frontier_numbered_connection_cards':
+        return False
+    source = getattr(flight, 'source_message_id', None)
+    ident = getattr(flight, 'observation_id', None)
+    current = db.get(BookingObservation, ident) if ident is not None else None
+    if (not source or not current or current.user_id != user_id or current.source_message_id != source
+            or current.ownership != 'self' or not original_source(current) or ambiguous(current)):
+        return False
+    from .frontier_connection_evidence import summary_schedule
+    summary = summary_schedule(current, allow_sibling=True)
+    if not summary:
+        return False
+    proof = current.facts['source_leg']['connection_itinerary']
+    local_summary = (*summary[:3], event_time(proof['summary_departure_local']), event_time(proof['summary_arrival_local']))
+    segments = db.query(Segment).join(Trip).filter(Trip.user_id == user_id).all()
+    candidates = []
+    for segment in segments:
+        meta = segment.meta_json or {}
+        sources = set(meta.get('source_message_ids') or [])
+        sources.add(meta.get('source_message_id'))
+        if (source in sources and booking_code(segment.pnr) == booking_code(current.pnr)
+                and _segment_schedule(segment) in {summary, local_summary}):
+            candidates.append(segment)
+    if not candidates:
+        return False
+    from .builder import _protected_trip_ids
+    protected = _protected_trip_ids(db, user_id, segments=segments)
+    protected.update(segment.trip_id for segment in segments
+        if any((segment.meta_json or {}).get(key) for key in ('manual', 'user_edited', 'personal_note')))
+    from .booking_ledger import user_decision_for_flight, cancellation_blocks_flight
+    from .travel_name_recovery import active_shares_for_item
+    from ..models import TravelInboxEvidence, TravelInboxItem, TravelInboxAssignment
+    for segment in candidates:
+        meta = segment.meta_json or {}
+        if (segment.trip_id in protected
+                or user_decision_for_flight(db, user_id, segment, pnr=segment.pnr)
+                or cancellation_blocks_flight(db, user_id, segment, pnr=segment.pnr,
+                    source_event_at=current.source_event_at)):
+            return True
+        newer, incoming = event_time(meta.get('source_received_at')), event_time(current.source_event_at)
+        if newer and (not incoming or newer > incoming):
+            return True
+        ids = meta.get('observation_ids') or []
+        if ids:
+            items = db.query(TravelInboxItem).join(TravelInboxEvidence).filter(
+                TravelInboxItem.user_id == user_id, TravelInboxEvidence.observation_id.in_(ids)).all()
+            if any(db.get(TravelInboxAssignment, item.id) or active_shares_for_item(db, user_id, item.id) for item in items):
+                return True
+    return False
 
 
 def _legacy_connection_collision(db, user_id, current):

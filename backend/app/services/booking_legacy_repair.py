@@ -200,7 +200,8 @@ def _run(db, user_id, manifest):
     for spec, segment, evidence, target, others in validated:
         target.source = (evidence.facts or {}).get('source') or 'receipt'
         target.source_message_id, target.observation_id = evidence.source_message_id, evidence.id
-        if not _refresh_existing_segment(db, segment, target, user_id=user_id, allow_overwrite=True):
+        if not _refresh_existing_segment(db, segment, target, user_id=user_id, allow_overwrite=True,
+                                         history_reason="before_reviewed_legacy_repair"):
             raise RepairConflict('Existing flight protection blocked correction')
         # A verified wall-clock-to-UTC correction may use an older complete
         # receipt while retaining a later legacy source timestamp. The normal

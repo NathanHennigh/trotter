@@ -348,3 +348,34 @@ def test_history_import_lock_contention_defers_without_failure_or_checkpoint_los
         assert job.state == "completed" and job.error_message is None
         assert db.get(SyncJob, "recent-running").state == "running"
         assert db.query(Message).count() == db.query(Segment).count() == 0
+
+
+@pytest.mark.parametrize("processing_fails", [False, True])
+def test_close_failure_still_resets_projection_context_and_releases_import_lock(worker, monkeypatch, processing_fails):
+    from app.services.booking_projection_context import is_new_projection
+    from app.services.import_lock import user_import_lock
+
+    factory, user_id, _ = worker
+    session = factory()
+    engine = session.get_bind()
+    real_close = session.close
+
+    def failed_close():
+        assert is_new_projection(user_id, 999999)
+        real_close()
+        raise RuntimeError("synthetic session close failure")
+
+    monkeypatch.setattr(session, "close", failed_close)
+    monkeypatch.setattr(import_tasks, "SessionLocal", lambda: session)
+    if processing_fails:
+        def failed_service(*args):
+            raise RuntimeError("synthetic processing failure")
+        monkeypatch.setattr(gmail, "build_gmail_service", failed_service)
+
+    with pytest.raises(RuntimeError, match="synthetic session close failure"):
+        run(factory, user_id, "sync", "close-failure")
+    assert not is_new_projection(user_id, 999999)
+    # This is the real lock, so successful reacquisition also detects a leaked
+    # OS/advisory lock rather than merely checking a mocked exit callback.
+    with user_import_lock(engine, user_id):
+        pass

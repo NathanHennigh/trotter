@@ -53,6 +53,9 @@ def create_celery_app() -> Celery:
 			},
 		},
 	)
+	if os.getenv("TROTTER_PARSER_PILOT_ROUTING") == "1":
+		from .services.flight_import_routing import route_parser_pilot
+		app.conf.task_routes = (route_parser_pilot, app.conf.task_routes)
 	return app
 
 

@@ -147,6 +147,10 @@ def extract_partial_flight_evidence(full_msg: dict) -> dict | None:
     """
     if not isinstance(full_msg, dict) or not isinstance(full_msg.get("payload"), dict):
         return None
+    from .partial_airline_evidence import extract_partial_airline_evidence
+    airline = extract_partial_airline_evidence(full_msg)
+    if airline:
+        return airline
     payload = full_msg["payload"]
     raw_headers = payload.get("headers") or []
     if not isinstance(raw_headers, list) or len(raw_headers) > 128:

@@ -2,10 +2,136 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
 from email.utils import parsedate_to_datetime
+import json
+import re
 
 from .flight_evidence import assess_flight_evidence, has_explicit_flight_number
 from .gmail import extract_attachments, extract_headers, extract_message_body
+from .html_visibility import permitted_jsonld_scripts, visible_html_soup
+
+
+def _has_complete_structured_itinerary(html: str) -> bool:
+    """Typed schedules admit parsing; they do not establish passenger authority."""
+    if len(html) > 200_000:
+        return False
+    bounded = html[:200_000]
+    if "application/ld+json" not in bounded or "FlightReservation" not in bounded:
+        return False
+    from .flight_evidence import _valid_iata
+
+    def complete(item, depth=0):
+        if depth > 8 or not isinstance(item, dict):
+            return False
+        if item.get("@type") in ("ReservationPackage", "TravelAction"):
+            children = item.get("subReservation")
+            return isinstance(children, list) and any(complete(child, depth + 1) for child in children[:64])
+        flight = item.get("reservationFor")
+        if item.get("@type") != "FlightReservation" or not isinstance(flight, dict) or flight.get("@type") != "Flight":
+            return False
+        airports = [flight.get(key) for key in ("departureAirport", "arrivalAirport")]
+        if not all(isinstance(airport, dict) for airport in airports):
+            return False
+        codes = [str(airport.get("iataCode") or "").upper() for airport in airports]
+        if codes[0] == codes[1] or not all(_valid_iata(code) for code in codes):
+            return False
+        if not re.fullmatch(r"(?:[A-Z0-9]{2})?\d{1,4}[A-Z]?", str(flight.get("flightNumber") or "").upper()):
+            return False
+        # A date alone is not a midnight schedule. Both clocks must be printed
+        # in this reservation, independent of message dates or MIME alternatives.
+        for key in ("departureTime", "arrivalTime"):
+            value = flight.get(key)
+            if not isinstance(value, str) or not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", value):
+                return False
+            try:
+                datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return False
+        return True
+
+    def inspect(item, depth=0):
+        if depth > 8 or not isinstance(item, dict):
+            return 0, False
+        if item.get("@type") == "FlightReservation":
+            return 1, complete(item)
+        if item.get("@type") in ("ReservationPackage", "TravelAction"):
+            children = item.get("subReservation", [])
+            if not isinstance(children, list) or len(children) > 64:
+                return 0, False
+            results = [inspect(child, depth + 1) for child in children]
+            return sum(count for count, _ in results), all(valid for _, valid in results)
+        return 0, True
+
+    scripts = permitted_jsonld_scripts(bounded)
+    if len(scripts) > 64:
+        return False
+    reservations = 0
+    for script in scripts:
+        try:
+            data = json.loads(script.string or "")
+        except (ValueError, TypeError, RecursionError):
+            continue
+        items = data if isinstance(data, list) else [data]
+        if len(items) > 64:
+            return False
+        for item in items:
+            count, valid = inspect(item)
+            if not valid:
+                return False
+            reservations += count
+    if not reservations:
+        return False
+    # The legacy extractor consumes every JSON-LD item once admitted. A valid
+    # first reservation cannot license malformed siblings or date-only clocks.
+    from .parser import extract_jsonld_flights
+    try:
+        return bool(extract_jsonld_flights(html))
+    except (AttributeError, TypeError, ValueError, RecursionError):
+        return False
+
+
+def _html_evidence(subject: str, sender: str, html: str):
+    evidence = assess_flight_evidence(subject=subject, sender=sender, body=html)
+    structural_signal = None
+    if "operational_itinerary" not in evidence.signals:
+        if _has_complete_structured_itinerary(html):
+            structural_signal = "structured_flight_reservation"
+        elif _has_clocked_html_summary(html):
+            structural_signal = "clocked_flight_summary"
+    if structural_signal:
+        evidence = replace(evidence, verdict="parse", score=max(8, evidence.score),
+                           signals=evidence.signals + (structural_signal, "operational_itinerary"))
+    return evidence
+
+
+def _has_clocked_html_summary(html: str) -> bool:
+    """A summary card can print timed airport cells without route punctuation."""
+    bounded = html[:200_000]
+    if not re.search(r"flight\s+summary", bounded, re.I):
+        return False
+    from .flight_evidence import _DATE_TIME, _flight_numbers, _valid_iata
+    soup = visible_html_soup(bounded)
+    text = re.sub(r"https?://\S+", " ", " ".join(soup.get_text(" ", strip=True).split()))
+    headings = list(re.finditer(r"\bflight summary\b", text, re.I))
+    endpoint = re.compile(r"\b((?:[01]?\d|2[0-3]):[0-5]\d(?:\s*[AP]M)?)\s+([A-Z]{3})\s+(?:GMT|UTC)\s*[+-]\d{1,2}(?::?\d{2})?\b", re.I)
+    for index, heading in enumerate(headings):
+        end = min(heading.end() + 1600, headings[index + 1].start() if index + 1 < len(headings) else len(text))
+        block = text[heading.end():end]
+        if not _DATE_TIME.search(block) or not _flight_numbers(block.upper()):
+            continue
+        codes = set()
+        for clock, code in endpoint.findall(block):
+            try:
+                value = re.sub(r"\s", "", clock).upper()
+                datetime.strptime(value, "%I:%M%p" if value.endswith(("AM", "PM")) else "%H:%M")
+            except ValueError:
+                continue
+            if _valid_iata(code.upper()):
+                codes.add(code.upper())
+        if len(codes) >= 2:
+            return True
+    return False
 
 
 def message_internal_time(message: dict):
@@ -42,8 +168,25 @@ def prepare_flight_message(full_msg: dict, *, user_name: str, aliases: list[str]
     headers = extract_headers(full_msg)
     plain_text, html = extract_message_body(full_msg)
     subject, sender = headers.get("subject", ""), headers.get("from", "")
-    body = plain_text if plain_text.strip() else html
-    evidence = assess_flight_evidence(subject=subject, sender=sender, body=body)
+    has_plain = bool(plain_text.strip())
+    has_html = bool(html.strip())
+    same_body = plain_text == html
+    body = plain_text if has_plain else html
+    evidence = (_html_evidence(subject, sender, html) if has_html and (not has_plain or same_body)
+                else assess_flight_evidence(subject=subject, sender=sender, body=body))
+    if has_plain and has_html and not same_body:
+        # MIME alternatives can differ materially: a short plain-text marketing
+        # fallback must not hide the HTML itinerary. Score each independently;
+        # scattered fields in two weak alternatives cannot combine into proof.
+        html_evidence = _html_evidence(subject, sender, html)
+        def strength(value):
+            return ({"skip": 0, "review": 1, "parse": 2}[value.verdict],
+                    "labeled_operational_block" in value.signals, value.score)
+        # A higher score alone may only mean the HTML omitted promotional text
+        # or contains incidental words such as "way to get" or "check in".
+        # Replacing present plain text requires an actual itinerary in the HTML.
+        if "operational_itinerary" in html_evidence.signals and strength(html_evidence) > strength(evidence):
+            body, evidence = html, html_evidence
     internal_ts = message_internal_time(full_msg)
     received_at = headers.get("date") or internal_ts
     if isinstance(received_at, str):

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from bs4 import BeautifulSoup
+from .html_visibility import visible_html_soup
 
 
 @dataclass
@@ -28,6 +29,7 @@ class ParserTextBundle:
     is_forwarded: bool = False
     timings: dict[str, float] = field(default_factory=dict)
     stats: dict[str, Any] = field(default_factory=dict)
+    structural_text: str = ""
 
 
 _NOISE_TAGS = {"script", "style", "noscript", "svg", "head", "meta", "link"}
@@ -99,7 +101,9 @@ def prepare_parser_text(
     started = time.perf_counter()
     html_text = _normalize_text(soup.get_text(separator="\n") if soup else "")
     if html and len(html_text) < 100 and len(html) > 1000:
-        html_text = _normalize_text(_raw_html_text_fallback(html))
+        # A fallback may adjust visible boundaries, never resurrect content
+        # removed as head/script/template/hidden markup.
+        html_text = _normalize_text(_raw_html_text_fallback(str(soup)))
     plain_clean = _normalize_text(plain_text or "")
     clean_source = "\n".join(
         part for part in [plain_clean, html_text] if part
@@ -133,11 +137,15 @@ def prepare_parser_text(
             "evidence_chars": len(evidence_text),
             "full_chars": len(full_text),
         },
+        # Repeated field labels and carrier names are meaningful inside cards.
+        # The compact views above deliberately deduplicate them; structural
+        # extractors need one lossless visible representation instead.
+        structural_text=(html_text or plain_clean)[:100_000],
     )
 
 
 def _clean_soup(html: str) -> BeautifulSoup:
-    soup = BeautifulSoup(html, "html.parser")
+    soup = visible_html_soup(html)
     for tag in soup(_NOISE_TAGS):
         tag.decompose()
     for tag in soup.find_all(True):

@@ -11,10 +11,12 @@ from __future__ import annotations
 from datetime import datetime
 from hashlib import sha256
 import json
+import re
 
-from ..models import BookingCancellation, BookingObservation, TravelInboxEvidence, TravelInboxItem, User
+from ..models import (BookingCancellation, BookingObservation, FlightShare, TravelInboxAssignment,
+                      TravelInboxEvidence, TravelInboxItem, User)
 from .booking_ledger import booking_code, event_time
-from .travel_inbox_identity import retained_passengers
+from .travel_inbox_identity import exact_airline_name_format_match, retained_passengers
 
 
 def _hash(value):
@@ -83,12 +85,82 @@ def _retain_passenger(db, user_id, observation, passenger, *, flight_key=None):
     flight_key = flight_key or observation_flight_key(observation)
     record_key = _hash({"flight": flight_key, "passenger": passenger["passenger_key"]})
     item = db.query(TravelInboxItem).filter_by(user_id=user_id, record_key=record_key).first()
+    if item is None and passenger["reason"] in {"companion", "other_traveler"}:
+        item, ambiguous = _same_issued_ticket_item(db, user_id, observation, passenger, flight_key)
+        if ambiguous:
+            # Retain the new source for review without merging existing people,
+            # rewriting their labels, or changing their decisions/shares.
+            return _retain_passenger(db, user_id, observation,
+                {"passenger_name":None, "passenger_key":None, "reason":"unassigned"}, flight_key=flight_key)
     if item is None:
         item = TravelInboxItem(user_id=user_id, record_key=record_key, flight_key=flight_key, **passenger)
         db.add(item)
         db.flush()
     _link(db, item, observation)
     return item
+
+
+def _named_issued_ticket(observation, passenger_name, *, ownership):
+    facts = observation.facts or {}
+    if (ownership not in {"self", "other"} or observation.ownership != ownership
+            or not all(_flight_identity(observation).values())
+            or facts.get("user_decision") or facts.get("force_review")
+            or any(facts.get(field) != getattr(observation, field) for field in ("pnr", "dep_airport", "arr_airport", "flight_number"))):
+        return None
+    entries = facts.get("passenger_evidence")
+    if not isinstance(entries, list):
+        return None
+    keys = set()
+    for evidence in entries:
+        if (not isinstance(evidence, dict) or evidence.get("role") != "traveler"
+                or evidence.get("applies") is not True or evidence.get("complete") is not True
+                or evidence.get("scope_ambiguous") is not False
+                or not (" ".join(str(evidence.get("name") or "").split()).casefold() == passenger_name.casefold()
+                        or exact_airline_name_format_match(evidence.get("name"), passenger_name))):
+            continue
+        scope = evidence.get("scope") or {}
+        if not isinstance(scope, dict) or any(scope.get(field) and scope[field] != getattr(observation, field)
+                for field in ("dep_airport", "arr_airport", "flight_number")):
+            continue
+        pnr = booking_code(observation.pnr)
+        if scope.get("pnr") != pnr and scope.get("pnrs") != [pnr]:
+            continue
+        key = evidence.get("issued_ticket_key")
+        if type(evidence.get("issued_ticket_version")) is int and evidence["issued_ticket_version"] == 1 and isinstance(key, str) and re.fullmatch(r"[a-f0-9]{64}", key):
+            keys.add(key)
+    return next(iter(keys)) if len(keys) == 1 else None
+
+
+def _same_issued_ticket_item(db, user_id, observation, passenger, flight_key):
+    ownership = {"companion": "self", "other_traveler": "other"}.get(passenger["reason"])
+    if ownership is None or not all(_flight_identity(observation).values()):
+        return None, False
+    candidates = [item for item in db.query(TravelInboxItem).filter_by(user_id=user_id, flight_key=flight_key)
+                  if item.reason == passenger["reason"] and item.passenger_name
+                  and exact_airline_name_format_match(item.passenger_name, passenger["passenger_name"])]
+    if not candidates:
+        return None, False
+    incoming = _named_issued_ticket(observation, passenger["passenger_name"], ownership=ownership)
+    matching, uncertain = [], False
+    for item in candidates:
+        rows = db.query(BookingObservation).join(TravelInboxEvidence).filter(
+            TravelInboxEvidence.item_id == item.id, BookingObservation.user_id == user_id).all()
+        keys = {_named_issued_ticket(row, item.passenger_name, ownership=ownership) for row in rows}
+        # Different explicit tickets can belong to different people whose
+        # printed given names happen to concatenate identically.
+        if incoming and len(keys) == 1 and None not in keys and incoming not in keys:
+            continue
+        protected = (db.get(TravelInboxAssignment, item.id) is not None
+            or any(item.id in (share.item_ids or []) for share in db.query(FlightShare).filter_by(sender_id=user_id))
+            or any((row.facts or {}).get("user_decision") for row in rows))
+        if (not incoming or not rows or keys != {incoming} or protected
+                or any(observation_flight_key(row) != flight_key for row in rows)):
+            uncertain = True
+        else:
+            matching.append(item)
+    if uncertain or len(matching) > 1:
+        return None, True
+    return (matching[0], False) if matching else (None, False)
 
 
 def retain_observation(db, user_id, observation):
@@ -188,7 +260,7 @@ def _same_scope(observation, scope):
     return not left or not right or left == right
 
 
-def _cancellation_state(db, user_id, observation):
+def _cancellation_state(db, user_id, observation, *, passenger_name=None):
     if not observation.pnr:
         return None
     events = db.query(BookingCancellation).filter_by(user_id=user_id, pnr=booking_code(observation.pnr)).all()
@@ -199,6 +271,20 @@ def _cancellation_state(db, user_id, observation):
             continue
         if not any(_same_scope(observation, scope) for scope in event.scopes):
             continue
+        if passenger_name and (event.facts or {}).get("strict_lifecycle"):
+            from .passenger_identity import full_names_match
+            scoped_facts = [facts for facts in (event.facts or {}).get("flights", [])
+                if _same_scope(observation, {
+                    "travel_date": (facts.get("time_provenance") or {}).get("departure_local_date")
+                        or str(facts.get("dep_time") or "")[:10],
+                    "dep_airport": facts.get("dep_airport"), "arr_airport": facts.get("arr_airport"),
+                    "flight_number": facts.get("flight_number")})]
+            names = [name for facts in scoped_facts for name in facts.get("passenger_names") or []]
+            if names and not any(full_names_match(passenger_name, name) for name in names):
+                continue
+            if not names:
+                uncertain = True
+                continue
         received = event_time(observation.source_event_at)
         canceled = event_time(event.source_event_at)
         if received and canceled and received <= canceled:
@@ -209,7 +295,7 @@ def _cancellation_state(db, user_id, observation):
     return "needs_review" if uncertain else None
 
 
-def serialize_item(db, user_id, item, *, include_evidence=False):
+def serialize_item(db, user_id, item, *, include_evidence=False, siblings=None):
     """Owner-only, passenger-specific read projection; never a transfer payload.
 
 Source pointers are available only to the importing owner. Raw email content,
@@ -251,7 +337,7 @@ sharing will require separate authorization and an explicit payload allowlist.
         status = "needs_review"
     elif not item.passenger_name and decision.get("ownership") == "self" and decision.get("status") == "active":
         status = "belongs_to_you"
-    cancellation = _cancellation_state(db, user_id, latest) if latest else None
+    cancellation = _cancellation_state(db, user_id, latest, passenger_name=item.passenger_name) if latest else None
     if cancellation:
         status = cancellation
     # Personal decisions have no authority over a named companion's ticket.
@@ -261,17 +347,29 @@ sharing will require separate authorization and an explicit payload allowlist.
         status = "canceled"
     if not item.passenger_name and decision.get("status") == "hold":
         status = "needs_review"
+    time_proof = facts.get("time_provenance")
+    hide_subject_dates = (facts.get("force_review") is True and isinstance(time_proof, dict)
+                          and time_proof.get("extraction_review_reason") == "subject_only_itinerary_requires_review")
+    # Subject-only placeholders remain immutable evidence, not displayed dates
+    # or clocks. The empty date keeps the existing retained-flight API contract.
     result = {
         "id": item.id, "passenger_name": item.passenger_name, "reason": reason,
         "status": status, "created_at": item.created_at, "observation_count": len(observations),
         "flight": {
-            "pnr": latest.pnr, "travel_date": latest.travel_date,
+            "pnr": latest.pnr, "travel_date": "" if hide_subject_dates else latest.travel_date,
             "dep_airport": latest.dep_airport, "arr_airport": latest.arr_airport,
-            "flight_number": latest.flight_number, "dep_time": facts.get("dep_time"),
-            "arr_time": facts.get("arr_time"), "airline": facts.get("airline"),
+            "flight_number": latest.flight_number, "dep_time": None if hide_subject_dates else facts.get("dep_time"),
+            "arr_time": None if hide_subject_dates else facts.get("arr_time"), "airline": facts.get("airline"),
             "aircraft": facts.get("aircraft"),
         } if latest else None,
     }
+    # A read projection preserves every stored recipient and source.
+    from .recipient_name_revision import recipient_revision_for_item
+    revision = recipient_revision_for_item(db, item, observations, siblings=siblings)
+    if revision:
+        result['recipient_revision'] = revision
+        if revision['state'] in {'superseded', 'needs_review'} and result['status'] != 'canceled':
+            result['status'] = 'needs_review'
     if include_evidence:
         result["evidence"] = [{
             "observation_id": row.id, "source_message_id": row.source_message_id,

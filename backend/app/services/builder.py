@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left, bisect_right
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from .booking_ledger import (
     cancellation_blocks_flight,
     flight_scope,
     has_verified_self_observation,
+    preserve_itinerary_changes,
     record_cancellation,
     record_flight_observations,
     snapshot_user_itinerary,
@@ -114,6 +116,7 @@ _COUNTRY_NAMES = {
 }
 _EXTRA_DESTINATION_STOPOVER = timedelta(hours=36)
 _NEARBY_INTERNATIONAL_CITY_KM = 2500.0
+_PROTECTED_GROUPING_SOURCES = {"manual", "user_review", "accepted_flight_share", "flight_share"}
 
 
 @dataclass
@@ -128,6 +131,9 @@ class BuildSegmentsResult:
     held_unknown: int = 0
     blocked_cancellation: int = 0
     removed_other: int = 0
+    superseded: int = 0
+    retired_superseded: int = 0
+    held_ticket_retirements: int = 0
     affected_segment_ids: set[int] = field(default_factory=set)
     review_reasons: list[str] = field(default_factory=list)
     removed_leg_scopes: list[dict] = field(default_factory=list)
@@ -199,7 +205,6 @@ def build_segments_and_trips_detailed(
     if not flights:
         return result
 
-    snapshot_user_itinerary(db, user_id, reason="before_booking_import")
     decision = record_flight_observations(
         db, user_id, flights, source_message_id=source_message_id, source_event_at=source_event_at,
         force_review=force_review,
@@ -208,24 +213,44 @@ def build_segments_and_trips_detailed(
     result.held_unknown = decision.held_unknown
     result.blocked_cancellation = decision.blocked_cancellation
     result.removed_other = decision.removed_other
+    result.superseded = decision.superseded
+    result.retired_superseded = decision.retired_superseded
+    result.held_ticket_retirements = decision.held_ticket_retirements
     result.removed_leg_scopes = list(decision.removed_leg_scopes)
+    result.review_reasons = list(decision.review_reasons)
     result.held = decision.held_other + decision.held_unknown + decision.blocked_cancellation
-    result.skipped = result.held
+    result.skipped = result.held + result.superseded
     affected_trip_ids = set(decision.affected_trip_ids)
     flights = decision.flights
     if not flights:
-        if result.removed_other:
+        if result.removed_other or result.retired_superseded or result.held_ticket_retirements:
             result.trips = (rebuild_affected_trips(db, user_id, affected_trip_ids)
                             if source_message_id else rebuild_user_trips(db, user_id))
         return result
 
     sorted_flights = sorted(flights, key=lambda f: _db_datetime(f.dep_time))
     trip_groups = _group_into_trips(sorted_flights)
+    protected_trip_ids = _protected_trip_ids(db, user_id)
+    protected_clocks = _trip_member_clocks(db, user_id, protected_trip_ids)
+    projection_flights = []
 
     for group in trip_groups:
         from .booking_leg_lineage import find as find_document_leg
+        from .booking_agency_ticket_lifecycle import find as find_agency_ticket
         ready, linked_trips = [], set()
         for flight in group:
+            agency = find_agency_ticket(db, user_id, flight, protected_trip_ids=protected_trip_ids)
+            if agency.status == "held":
+                result.held += 1
+                result.held_unknown += 1
+                result.skipped += 1
+                if agency.reason not in result.review_reasons:
+                    result.review_reasons.append(agency.reason)
+                continue
+            if agency.flight is not None:
+                flight = agency.flight
+            if agency.segment is not None:
+                linked_trips.add(agency.segment.trip_id)
             lineage = find_document_leg(db, user_id, flight)
             if lineage.status == "stale":
                 result.skipped += 1
@@ -238,6 +263,7 @@ def build_segments_and_trips_detailed(
                     result.review_reasons.append("document_leg_identity_conflict")
                 continue
             ready.append(flight)
+            projection_flights.append(flight)
             if lineage.segment is not None:
                 linked_trips.add(lineage.segment.trip_id)
         if not ready:
@@ -248,27 +274,46 @@ def build_segments_and_trips_detailed(
         if trip is None:
             trip = existing_projection_trip(db, user_id, group)
         if trip is None:
-            trip = _find_or_create_trip(db, user_id, group)
-        affected_trip_ids.add(trip.id)
+            trip = _existing_segment_trip(db, user_id, group)
+        if trip is None:
+            # A protected candidate may still identify an existing leg or a
+            # negative decision. Exclude it only when allocating for INSERT.
+            trip = _find_or_create_trip(db, user_id, group, create=False)
+        # A group may already span several trips, or every leg may be held by
+        # a later upsert guard. Allocate only when a segment will really use it.
+        # Otherwise a never-used shell becomes misleading deleted-trip history.
+        def allocate_trip():
+            nonlocal trip
+            if trip is None or trip.id in protected_trip_ids:
+                trip = _find_or_create_trip(db, user_id, group,
+                                           excluded_trip_ids=protected_trip_ids)
+            return trip
         for flight in group:
-            action = _upsert_segment(db, trip.id, user_id, flight)
+            action = _upsert_segment(db, trip.id if trip is not None else None,
+                                     user_id, flight, trip_factory=allocate_trip,
+                                     protected_trip_ids=protected_trip_ids)
             if action == "inserted":
                 result.inserted += 1
             elif action == "updated":
                 result.updated += 1
-            elif action in {"held_legacy_identity", "held_legacy_protection"}:
+            elif action in {"held_legacy_identity", "held_legacy_protection", "held_ticket_reconciliation", "held_agency_ticket"}:
                 result.held += 1
                 result.held_unknown += 1
                 result.skipped += 1
-                reason = ("legacy_booking_protected" if action == "held_legacy_protection"
+                reason = ("agency_ticket_revision_requires_review" if action == "held_agency_ticket" else
+                          "ticket_reconciliation_not_enabled" if action == "held_ticket_reconciliation" else
+                          "legacy_booking_protected" if action == "held_legacy_protection"
                           else "legacy_flight_identity_conflict")
                 if reason not in result.review_reasons:
                     result.review_reasons.append(reason)
             else:
                 result.skipped += 1
+        if trip is not None:
+            affected_trip_ids.add(trip.id)
 
+    _refresh_protected_trip_bounds(db, user_id, protected_clocks)
     if source_message_id:
-        observation_ids = {getattr(flight, "observation_id", None) for flight in flights}
+        observation_ids = {getattr(flight, "observation_id", None) for flight in [*flights, *projection_flights]}
         for segment in db.query(Segment).join(Trip).filter(Trip.user_id == user_id).all():
             if observation_ids.intersection((segment.meta_json or {}).get("observation_ids") or []):
                 affected_trip_ids.add(segment.trip_id)
@@ -283,6 +328,7 @@ def build_segments_and_trips_detailed(
 def cancel_segments_for_pnr(
     db: Session, user_id: int, pnr: str, *, received_at=None,
     source_message_id: Optional[str] = None, source_event_at=None, flights=None,
+    strict_lifecycle: bool = False, held_conflict_segment_ids=None,
 ) -> int:
     """Remove stored flight segments for a canceled booking code.
 
@@ -292,12 +338,13 @@ def cancel_segments_for_pnr(
     pnr = _normalize_pnr(pnr)
     if not pnr:
         return 0
-    snapshot_user_itinerary(db, user_id, reason="before_booking_cancellation")
     cancellation_time = _db_datetime(source_event_at or received_at)
     cancellation = record_cancellation(
         db, user_id, pnr, source_message_id=source_message_id,
-        source_event_at=cancellation_time, flights=flights,
+        source_event_at=cancellation_time, flights=flights, strict_lifecycle=strict_lifecycle,
     )
+    if held_conflict_segment_ids is not None:
+        held_conflict_segment_ids.extend(getattr(cancellation, "retired_conflict_segment_ids", []))
     if not cancellation.scopes:
         return 0
     segments = (
@@ -310,13 +357,15 @@ def cancel_segments_for_pnr(
     affected = 0
     affected_trip_ids = set()
     for segment in segments:
+        if strict_lifecycle:
+            from .booking_ledger import _same_cancellation_leg
+            if not any(_same_cancellation_leg(flight_scope(segment), scope)
+                       for scope in (cancellation.facts or {}).get("personal_scopes", cancellation.scopes)):
+                continue
         if not cancellation_blocks_flight(db, user_id, segment, source_event_at=_segment_source_received_at(segment)):
             continue
-        source_time = _segment_source_received_at(segment)
-        if cancellation_time and source_time and source_time > cancellation_time:
-            continue
         snapshot_user_itinerary(db, user_id, reason="canceled_booking",
-                                segment_ids={segment.id}, trip_ids={segment.trip_id})
+                                segment_ids={segment.id}, trip_ids=())
         affected_trip_ids.add(segment.trip_id)
         alias = _first_active_pnr_alias(db, user_id, segment, pnr)
         if alias:
@@ -358,7 +407,6 @@ def resolve_booking_relationships(db: Session, user_id: int) -> None:
     evidence relationships that matter later: aliases, likely replacement
     bookings, and reused/credit-linked PNRs that appear on unrelated trips.
     """
-    snapshot_user_itinerary(db, user_id, reason="before_booking_relationship_resolution")
     segments = (
         db.query(Segment)
         .join(Trip)
@@ -368,9 +416,10 @@ def resolve_booking_relationships(db: Session, user_id: int) -> None:
     )
     if not segments:
         return
-    _mark_duplicate_route_aliases(segments)
-    _mark_near_duplicate_booking_replacements(segments)
-    _mark_reused_pnr_candidates(segments)
+    with preserve_itinerary_changes(db, user_id, reason="before_booking_relationship_resolution", segments=segments):
+        _mark_duplicate_route_aliases(segments)
+        _mark_near_duplicate_booking_replacements(segments)
+        _mark_reused_pnr_candidates(segments)
     db.flush()
 
 
@@ -381,7 +430,6 @@ def rebuild_user_trips(db: Session, user_id: int) -> int:
     an itinerary. Rebuilding from the user's complete segment graph prevents
     stale one-email groupings from surviving after better data arrives.
     """
-    snapshot_user_itinerary(db, user_id, reason="before_trip_rebuild")
     segments = (
         db.query(Segment)
         .join(Trip)
@@ -396,6 +444,12 @@ def rebuild_user_trips(db: Session, user_id: int) -> int:
         db.flush()
         return 0
 
+    trips = db.query(Trip).filter_by(user_id=user_id).all()
+    with preserve_itinerary_changes(db, user_id, reason="before_trip_rebuild", trips=trips, segments=segments):
+        return _rebuild_saved_trips(db, user_id, segments)
+
+
+def _rebuild_saved_trips(db, user_id, segments):
     segments = _prune_duplicate_segments(db, segments)
     old_trip_ids = {segment.trip_id for segment in segments}
     old_trips = {
@@ -443,13 +497,18 @@ def rebuild_affected_trips(db: Session, user_id: int, affected_trip_ids: set[int
     if account_enabled("BOOKING_CONTEXTUAL_TRIP_GROUPING_ENABLED", user_id):
         return _rebuild_contextual_trips(db, user_id, affected_trip_ids)
     all_segments = db.query(Segment).join(Trip).filter(Trip.user_id == user_id).all()
+    all_trips = {trip.id: trip for trip in db.query(Trip).filter_by(user_id=user_id).all()}
+    protected = _protected_trip_ids(db, user_id, segments=all_segments, trips=all_trips)
+    affected_trip_ids = (affected_trip_ids & all_trips.keys()) - protected
+    if not affected_trip_ids:
+        return 0
     home_airport = _infer_home_airport(all_segments)
     changed = True
     while changed:
         changed = False
         selected = [segment for segment in all_segments if segment.trip_id in affected_trip_ids]
         for candidate in all_segments:
-            if candidate.trip_id in affected_trip_ids:
+            if candidate.trip_id in affected_trip_ids or candidate.trip_id in protected:
                 continue
             meta = candidate.meta_json or {}
             if meta.get("ownership") != "self" or not meta.get("observation_ids"):
@@ -466,27 +525,27 @@ def rebuild_affected_trips(db: Session, user_id: int, affected_trip_ids: set[int
                     changed = True
                     break
     segments = [segment for segment in all_segments if segment.trip_id in affected_trip_ids]
-    trips = {trip.id: trip for trip in db.query(Trip).filter(
-        Trip.user_id == user_id, Trip.id.in_(affected_trip_ids),
-    ).all()}
-    snapshot_user_itinerary(db, user_id, reason="recluster_changed_booking_trips",
-                            segment_ids={segment.id for segment in segments}, trip_ids=affected_trip_ids)
+    trips = {trip_id: all_trips[trip_id] for trip_id in affected_trip_ids}
     clusters = _cluster_saved_segments(segments, home_airport)
     used_ids = set()
     for cluster in clusters:
         reusable = _select_reusable_trip_id(cluster, used_ids)
         trip = trips.get(reusable) if reusable else None
+        existing_trips = (trip,) if trip is not None else ()
         if trip is None:
             trip = Trip(user_id=user_id)
             db.add(trip)
             db.flush()
         used_ids.add(trip.id)
         ordered = sorted(cluster, key=_segment_sort_key)
-        trip.start_ts = min(_segment_dep_time(segment) for segment in ordered)
-        trip.end_ts = max(_segment_arr_time(segment) for segment in ordered)
-        trip.title = _trip_title_for_segments(ordered, home_airport=home_airport)
-        for segment in ordered:
-            segment.trip_id = trip.id
+        moving = [segment for segment in ordered if segment.trip_id != trip.id]
+        with preserve_itinerary_changes(db, user_id, reason="recluster_changed_booking_trips",
+                                        trips=existing_trips, segments=moving):
+            trip.start_ts = min(_segment_dep_time(segment) for segment in ordered)
+            trip.end_ts = max(_segment_arr_time(segment) for segment in ordered)
+            trip.title = _trip_title_for_segments(ordered, home_airport=home_airport)
+            for segment in moving:
+                segment.trip_id = trip.id
     db.flush()
     empty = [trip for trip in trips.values() if trip.id not in used_ids and
              not db.query(Segment.id).filter(Segment.trip_id == trip.id).first()]
@@ -499,6 +558,89 @@ def rebuild_affected_trips(db: Session, user_id: int, affected_trip_ids: set[int
     return len(clusters)
 
 
+def _protected_trip_ids(db: Session, user_id: int, *, segments=None, trips=None, observations=None) -> set[int]:
+    """Existing explicit grouping and sharing boundaries cannot acquire imports.
+
+    Matching an old leg still uses the ordinary source/chronology checks. These
+    boundaries govern membership and privacy, including a genuinely new leg in
+    a receipt that also names an existing protected leg.
+    """
+    from ..models import BookingObservation, FlightShare
+    if segments is None:
+        segments = db.query(Segment).join(Trip).filter(Trip.user_id == user_id).all()
+    if trips is None:
+        trips = {trip.id: trip for trip in db.query(Trip).filter_by(user_id=user_id).all()}
+    # Any explicit decision remains a boundary for automatic regrouping. Read
+    # once rather than issuing a decision query for every segment/connection.
+    if observations is None:
+        observations = db.query(BookingObservation).filter_by(user_id=user_id).all()
+    manual_scopes = {
+        (_normalize_pnr(row.pnr), row.travel_date, row.dep_airport, row.arr_airport,
+         _normalize_flight_number(row.flight_number))
+        for row in observations
+        if (row.facts or {}).get("user_decision")
+    }
+    shared_segment_ids = {segment_id
+        for share in db.query(FlightShare).filter_by(recipient_user_id=user_id).all()
+        for segment_id in (share.accepted_segment_ids or [])}
+    protected = {trip.id for trip in trips.values() if trip.visibility not in {None, "private"}}
+    for segment in segments:
+        meta = segment.meta_json or {}
+        scope = flight_scope(segment)
+        codes = {_normalize_pnr(segment.pnr), *(_normalize_pnr(code) for code in (meta.get("pnr_aliases") or []))}
+        keys = {(code, scope["travel_date"], segment.dep_airport,
+                 segment.arr_airport, _normalize_flight_number(segment.flight_number)) for code in codes}
+        if (keys.intersection(manual_scopes) or segment.id in shared_segment_ids
+                or meta.get("source") in _PROTECTED_GROUPING_SOURCES
+                or meta.get("user_decision")
+                or meta.get("manually_edited")
+                or meta.get("manual_grouping")
+                or meta.get("trip_grouping_locked")
+                or meta.get("manual_trip_id")
+                or meta.get("trip_assignment_source") == "manual"):
+            protected.add(segment.trip_id)
+    return protected
+
+
+def _trip_member_clocks(db: Session, user_id: int, trip_ids) -> dict:
+    if not trip_ids:
+        return {}
+    members = {}
+    for segment in db.query(Segment).join(Trip).filter(
+            Trip.user_id == user_id, Trip.id.in_(trip_ids)):
+        members.setdefault(segment.trip_id, {})[segment.id] = (
+            _segment_dep_time(segment), _segment_arr_time(segment))
+    return members
+
+
+def _refresh_protected_trip_bounds(db: Session, user_id: int, before: dict) -> None:
+    """Reflect an accepted member schedule change without changing its grouping.
+
+    Unchanged or held originals cannot rewrite custom/stale bounds. Only the
+    exact same members with changed clocks permit a derived start/end refresh;
+    privacy, title, membership and all other trip fields remain untouched.
+    """
+    after = _trip_member_clocks(db, user_id, before.keys())
+    updates = []
+    for trip_id, previous in before.items():
+        current = after.get(trip_id, {})
+        if previous.keys() != current.keys() or previous == current:
+            continue
+        if any(not dep or not arr or arr <= dep for dep, arr in current.values()):
+            continue
+        start = min(dep for dep, _ in current.values())
+        end = max(arr for _, arr in current.values())
+        trip = db.get(Trip, trip_id)
+        if trip and (_db_datetime(trip.start_ts), _db_datetime(trip.end_ts)) != (start, end):
+            updates.append((trip, start, end))
+    if updates:
+        snapshot_user_itinerary(db, user_id, reason="refresh_protected_trip_bounds",
+                                segment_ids=set(), trip_ids={trip.id for trip, _, _ in updates})
+        for trip, start, end in updates:
+            trip.start_ts, trip.end_ts = start, end
+        db.flush()
+
+
 def _rebuild_contextual_trips(db: Session, user_id: int, affected_trip_ids: set[int]) -> int:
     """Plan with the whole timeline, apply only connected affected memberships.
 
@@ -507,42 +649,26 @@ def _rebuild_contextual_trips(db: Session, user_id: int, affected_trip_ids: set[
     The full timeline supplies that context without running global legacy
     pruning or authorizing edits to unrelated, shared or manually held travel.
     """
-    from ..models import BookingObservation, FlightShare
-
+    from ..models import BookingObservation
     all_segments = db.query(Segment).join(Trip).filter(Trip.user_id == user_id).all()
-    trips = {trip.id: trip for trip in db.query(Trip).filter(Trip.user_id == user_id).all()}
-    # Any explicit decision remains a boundary for automatic regrouping. Read
-    # once rather than issuing a decision query for every segment/connection.
-    manual_scopes = {
-        (_normalize_pnr(row.pnr), row.travel_date, row.dep_airport, row.arr_airport,
-         _normalize_flight_number(row.flight_number))
-        for row in db.query(BookingObservation).filter_by(user_id=user_id).all()
-        if (row.facts or {}).get("user_decision")
-    }
-    shared_segment_ids = {segment_id
-        for share in db.query(FlightShare).filter_by(recipient_user_id=user_id).all()
-        for segment_id in (share.accepted_segment_ids or [])}
-    protected = {trip.id for trip in trips.values() if trip.visibility not in {None, "private"}}
-    for segment in all_segments:
-        meta = segment.meta_json or {}
-        scope = flight_scope(segment)
-        codes = {_normalize_pnr(segment.pnr), *(_normalize_pnr(code) for code in (meta.get("pnr_aliases") or []))}
-        keys = {(code, scope["travel_date"], segment.dep_airport,
-                 segment.arr_airport, _normalize_flight_number(segment.flight_number)) for code in codes}
-        if (keys.intersection(manual_scopes) or segment.id in shared_segment_ids
-                or meta.get("source") in {"manual", "user_review", "accepted_flight_share"}
-                or meta.get("user_decision")
-                or meta.get("manual_grouping")
-                or meta.get("trip_grouping_locked")
-                or meta.get("manual_trip_id")
-                or meta.get("trip_assignment_source") == "manual"):
-            protected.add(segment.trip_id)
+    trips = {trip.id: trip for trip in db.query(Trip).filter_by(user_id=user_id).all()}
+    observations = db.query(BookingObservation).filter_by(user_id=user_id).all()
+    protected = _protected_trip_ids(db, user_id, segments=all_segments, trips=trips, observations=observations)
 
     home_airport = _infer_home_airport(all_segments)
     affected = (set(affected_trip_ids) & trips.keys()) - protected
     if not affected:
         return 0
-    contextual = _cluster_saved_segments(all_segments, home_airport)
+    open_jaw_pairs = _bounded_open_jaw_pairs(all_segments, observations, protected)
+    from ..models import User
+    user = db.get(User, user_id)
+    source_breaks = _source_closed_journey_breaks(all_segments, observations, protected, affected, user=user, trips=trips)
+    contextual = _cluster_saved_segments(all_segments, home_airport, open_jaw_pairs=open_jaw_pairs, source_breaks=source_breaks)
+    # The exception is used only for the first two legs of a cluster. A pair
+    # inside a longer pre-existing chain must not acquire an unused rationale.
+    applied_pairs = {tuple(segment.id for segment in cluster[:2]) for cluster in contextual if len(cluster) >= 2}
+    open_jaw_by_segment = {segment_id: inference for pair, inference in open_jaw_pairs.items()
+                           if pair in applied_pairs for segment_id in pair}
     # A protected flight is context, never a bridge through which independent
     # editable travel can be silently combined.
     available_clusters: list[list[Segment]] = []
@@ -575,9 +701,10 @@ def _rebuild_contextual_trips(db: Session, user_id: int, affected_trip_ids: set[
                 for segment in selected:
                     earlier, later = sorted((candidate, segment), key=_segment_sort_key)
                     gap = _segment_dep_time(later) - _segment_arr_time(earlier)
-                    if (_airports_are_near(earlier.arr_airport, later.dep_airport)
+                    if ((earlier.id, later.id) in open_jaw_pairs or (
+                            _airports_are_near(earlier.arr_airport, later.dep_airport)
                             and not _airports_are_near(earlier.arr_airport, home_airport)
-                            and timedelta(0) <= gap <= timedelta(days=14)):
+                            and timedelta(0) <= gap <= timedelta(days=14))):
                         affected.add(candidate.trip_id)
                         changed = True
                         break
@@ -614,17 +741,30 @@ def _rebuild_contextual_trips(db: Session, user_id: int, affected_trip_ids: set[
     if not has_change:
         return len(clusters)
 
-    snapshot_user_itinerary(db, user_id, reason="recluster_changed_booking_trips",
-                            segment_ids={segment.id for segment in all_segments if segment.trip_id in affected},
-                            trip_ids=affected)
+    with preserve_itinerary_changes(db, user_id, reason="recluster_changed_booking_trips",
+                                    trips=(trips[trip_id] for trip_id in affected),
+                                    segments=(s for s in all_segments if s.trip_id in affected)):
+        _apply_contextual_trip_plan(db, user_id, plan, open_jaw_by_segment, trips, removed_trip_ids)
+    return len(clusters)
+
+
+def _apply_contextual_trip_plan(db, user_id, plan, open_jaw_by_segment, trips, removed_trip_ids):
     for ordered, trip, start, end, title, _ in plan:
         if trip is None:
             trip = Trip(user_id=user_id)
             db.add(trip)
             db.flush()
         trip.start_ts, trip.end_ts, trip.title = start, end, title
+        members = {segment.id for segment in ordered}
         for segment in ordered:
             segment.trip_id = trip.id
+            inference = open_jaw_by_segment.get(segment.id)
+            if inference and set(inference["segment_ids"]) <= members:
+                meta = dict(segment.meta_json or {})
+                retained = list(meta.get("trip_grouping_inferences") or [])
+                if inference not in retained:
+                    meta["trip_grouping_inferences"] = [*retained, inference]
+                    segment.meta_json = meta
     db.flush()
     # All former members are assigned above. Remove only affected empty shells,
     # retaining the full pre-change snapshots and every independent draft.
@@ -633,7 +773,6 @@ def _rebuild_contextual_trips(db: Session, user_id: int, affected_trip_ids: set[
         if not db.query(Segment.id).filter(Segment.trip_id == trip_id).first():
             db.delete(trip)
     db.flush()
-    return len(clusters)
 
 
 # ──────────────────────────── internal helpers ───────────────────────────────
@@ -650,7 +789,258 @@ def _segment_sort_key(segment: Segment) -> tuple[datetime, datetime, int]:
     return (_segment_dep_time(segment), _segment_arr_time(segment), segment.id or 0)
 
 
-def _cluster_saved_segments(segments: list[Segment], home_airport: Optional[str]) -> list[list[Segment]]:
+def _bounded_open_jaw_pairs(segments, observations, protected_trip_ids):
+    """Infer only unique, adjacent two-leg journeys across a small airport gap.
+
+    This supplies trip membership, never a booking alias or a transport leg.
+    Indexing all active legs keeps conflicting/unknown/protected travel visible
+    as boundaries. Per-origin timestamp indexes avoid pairwise scans or SQL.
+    """
+    from .booking_ledger import event_time
+
+    ordered = sorted(segments, key=_segment_sort_key)
+    by_id = {row.id: row for row in observations}
+    proofs, outbound_ends, return_starts, overlapping = {}, {}, {}, set()
+    latest_end = None
+    for index, segment in enumerate(ordered):
+        departure, arrival = _segment_dep_time(segment), _segment_arr_time(segment)
+        outbound_ends.setdefault(segment.dep_airport, []).append(arrival)
+        return_starts.setdefault(segment.arr_airport, []).append(departure)
+        if ((latest_end is not None and departure < latest_end)
+                or index + 1 < len(ordered) and arrival > _segment_dep_time(ordered[index + 1])):
+            overlapping.add(segment.id)
+        latest_end = max(latest_end, arrival) if latest_end is not None else arrival
+        meta = segment.meta_json or {}
+        if (segment.trip_id in protected_trip_ids or segment.mode != "flight"
+                or meta.get("ownership") != "self" or not segment.pnr or not segment.flight_number
+                or meta.get("booking_conflicts") or meta.get("force_review") or meta.get("manually_edited")
+                or departure >= arrival or segment.dep_airport == segment.arr_airport):
+            continue
+        scope = flight_scope(segment)
+        for observation_id in sorted(meta.get("observation_ids") or []):
+            row = by_id.get(observation_id)
+            if not row:
+                continue
+            facts = row.facts if isinstance(row.facts, dict) else {}
+            provenance = facts.get("time_provenance") or {}
+            if not isinstance(provenance, dict):
+                continue
+            people = facts.get("passenger_evidence") or []
+            if (row.ownership == "self" and facts.get("ownership") == "self"
+                    and row.source_message_id and not facts.get("force_review")
+                    and not facts.get("user_decision") and row.pnr == segment.pnr
+                    and row.travel_date == scope["travel_date"] and row.dep_airport == segment.dep_airport
+                    and row.arr_airport == segment.arr_airport
+                    and _normalize_flight_number(row.flight_number) == _normalize_flight_number(segment.flight_number)
+                    and event_time(facts.get("dep_time")) == departure
+                    and event_time(facts.get("arr_time")) == arrival
+                    and provenance.get("version") == 1 and provenance.get("status") == "normalized"
+                    and isinstance(people, list) and any(isinstance(person, dict) and person.get("name")
+                        and person.get("role") == "traveler" and person.get("complete") is True
+                        and person.get("applies") is True for person in people)):
+                proofs[segment.id] = row.id
+                break
+    for values in [*outbound_ends.values(), *return_starts.values()]:
+        values.sort()
+    result, distances = {}, {}
+    minimum, maximum = timedelta(hours=4), timedelta(days=7)
+    for outbound, returned in zip(ordered, ordered[1:]):
+        if (outbound.id not in proofs or returned.id not in proofs
+                or outbound.id in overlapping or returned.id in overlapping
+                or returned.arr_airport != outbound.dep_airport):
+            continue
+        end, start = _segment_arr_time(outbound), _segment_dep_time(returned)
+        gap = start - end
+        if not minimum <= gap <= maximum:
+            continue
+        # Any second plausible origin/return timing makes the pairing uncertain,
+        # even when that competing row has weaker source or passenger evidence.
+        prior = outbound_ends[outbound.dep_airport]
+        later = return_starts[outbound.dep_airport]
+        if (bisect_right(prior, start - minimum) - bisect_left(prior, start - maximum) != 1
+                or bisect_right(later, end + maximum) - bisect_left(later, end + minimum) != 1):
+            continue
+        away = (outbound.arr_airport, returned.dep_airport)
+        countries = [_AIRPORT_DETAILS.get(code, {}).get("country") for code in away]
+        if not countries[0] or countries[0] != countries[1] or any(code not in _AIRPORT_COORDS for code in away):
+            continue
+        if away not in distances:
+            distances[away] = _haversine_km(*_AIRPORT_COORDS[away[0]], *_AIRPORT_COORDS[away[1]])
+        distance = distances[away]
+        # The existing <=150km rule is unchanged. Only this narrow additional
+        # band needs unique closed-loop evidence and explicit inference metadata.
+        if not 150 < distance <= 200:
+            continue
+        pair = (outbound.id, returned.id)
+        result[pair] = {"version": 1, "kind": "closed_loop_open_jaw", "segment_ids": list(pair),
+            "origin_airport": outbound.dep_airport, "away_airports": list(away),
+            "away_gap_seconds": int(gap.total_seconds()), "minimum_gap_hours": 4, "maximum_gap_days": 7,
+            "away_airport_distance_km": round(distance, 3),
+            "minimum_airport_distance_km_exclusive": 150, "maximum_airport_distance_km": 200,
+            "distance_basis": "great_circle", "transfer": "unrecorded",
+            "source_observation_ids": [proofs[outbound.id], proofs[returned.id]]}
+    return result
+
+
+def _source_closed_journey_breaks(segments, observations, protected_trip_ids, affected_trip_ids, *, user, trips):
+    """Do not extend an exactly sourced closed journey into a later booking.
+
+    This is a negative grouping boundary within already affected automatic
+    trips. It creates no flight, fixes no historical schedule and grants no
+    ownership to neighboring legacy rows. Unproved/incomplete source groups
+    and protected memberships retain the existing behavior.
+    """
+    from .booking_ledger import event_time
+
+    from .passenger_identity import identity_candidates, full_names_match
+    from datetime import date
+    if not user or type(user.id) is not int or not isinstance(trips, dict):
+        return set()
+    owner_names = identity_candidates(user.name, user.travel_name_aliases)
+    if not owner_names:
+        return set()
+    owned_trips = {key for key, trip in trips.items()
+                   if type(key) is int and trip.id == key and trip.user_id == user.id
+                   and trip.visibility in {None, "private"}}
+    # Extra conservatism belongs only to this exception, never a new permission
+    # to regroup ordinary manual/annotated travel.
+    held = set(protected_trip_ids)
+    for segment in segments:
+        meta = segment.meta_json if isinstance(segment.meta_json, dict) else {}
+        if (segment.trip_id not in owned_trips or any(meta.get(key) for key in
+                ("manual", "personal_note", "user_edited", "user_decision", "manually_edited",
+                 "manual_grouping", "trip_grouping_locked", "manual_trip_id"))
+                or meta.get("source") in _PROTECTED_GROUPING_SOURCES
+                or meta.get("trip_assignment_source") == "manual"):
+            held.add(segment.trip_id)
+    protected_trip_ids = held
+    by_id = {row.id: row for row in observations if row.user_id == user.id}
+    if len(by_id) != sum(row.user_id == user.id for row in observations):
+        return set()
+    groups = {}
+    for row in by_id.values():
+        groups.setdefault((row.user_id, row.source_message_id, row.pnr), []).append(row)
+
+    def valid(row):
+        facts = row.facts if isinstance(row.facts, dict) else {}
+        time = facts.get("time_provenance")
+        if (row.user_id != user.id or row.ownership != "self" or facts.get("ownership") != "self"
+                or any(facts.get(key) != getattr(row, key) for key in
+                       ("pnr", "dep_airport", "arr_airport", "flight_number"))
+                or not isinstance(facts.get("airline"), str) or not facts["airline"]
+                or not isinstance(row.flight_number, str)
+                or not row.flight_number.startswith(facts["airline"])
+                or not row.source_message_id or not row.pnr
+                or row.pnr != _normalize_pnr(row.pnr)
+                or facts.get("force_review") or facts.get("user_decision")
+                or not row.flight_number or not row.dep_airport or not row.arr_airport
+                or row.dep_airport == row.arr_airport or not isinstance(time, dict)
+                or type(time.get("version")) is not int or time["version"] != 1
+                or time.get("status") != "normalized"):
+            return None
+        dep, arr = event_time(facts.get("dep_time")), event_time(facts.get("arr_time"))
+        if dep is None or arr is None or not timedelta(0) < arr-dep <= timedelta(days=1):
+            return None
+        for field, value, airport in (("departure", dep, row.dep_airport), ("arrival", arr, row.arr_airport)):
+            end = time.get(field)
+            if (not isinstance(end, dict) or end.get("airport") != airport
+                    or event_time(end.get("utc")) != value):
+                return None
+        day = row.travel_date.isoformat() if hasattr(row.travel_date, "isoformat") else row.travel_date
+        try:
+            canonical_day = date.fromisoformat(day).isoformat()
+        except (ValueError, TypeError):
+            return None
+        if canonical_day != day or time.get("departure_local_date") != day:
+            return None
+        people = facts.get("passenger_evidence")
+        if not isinstance(people, list) or not any(
+                isinstance(person, dict) and isinstance(person.get("name"), str)
+                and any(full_names_match(person["name"], name) for name in owner_names)
+                and person.get("role") == "traveler" and person.get("complete") is True
+                and person.get("applies") is True and not person.get("scope_ambiguous")
+                and isinstance(person.get("scope"), dict)
+                and all(person["scope"].get(key) in (None, expected) for key, expected in
+                        (("dep_airport", row.dep_airport), ("arr_airport", row.arr_airport),
+                         ("flight_number", row.flight_number), ("departure_date", day)))
+                and (person["scope"].get("pnr") == row.pnr
+                     or person["scope"].get("pnrs") == [row.pnr])
+                for person in people):
+            return None
+        return dep, arr
+
+    def matches(segment, row):
+        clocks = valid(row)
+        return bool(clocks and segment.trip_id in owned_trips and row.user_id == user.id
+            and row.facts["airline"] == segment.airline and row.pnr == segment.pnr
+            and row.dep_airport == segment.dep_airport and row.arr_airport == segment.arr_airport
+            and _normalize_flight_number(row.flight_number) == _normalize_flight_number(segment.flight_number)
+            and clocks == (_segment_dep_time(segment), _segment_arr_time(segment)))
+
+    # Only complete, single-original, typed card chains establish an origin.
+    # A duplicate/partial/cross-product interpretation denies this exception.
+    ends = {}
+    for key, rows in groups.items():
+        if not 2 <= len(rows) <= 8:
+            continue
+        cards = []
+        for row in rows:
+            clocks = valid(row)
+            leg = (row.facts or {}).get("source_leg")
+            if (not clocks or not isinstance(leg, dict)
+                    or type(leg.get("version")) is not int or leg["version"] != 1
+                    or leg.get("template") != "ota_multi_confirmation"
+                    or leg.get("ambiguous") is not False
+                    or type(leg.get("sequence")) is not int
+                    or not isinstance(leg.get("key"), str) or len(leg["key"]) != 64
+                    or any(char not in "0123456789abcdef" for char in leg["key"])):
+                break
+            cards.append((leg["sequence"], leg["key"], row, clocks))
+        if len(cards) != len(rows):
+            continue
+        cards.sort(key=lambda item: item[0])
+        if ([item[0] for item in cards] != list(range(1, len(cards)+1))
+                or len({item[1] for item in cards}) != len(cards)
+                or cards[0][2].dep_airport != cards[-1][2].arr_airport):
+            continue
+        if any(a[2].arr_airport != b[2].dep_airport or a[3][1] > b[3][0]
+               for a,b in zip(cards,cards[1:])):
+            continue
+        ends[cards[-1][2].id] = (key, cards[0][2].dep_airport)
+
+    ordered = sorted(segments, key=_segment_sort_key)
+    result = set()
+    for previous, following in zip(ordered, ordered[1:]):
+        if (previous.trip_id not in affected_trip_ids or following.trip_id not in affected_trip_ids
+                or previous.trip_id in protected_trip_ids or following.trip_id in protected_trip_ids
+                or previous.trip_id not in owned_trips or following.trip_id not in owned_trips
+                or previous.mode != "flight" or following.mode != "flight"
+                or not previous.pnr or not following.pnr or previous.pnr == following.pnr
+                or previous.arr_airport != following.dep_airport
+                or _segment_dep_time(following)-_segment_arr_time(previous) <= timedelta(hours=48)):
+            continue
+        pm, fm = previous.meta_json or {}, following.meta_json or {}
+        if any(meta.get("ownership") != "self" or meta.get("force_review") or meta.get("booking_conflicts")
+               for meta in (pm,fm)):
+            continue
+        pc = {_normalize_pnr(previous.pnr), *(_normalize_pnr(x) for x in (pm.get("pnr_aliases") or []))}
+        fc = {_normalize_pnr(following.pnr), *(_normalize_pnr(x) for x in (fm.get("pnr_aliases") or []))}
+        if pc.intersection(fc):
+            continue
+        for oid in pm.get("observation_ids") or []:
+            row = by_id.get(oid)
+            closure = ends.get(oid)
+            if not row or not closure or closure[1] != previous.arr_airport or not matches(previous,row):
+                continue
+            if any(other and other.user_id == row.user_id
+                   and other.source_message_id != row.source_message_id and matches(following,other)
+                   for other in (by_id.get(x) for x in (fm.get("observation_ids") or []))):
+                result.add((previous.id, following.id))
+                break
+    return result
+
+
+def _cluster_saved_segments(segments: list[Segment], home_airport: Optional[str], *, open_jaw_pairs=None, source_breaks=None) -> list[list[Segment]]:
     if not segments:
         return []
 
@@ -661,7 +1051,9 @@ def _cluster_saved_segments(segments: list[Segment], home_airport: Optional[str]
         current = clusters[-1]
         previous = current[-1]
         gap = _segment_dep_time(segment) - _segment_arr_time(previous)
-        if _belongs_to_current_trip(current, segment, gap, home_airport, home_airports):
+        open_jaw = len(current) == 1 and (previous.id, segment.id) in (open_jaw_pairs or {})
+        if ((previous.id, segment.id) not in (source_breaks or set())
+                and (open_jaw or _belongs_to_current_trip(current, segment, gap, home_airport, home_airports))):
             current.append(segment)
         else:
             clusters.append([segment])
@@ -1558,15 +1950,16 @@ def _mark_cancellation_replacements(
                 continue
             if not _segments_are_replacement_candidates(canceled, candidate):
                 continue
-            _add_booking_relationship(
-                candidate,
-                {
-                    "type": "surviving_replacement_candidate",
-                    "replaces_pnr": canceled_pnr,
-                    "canceled_segment_id": canceled.id,
-                    "cancellation_received_at": cancellation_time.isoformat() if cancellation_time else None,
-                },
-            )
+            with preserve_itinerary_changes(db, user_id, reason="before_booking_cancellation", segments=(candidate,)):
+                _add_booking_relationship(
+                    candidate,
+                    {
+                        "type": "surviving_replacement_candidate",
+                        "replaces_pnr": canceled_pnr,
+                        "canceled_segment_id": canceled.id,
+                        "cancellation_received_at": cancellation_time.isoformat() if cancellation_time else None,
+                    },
+                )
 
 
 def _first_active_pnr_alias(db: Session, user_id: int, segment: Segment, canceled_pnr: str) -> Optional[str]:
@@ -2074,32 +2467,70 @@ def _group_by_proximity(flights: list) -> list[list]:
     return groups
 
 
-def _find_or_create_trip(db: Session, user_id: int, flights: list) -> Trip:
+def _existing_segment_trip(db: Session, user_id: int, flights: list) -> Optional[Trip]:
+    """Resolve an already projected exact leg before allocating a candidate trip.
+
+    Replaying one leg of a longer trip rarely has that trip's complete time
+    window. The normal upsert and protection checks still apply; this only
+    avoids allocating and snapshotting a trip that will remain empty.
+    """
+    trip_ids = set()
+    for flight in flights:
+        existing = _find_same_source_segment(db, user_id, flight)
+        if existing is None:
+            number, code = _normalize_flight_number(flight.flight_number), _normalize_pnr(flight.pnr)
+            candidates = db.query(Segment).join(Trip).filter(
+                Trip.user_id == user_id, Segment.pnr == code,
+                Segment.dep_airport == flight.dep_airport,
+                Segment.arr_airport == flight.arr_airport,
+            ).all() if code else []
+            matches = [segment for segment in candidates
+                       if _local_service_day(segment) == _local_service_day(flight)
+                       and _normalize_flight_number(segment.flight_number) == number]
+            existing = matches[0] if len(matches) == 1 else None
+        if existing is not None:
+            trip_ids.add(existing.trip_id)
+    return db.get(Trip, next(iter(trip_ids))) if len(trip_ids) == 1 else None
+
+
+def _find_or_create_trip(db: Session, user_id: int, flights: list, *, create: bool = True,
+                         excluded_trip_ids=()) -> Optional[Trip]:
     """Return an existing Trip that spans the same time window or create one."""
     start_ts = min(_db_datetime(f.dep_time) for f in flights)
     end_ts = max(_db_datetime(f.arr_time) for f in flights)
 
-    existing = (
+    query = (
         db.query(Trip)
         .filter(Trip.user_id == user_id, Trip.start_ts == start_ts, Trip.end_ts == end_ts)
-        .first()
     )
+    if excluded_trip_ids:
+        query = query.filter(Trip.id.notin_(excluded_trip_ids))
+    existing = query.first()
     if existing:
         return existing
+    if not create:
+        return None
 
     dep = flights[0].dep_airport if flights else ""
     arr = flights[-1].arr_airport if flights else ""
     title = f"{dep} → {arr}" if dep and arr else None
 
-    trip = Trip(user_id=user_id, title=title, start_ts=start_ts, end_ts=end_ts)
+    trip = Trip(user_id=user_id, title=title, start_ts=start_ts, end_ts=end_ts, visibility="private")
     db.add(trip)
     db.flush()
     return trip
 
 
-def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
+def _upsert_segment(db: Session, trip_id: Optional[int], user_id: int, flight, *, trip_factory=None,
+                    protected_trip_ids=()) -> str:
     """Insert/update a Segment and return inserted, updated, or skipped."""
     from app.models import Trip
+    from .booking_agency_ticket_lifecycle import find as find_agency_ticket
+    agency = find_agency_ticket(db, user_id, flight, protected_trip_ids=protected_trip_ids)
+    if agency.status == "held":
+        return "held_agency_ticket"
+    if agency.flight is not None:
+        flight = agency.flight
     dep_time = _db_datetime(flight.dep_time)
     arr_time = _db_datetime(flight.arr_time)
     flight_number = _normalize_flight_number(flight.flight_number)
@@ -2108,6 +2539,11 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
 
     if arr_time and dep_time and arr_time <= dep_time:
         return "skipped"
+    if agency.segment is not None:
+        if not _refresh_existing_segment(db, agency.segment, flight, user_id=user_id,
+                                         allow_overwrite=agency.overwrite):
+            return "held_legacy_protection"
+        return "updated"
 
     # Validate any declared recovery/schedule links before either matching path
     # can mutate an existing segment. This lookup itself does not change clocks.
@@ -2136,23 +2572,46 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
         # newer booking/source facts merely because the times were unmarked.
         # This also applies to linked legacy rows before chronology checks:
         # correcting the time basis does not introduce a different schedule.
-        if not _refresh_existing_segment(db, legacy, flight, user_id=user_id, allow_overwrite=False):
+        if not _refresh_existing_segment(db, legacy, flight, user_id=user_id, correct_legacy_clocks=True):
             return "held_legacy_protection"
-        legacy.dep_time, legacy.arr_time = dep_time, arr_time
-        meta = dict(legacy.meta_json or {})
-        meta["time_provenance"] = getattr(flight, "time_provenance")
-        legacy.meta_json = meta
         return "updated"
     if existing is None and legacy_review:
         return "held_legacy_identity"
     if existing is None and _has_unproven_legacy_booking_collision(db, user_id, flight):
         return "held_legacy_identity"
-    if existing is None:
+    references = (getattr(flight, "source_leg", None) or {}).get("booking_references") or {}
+    labeled_receipt = references.get("basis") == "carrier_labeled_purchase_receipt"
+    receipt_match_is_older = False
+    if labeled_receipt:
+        # A different booking may describe this same physical flight. Even an
+        # exact clock is insufficient to transfer a receipt to that booking.
+        physical = [row for row in db.query(Segment).join(Trip).filter(
+            Trip.user_id == user_id, Segment.dep_airport == flight.dep_airport,
+            Segment.arr_airport == flight.arr_airport).all()
+            if _normalize_flight_number(row.flight_number) == flight_number
+            and _local_service_day(row) == _local_service_day(flight)]
+        if physical:
+            if (len(physical) != 1 or not pnr or references.get("primary") != pnr
+                    or _normalize_pnr(physical[0].pnr) != pnr or (existing is not None and physical[0].id != existing.id)):
+                return "held_legacy_identity"
+            existing = physical[0]
+            if (_db_datetime(existing.dep_time), _db_datetime(existing.arr_time)) != (dep_time, arr_time):
+                from .booking_ledger import event_time
+                receipt_at = event_time(getattr(flight, "source_received_at", None))
+                saved_at = _segment_source_received_at(existing)
+                if not receipt_at or not saved_at or receipt_at >= saved_at:
+                    return "held_legacy_identity"
+                receipt_match_is_older = True
+        elif existing is not None:
+            # An existing source link to another service day cannot identify
+            # this leg solely from the receipt's carrier confirmation.
+            return "held_legacy_identity"
+    elif existing is None:
         existing = _find_supersedable_segment(db, user_id, flight)
-    if existing is None:
+    if existing is None and not labeled_receipt:
         existing = _find_accepted_shared_segment(db, user_id, flight)
     if existing:
-        allow_overwrite = _incoming_is_newer_or_equal(existing, flight)
+        allow_overwrite = not receipt_match_is_older and _incoming_is_newer_or_equal(existing, flight)
         if allow_overwrite and _incoming_is_contained_partial_segment(existing, flight):
             if existing.dep_airport == flight.dep_airport and existing.arr_airport != flight.arr_airport:
                 existing = None
@@ -2178,7 +2637,7 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     else:
         q = q.filter(Segment.flight_number.is_(None))
 
-    existing = q.first()
+    existing = q.filter(Segment.pnr == pnr).first() if labeled_receipt else q.first()
     if existing:
         if not _refresh_existing_segment(db, existing, flight, user_id=user_id):
             return "held_legacy_protection"
@@ -2190,7 +2649,7 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
         dep_time=dep_time,
         airline=airline,
         flight_number=flight_number,
-    )
+    ) if trip_id is not None and not labeled_receipt else None
     if existing:
         if not _refresh_existing_segment(
             db,
@@ -2202,7 +2661,12 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
             return "held_legacy_protection"
         return "updated"
 
+    from .booking_ticket_lifecycle import requires_reconciliation_for_creation
+    if requires_reconciliation_for_creation(user_id, flight):
+        return "held_ticket_reconciliation"
     distance_km, geom = _segment_geometry(db, flight.dep_airport, flight.arr_airport)
+    if trip_id is None or trip_id in protected_trip_ids:
+        trip_id = trip_factory().id
 
     seg = Segment(
         trip_id=trip_id,
@@ -2221,6 +2685,8 @@ def _upsert_segment(db: Session, trip_id: int, user_id: int, flight) -> str:
     enrich_segment(seg, include_weather=False)
     db.add(seg)
     db.flush()
+    from .booking_projection_context import record_projection_creation
+    record_projection_creation(db, user_id, seg, flight)
     return "inserted"
 
 
@@ -2544,11 +3010,21 @@ def _segment_source_received_at(segment: Segment):
 
 
 def _refresh_existing_segment(db: Session, segment: Segment, flight, *, user_id: int,
-                              allow_overwrite: bool = False) -> bool:
+                              allow_overwrite: bool = False, correct_legacy_clocks: bool = False,
+                              history_reason: str = "before_booking_import") -> bool:
     # Every matching fallback shares this guard before any alias, clock, route,
     # or provenance mutation. A held leg must remain intact as one atomic unit.
     if _existing_primary_is_protected(db, user_id, segment, flight):
         return False
+    with preserve_itinerary_changes(db, user_id, reason=history_reason, segments=(segment,)):
+        _apply_segment_update(db, segment, flight, allow_overwrite=allow_overwrite)
+        if correct_legacy_clocks:
+            segment.dep_time, segment.arr_time = _db_datetime(flight.dep_time), _db_datetime(flight.arr_time)
+            segment.meta_json = {**(segment.meta_json or {}), "time_provenance": flight.time_provenance}
+    return True
+
+
+def _apply_segment_update(db, segment, flight, *, allow_overwrite):
     incoming_pnr = _normalize_pnr(flight.pnr)
     if incoming_pnr and not segment.pnr:
         segment.pnr = incoming_pnr
@@ -2589,7 +3065,8 @@ def _refresh_existing_segment(db: Session, segment: Segment, flight, *, user_id:
         segment.distance_km, segment.geom = _segment_geometry(db, segment.dep_airport, segment.arr_airport)
     meta = dict(segment.meta_json or {})
     incoming_is_current = _incoming_is_newer_or_equal(segment, flight)
-    if flight.source and incoming_is_current:
+    if (flight.source and incoming_is_current
+            and meta.get("source") not in _PROTECTED_GROUPING_SOURCES):
         meta["source"] = flight.source
     if getattr(flight, "confidence", None) is not None and incoming_is_current:
         meta["confidence"] = flight.confidence
@@ -2602,7 +3079,6 @@ def _refresh_existing_segment(db: Session, segment: Segment, flight, *, user_id:
     for alias in getattr(flight, "pnr_aliases", []) or []:
         _add_pnr_alias(segment, alias, reason="source_message_alias")
     enrich_segment(segment, include_weather=False)
-    return True
 
 
 def _db_datetime(value):
@@ -2745,7 +3221,7 @@ def _preserve_same_clock_date_evidence(previous, incoming):
 
 def _merge_flight_provenance(meta: dict, flight, *, incoming_is_current: bool) -> None:
     if incoming_is_current:
-        for key in ('time_provenance', 'source_time_provenance', 'parser_version', 'source_leg'):
+        for key in ('time_provenance', 'source_time_provenance', 'parser_version', 'source_leg', 'booking_lifecycle', 'booking_ticket'):
             value = getattr(flight, key, None)
             if value is not None and (key != 'source_leg' or value):
                 if key == 'time_provenance':

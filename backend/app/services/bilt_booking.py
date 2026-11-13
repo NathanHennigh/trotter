@@ -34,10 +34,14 @@ def _airport_codes() -> frozenset[str]:
     return frozenset(airportsdata.load("IATA"))
 
 
+def is_bilt_confirmation_metadata(*, subject: str, sender: str) -> bool:
+    """Exact existing adapter prerequisites; no body or ownership authority."""
+    return (parseaddr(sender or "")[1].lower() == BILT_FLIGHT_SENDER
+            and " ".join((subject or "").lower().split()) in BILT_FLIGHT_SUBJECTS)
+
+
 def bilt_confirmation_evidence(*, subject: str, sender: str, body: str) -> BiltConfirmationEvidence | None:
-    if parseaddr(sender or "")[1].lower() != BILT_FLIGHT_SENDER:
-        return None
-    if " ".join((subject or "").lower().split()) not in BILT_FLIGHT_SUBJECTS:
+    if not is_bilt_confirmation_metadata(subject=subject, sender=sender):
         return None
     text = body or ""
     if re.search(r"<(?:html|body|div|table|p|span)\b", text, re.I):

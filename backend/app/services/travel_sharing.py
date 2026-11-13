@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
@@ -112,13 +113,16 @@ def _flight_snapshot(row):
             "travel_date": dep.date().isoformat(), "airline": airline}
 
 
-def _validate_item(db, item, *, passenger_name=None, allow_unassigned=False):
-    row = serialize_item(db, item.user_id, item)
+def _validate_item(db, item, *, passenger_name=None, allow_unassigned=False, row=None):
+    if row is None:
+        row = serialize_item(db, item.user_id, item)
     assignment = _assignment(db, item.user_id, item.id)
     name = assignment.passenger_name if assignment else item.passenger_name
     if row["status"] in {"canceled", "belongs_to_you"}:
         raise HTTPException(422, "Canceled flights and flights already identified as yours cannot be shared here")
     if item.passenger_name and row["status"] == "needs_review":
+        if (row.get("recipient_revision") or {}).get("reason") == "ambiguous_passenger_name":
+            raise HTTPException(422, "The booking shows two versions of this passenger’s name. This ticket needs review before sharing.")
         raise HTTPException(422, "This named ticket has conflicting ownership evidence to resolve before sharing")
     source = _latest_observation(db, item)
     if (not source or (source.facts or {}).get("force_review")
@@ -131,19 +135,19 @@ def _validate_item(db, item, *, passenger_name=None, allow_unassigned=False):
     return _flight_snapshot(row)
 
 
-def inbox_item_view(db, owner_id, item):
-    row = serialize_item(db, owner_id, item)
+def inbox_item_view(db, owner_id, item, *, siblings=None):
+    row = serialize_item(db, owner_id, item, siblings=siblings)
     assignment = _assignment(db, owner_id, item.id)
     row["assigned_passenger_name"] = assignment.passenger_name if assignment else None
     row["requires_assignment"] = False
     try:
-        _validate_item(db, item)
+        _validate_item(db, item, row=row)
         row.update(shareable=True, share_blocked_reason=None)
     except HTTPException as exc:
         row.update(shareable=False, share_blocked_reason=str(exc.detail))
         if not (row["assigned_passenger_name"] or item.passenger_name):
             try:
-                _validate_item(db, item, allow_unassigned=True)
+                _validate_item(db, item, row=row, allow_unassigned=True)
                 row["requires_assignment"] = True
             except HTTPException:
                 pass
@@ -157,13 +161,20 @@ def inbox(db, user):
     outgoing = db.query(FlightShare).filter_by(sender_id=user.id).order_by(FlightShare.created_at.desc()).limit(MAX_INBOX_RECORDS + 1).all()
     if any(len(rows) > MAX_INBOX_RECORDS for rows in (items, incoming, outgoing)):
         raise HTTPException(409, "This inbox is too large to load at once. Contact support to retrieve the complete archive.")
-    views = [inbox_item_view(db, user.id, item) for item in items]
-    return {"items": [row for row in views if row["status"] != "belongs_to_you"],
+    by_flight = defaultdict(list)
+    for item in items:
+        by_flight[item.flight_key].append(item)
+    views = [inbox_item_view(db, user.id, item, siblings=by_flight[item.flight_key]) for item in items]
+    return {"items": [row for row in views if row["status"] != "belongs_to_you"
+                     and (row.get('recipient_revision') or {}).get('state') != 'superseded'],
             "incoming": [share_view(db, row) for row in incoming], "outgoing": [share_view(db, row) for row in outgoing]}
 
 
 def assign(db, user, item_id, passenger_name):
     item = _item(db, user.id, item_id)
+    revision = serialize_item(db, user.id, item).get('recipient_revision') or {}
+    if revision.get('state') in {'superseded', 'needs_review'}:
+        raise HTTPException(422, "This ticket name revision needs review before assignment")
     name = normalize_name(passenger_name)
     if item.passenger_name and normalize_name(item.passenger_name).casefold() != name.casefold():
         raise HTTPException(422, "This ticket already names a different traveler; its passenger evidence cannot be relabeled")

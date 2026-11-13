@@ -75,7 +75,8 @@ def _single_address(value):
 
 def _uncertain_cancellation(message):
     return message.parse_error in {"ambiguous_cancellation_scope", "ambiguous_cancellation_time",
-        "unresolved_cancellation_scope", "cancellation_document_requires_review"}
+        "unresolved_cancellation_scope", "cancellation_document_requires_review",
+        "post_departure_cancellation_conflict"}
 
 
 def _source_inputs(payload, user):

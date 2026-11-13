@@ -81,6 +81,30 @@ def test_future_or_inverted_clocks_never_invent_duration(db):
     assert rows[1]["recorded_span_seconds"] is None
 
 
+def test_completed_scan_does_not_hide_operational_or_incomplete_source_gaps(db):
+    job(db, "completed-quality", "completed")
+    message(db, "discarded", "ignored_nonflight_promo", status=MessageStatus.ACCEPTED, ignored=True,
+        evidence={"resolved": True, "evidence_gate": {"verdict": "parse", "signals": ["labeled_operational_block"]}})
+    message(db, "partial", status=MessageStatus.ACCEPTED, evidence={"resolved": True,
+        "partial_flight_evidence": {"missing_fields": ["arrival_time"], "carrier": "SY"}})
+    db.commit()
+    report = build_scan_health(db, user_ids=[1], now=NOW)
+    assert not report["attention_required"]  # operational job health remains distinct
+    assert report["quality_review_required"]
+    assert report["messages"]["outcomes"] == {"operational_evidence_discarded": 1, "incomplete_evidence": 1}
+    assert SECRET not in json.dumps(report)
+
+
+@pytest.mark.parametrize("reason", ["post_departure_cancellation_conflict", "reviewed_unsupported_projection"])
+def test_retained_lifecycle_conflicts_stay_visible_in_quality_report(db, reason):
+    message(db, "held", reason)
+    db.commit()
+    report = build_scan_health(db, user_ids=[1], now=NOW)
+    assert report["messages"]["outcomes"] == {"identity_schedule_or_protection_review": 1}
+    assert report["quality_review_required"]
+    assert not report["attention_required"]
+
+
 def test_classify_persisted_outcomes_carriers_templates_without_echoing_evidence(db):
     message(db, "strong", "strong_flight_evidence_but_no_segments",
         evidence={"evidence_gate": {"flight_numbers": ["BR51", "BR51", SECRET]}})

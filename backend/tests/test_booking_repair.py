@@ -166,7 +166,7 @@ def test_interrupted_apply_rolls_back_every_projection_and_remains_retryable(ctx
 
 def test_forwarded_unknown_timezone_is_interval_not_new_received_time():
     result = booking_time_provenance('2026-03-10T16:57:36Z', 'Fwd: Your flight receipt',
-        '---------- Forwarded message ---------\nDate: Sun, Mar 8, 2026, 8:18 PM\nSubject: Your receipt')
+        '---------- Forwarded message ---------\nFrom: Airline\nDate: Sun, Mar 8, 2026, 8:18 PM\nSubject: Your receipt')
     assert result['kind'] == 'forwarded_timezone_unknown'
     assert result['event_at'] is None
     assert result['earliest'].startswith('2026-03-08T06:18')
@@ -175,7 +175,7 @@ def test_forwarded_unknown_timezone_is_interval_not_new_received_time():
 
 def test_forwarded_missing_year_never_invents_chronology():
     result = booking_time_provenance('2026-03-10T16:57:36Z', 'Fwd: Receipt',
-        '---------- Forwarded message ---------\nDate: Mar 8, 8:18 PM\nSubject: Receipt')
+        '---------- Forwarded message ---------\nFrom: Airline\nDate: Mar 8, 8:18 PM\nSubject: Receipt')
     assert result['kind'] == 'forwarded_unknown'
     assert result['event_at'] is None and 'earliest' not in result
 

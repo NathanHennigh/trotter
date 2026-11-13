@@ -235,7 +235,8 @@ def test_removal_of_other_booking_revisits_original_personal_receipt_immediately
     db, user = session
     other = flight("other", hour=14, pnr="OTHER1")
     other.passenger_names = ["Morgan Avery"]
-    seed(db, user, other)
+    # This case exercises automatic correction, not a user-noted projection.
+    seed(db, user, other, note=None)
     own = flight("self", hour=15, pnr="OWN001")
     notices = [("own-receipt", own), ("other-receipt", other)]
     outcomes = {}
@@ -268,7 +269,7 @@ def test_other_projection_removal_never_bypasses_retained_receipt_protection(ses
     db, user = session
     other = flight("other", hour=14, pnr="OTHER1")
     other.passenger_names = ["Morgan Avery"]
-    seed(db, user, other)
+    seed(db, user, other, note=None)
     own = flight("unknown" if protection == "unknown" else "self", hour=15, pnr="OWN001")
     if protection == "force_review":
         own.force_review = True
@@ -305,7 +306,7 @@ def test_other_removal_recheck_is_exact_user_and_physical_leg(session, different
     from test_legacy_local_clock_replay import seed
     db, user = session
     other = flight("other", hour=14, pnr="OTHER1")
-    seed(db, user, other)
+    seed(db, user, other, note=None)
     own = flight("self", hour=15, pnr="OWN001")
     owner = user
     if different == "account":
@@ -324,3 +325,35 @@ def test_other_removal_recheck_is_exact_user_and_physical_leg(session, different
     result = apply(db, user, "other-receipt", other)
     assert result.build.removed_other == 1 and result.build.inserted == 0
     assert db.query(Segment).count() == 0
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_noted_other_projection_keeps_user_rows_and_pending_own_evidence(session, reverse):
+    from test_legacy_local_clock_replay import seed
+    db, user = session
+    other = flight("other", hour=14, pnr="OTHER1")
+    other.passenger_names = ["Morgan Avery"]
+    existing = seed(db, user, other, note="User checked this itinerary")
+    trip = db.get(Trip, existing.trip_id)
+
+    def full_row(row):
+        return deepcopy({column.name: getattr(row, column.name) for column in row.__table__.columns})
+
+    original_segment, original_trip = full_row(existing), full_row(trip)
+    notices = [("own-receipt", flight("self", hour=15, pnr="OWN001")), ("other-receipt", other)]
+    outcomes = {}
+    for source, value in reversed(notices) if reverse else notices:
+        outcomes[source] = apply(db, user, source, value)
+    assert outcomes["other-receipt"].build.removed_other == 0
+    assert outcomes["other-receipt"].review_reason == "protected_other_passenger_conflict"
+    assert db.query(Segment).count() == db.query(Trip).count() == 1
+    assert full_row(existing) == original_segment and full_row(trip) == original_trip
+    evidence = observations(db)
+    assert len(evidence) == 2
+    assert {facts["ownership"] for _, _, facts in evidence} == {"self", "other"}
+    for _ in range(3):
+        for source, value in notices:
+            apply(db, user, source, value)
+        assert db.query(Segment).count() == db.query(Trip).count() == 1
+        assert full_row(existing) == original_segment and full_row(trip) == original_trip
+        assert observations(db) == evidence

@@ -33,6 +33,22 @@ def assess_parse_miss(*, subject: str, sender: str, body: str) -> ParseMissEvide
     """Use the same eligibility decision as ingestion; no contradictory scorer."""
     from .flight_evidence import assess_flight_evidence
     gate = assess_flight_evidence(subject=subject, sender=sender, body=body)
+    return _parse_miss_from_gate(subject=subject, body=body, gate=gate)
+
+
+def assess_skipped_parse_miss(*, subject: str, sender: str, body: str, evidence=None) -> ParseMissEvidence:
+    """Reuse only the worker's unchanged call-local skip decision."""
+    from .flight_evidence import EVIDENCE_VERSION, FlightEvidence
+    if not (isinstance(evidence, FlightEvidence) and evidence.verdict == "skip"
+            and type(evidence.version) is int and evidence.version == EVIDENCE_VERSION
+            and type(evidence.score) is int and isinstance(evidence.signals, tuple)
+            and all(isinstance(signal, str) for signal in evidence.signals)
+            and all(isinstance(value, str) for value in (subject, sender, body))):
+        return assess_parse_miss(subject=subject, sender=sender, body=body)
+    return _parse_miss_from_gate(subject=subject, body=body, gate=evidence)
+
+
+def _parse_miss_from_gate(*, subject: str, body: str, gate) -> ParseMissEvidence:
     signals = list(gate.signals)
     if _ANCILLARY_WORD.search(subject + "\n" + body):
         signals.append("ancillary_noise")

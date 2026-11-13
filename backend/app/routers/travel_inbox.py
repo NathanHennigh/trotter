@@ -35,8 +35,9 @@ def list_travel_inbox(
         ))
     rows = query.order_by(TravelInboxItem.created_at.desc(), TravelInboxItem.id.desc()).limit(limit + 1).all()
     page = rows[:limit]
+    views = [_serialize_item(db, current_user.id, item) for item in page]
     return {
-        "items": [_serialize_item(db, current_user.id, item) for item in page],
+        "items": [row for row in views if (row.get('recipient_revision') or {}).get('state') != 'superseded'],
         "next_cursor": page[-1].id if len(rows) > limit else None,
     }
 

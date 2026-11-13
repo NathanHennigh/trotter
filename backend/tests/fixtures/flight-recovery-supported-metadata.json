@@ -1,0 +1,21 @@
+{
+  "description": "Sanitized captured header structures. Domains and subject structure preserved; people, places, dates, references and itineraries replaced. Labels describe evidence coverage, not imported flights.",
+  "cases": [
+    {"case": "expedia_legacy_sender", "sender": "Travel <notices@expediamail.com>", "subject": "Expedia travel confirmation - Aug 18 - (Itinerary # 12345678901234)", "complete": ["united_return_1", "united_return_2"]},
+    {"case": "expedia_seat_notice", "sender": "Travel <notices@expedia.com>", "subject": "Select a new seat for your United flight(s)", "complete": ["united_return_1", "united_return_2"]},
+    {"case": "southwest_booked_outbound", "sender": "Airline <notices@ifly.southwest.com>", "subject": "You're going to Example City on 08/18 (ABC123)!", "complete": ["southwest_outbound"]},
+    {"case": "southwest_booked_return", "sender": "Airline <notices@ifly.southwest.com>", "subject": "You're going to Example City (Regional) on 08/22 (DEF456)!", "complete": ["southwest_return"]},
+    {"case": "southwest_reminder", "sender": "Airline <notices@iluv.southwest.com>", "subject": "Your Example City trip (ABC123) is almost here!", "complete": ["southwest_outbound"]},
+    {"case": "amex_confirmation", "sender": "Travel <notices@welcome.americanexpress.com>", "subject": "Confirmed: your trip to Example City", "complete": ["delta_connection_1", "delta_connection_2"]},
+    {"case": "amex_schedule", "sender": "Travel <notices@mytrips.americanexpress.com>", "subject": "Flight Schedule Change for Trip ID: 1234-5678", "complete": ["delta_connection_1", "delta_connection_2"]},
+    {"case": "amex_review", "sender": "Travel <notices@welcome.americanexpress.com>", "subject": "ALEX, review details for your upcoming trip", "complete": ["delta_connection_1", "delta_connection_2"]},
+    {"case": "delta_direct", "sender": "Airline <notices@t.delta.com>", "subject": "Your SEA > SFO Trip Details", "complete": ["delta_connection_1", "delta_connection_2"]},
+    {"case": "allegiant_confirmation", "sender": "Airline <notices@t.allegiant.com>", "subject": "AllegiantAir.com - Itinerary #ABC123", "complete": ["allegiant_outbound", "allegiant_return"]},
+    {"case": "allegiant_reminder", "sender": "Airline <notices@e.allegiant.com>", "subject": "Your upcoming trip is only two days away", "complete": ["allegiant_outbound", "allegiant_return"]},
+    {"case": "alaska_confirmation", "sender": "Airline <notices@email.alaskaair.com>", "subject": "Your flight is booked: ABC123 to Example City on 08/18/2026", "complete": ["alaska_outbound", "alaska_return"]},
+    {"case": "sun_country_confirmation", "sender": "Airline <notices@info.suncountry.com>", "subject": "Booking Confirmation ABC123", "partial": ["sun_country_connection_1", "sun_country_connection_2"]},
+    {"case": "sun_country_checkin", "sender": "Airline <notices@info.suncountry.com>", "subject": "ABC123 Ready for flight check-in : SY123", "partial": ["sun_country_connection_1", "sun_country_connection_2"]},
+    {"case": "united_entertainment_outbound", "sender": "Airline <notices@enews.united.com>", "subject": "Wi-Fi and entertainment options for your August 18 flight", "partial": ["united_notice_outbound"]},
+    {"case": "united_entertainment_return", "sender": "Airline <notices@enews.united.com>", "subject": "Wi-Fi and entertainment options for your August 22 flight", "partial": ["united_notice_return"]}
+  ]
+}

@@ -1,0 +1,19 @@
+# Enable alongside the usual Compose files after both tagged images are built.
+services:
+  api:
+    image: ${TROTTER_PARSER_ROUTER_IMAGE:?set the stable image with pilot routing}
+    environment:
+      TROTTER_PARSER_PILOT_ROUTING: "1"
+  worker:
+    image: ${TROTTER_PARSER_ROUTER_IMAGE:?set the stable image with pilot routing}
+    environment:
+      TROTTER_PARSER_PILOT_ROUTING: "1"
+    command: ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=INFO", "--queues=celery", "--concurrency=${TROTTER_CELERY_CONCURRENCY:-2}"]
+  worker-parser-pilot:
+    extends:
+      file: compose.yml
+      service: worker-history
+    image: ${TROTTER_PARSER_PILOT_IMAGE:?set the verified parser pilot image}
+    environment:
+      TROTTER_PARSER_PILOT_ROUTING: "1"
+    command: ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=INFO", "--queues=flight_parser_pilot", "--concurrency=1", "--prefetch-multiplier=1", "--hostname=parser-pilot@%h"]

@@ -20,7 +20,8 @@ from ..models import BookingObservation, GmailHistoryState, Message, SyncJob
 OWNERSHIP = frozenset({"passenger_identity_unresolved", "conflicting_latest_passenger", "ambiguous_matching_names"})
 CONFLICTS = frozenset({"legacy_flight_identity_conflict", "document_leg_identity_conflict",
     "ambiguous_latest_evidence", "unresolved_source_chronology", "ambiguous_cancellation_time",
-    "ambiguous_cancellation_scope", "unresolved_cancellation_scope", "legacy_booking_protected"})
+    "ambiguous_cancellation_scope", "unresolved_cancellation_scope", "legacy_booking_protected",
+    "post_departure_cancellation_conflict", "reviewed_unsupported_projection"})
 REASONS = OWNERSHIP | CONFLICTS | frozenset({"strong_flight_evidence_but_no_segments",
     "partial_flight_evidence_but_no_segments", "weak_flight_evidence_but_candidate_query_matched",
     "ticket_attachment_needs_review", "ignored_nonflight_promo", "ancillary_existing_pnr",
@@ -104,8 +105,14 @@ def _message_outcome(row):
     status = getattr(row.status, "value", row.status)
     reason = _label(row.parse_error or evidence.get("reason"), REASONS)
     partial = _dict(evidence.get("partial_flight_evidence"))
+    gate = _dict(evidence.get("evidence_gate"))
     if status == "pending":
         outcome = "pending"
+    elif partial.get("missing_fields"):
+        outcome = "incomplete_evidence"
+    elif (row.ignored or reason == "ignored_nonflight_promo") and (gate.get("verdict") in {"parse", "review"}
+            or "labeled_operational_block" in (gate.get("signals") or [])):
+        outcome = "operational_evidence_discarded"
     elif row.ignored or status == "ignored":
         outcome = "ignored"
     elif status == "accepted" and (evidence.get("resolved") is True or not row.parse_error):
@@ -229,10 +236,14 @@ def build_scan_health(db, *, user_ids=None, now=None, lookback_hours=24,
     attention = bool(state_counts.get('failed') or warning_counts.get('suspected_stalled') or
                      warning_counts.get('pending_without_recent_update') or
                      any(h['lease_expired'] or h['state'] == 'paused' for h in histories))
+    quality = {key: outcomes.get(key, 0) for key in ("operational_evidence_discarded",
+        "unsupported_or_unrecognized_format", "ownership_review", "incomplete_evidence",
+        "identity_schedule_or_protection_review")}
     return {"schema_version": 1, "generated_at": _stamp(now),
         "scope": {"user_ids": user_ids, "job_updated_since": _stamp(cutoff), "all_active_jobs_included": True,
                   "message_scope": "all currently stored outcomes for selected accounts; not linked to jobs"},
         "attention_required": attention,
+        "quality_review_required": any(quality.values()),
         "jobs": {"total": sum(state_counts.values()), "by_state": dict(sorted(state_counts.items())),
             "warnings": dict(sorted(warning_counts.items())), "failure_categories": dict(sorted(failure_counts.items())),
             "recorded_terminal_spans_seconds": {"count": len(spans), "min": min(spans) if spans else None,
@@ -244,6 +255,8 @@ def build_scan_health(db, *, user_ids=None, now=None, lookback_hours=24,
             "by_template": {k: dict(sorted(v.items())) for k, v in sorted(templates.items())},
             "by_carrier": {k: dict(sorted(v.items())) for k, v in sorted(carriers.items())},
             "messages_retaining_other_travelers": other_retained_messages},
+        "quality": {"cumulative_message_counts": quality,
+            "scope": "Current stored outcomes, not proof of complete mailbox recall or a new scan regression"},
         "limitations": [
             "SyncJob.started_at is initialized at creation and overwritten at worker start; exact queue wait is not persisted.",
             "Recorded terminal spans are updated_at minus started_at, not guaranteed worker runtimes (for example deferred history jobs).",
@@ -271,6 +284,7 @@ def render_scan_health(report):
         lines.append(f"  account={row['user_id']} {row['state']} pending-messages={row['pending_message_count']} "
                      f"attempts={row['attempts']} expired-lease={row['lease_expired']} error={row['error_category']}")
     lines.append(f"Stored message outcomes (cumulative): {report['messages']['total']}")
+    lines.append("Source-quality review required: " + ("yes" if report.get("quality_review_required") else "no"))
     lines.extend(f"  {key}: {value}" for key, value in report['messages']['outcomes'].items())
     for dimension in ('by_template', 'by_carrier'):
         lines.append(dimension.replace('_', ' ').capitalize() + ':')

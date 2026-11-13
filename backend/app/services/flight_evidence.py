@@ -6,10 +6,10 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 
-from .bilt_booking import bilt_confirmation_evidence
+from .bilt_booking import bilt_confirmation_evidence, is_bilt_confirmation_metadata
 
 
-EVIDENCE_VERSION = 2
+EVIDENCE_VERSION = 3
 _AIRPORT_PAIR = re.compile(
     r"\b(?P<dep>[A-Z]{3})\s*(?:-|--|->|>|\bTO\b|–|—)\s*(?P<arr>[A-Z]{3})\b",
     re.IGNORECASE,
@@ -22,7 +22,7 @@ _FLIGHT_NUMBER = re.compile(
 )
 _CARRIER_CODES = {
     "AMERICAN AIRLINES": "AA", "UNITED AIRLINES": "UA", "DELTA AIR LINES": "DL",
-    "DELTA AIRLINES": "DL", "SOUTHWEST AIRLINES": "WN", "SPIRIT AIRLINES": "NK",
+    "DELTA AIRLINES": "DL", "DELTA": "DL", "SOUTHWEST AIRLINES": "WN", "SPIRIT AIRLINES": "NK",
     "FRONTIER AIRLINES": "F9", "ALASKA AIRLINES": "AS", "JETBLUE": "B6",
     "AEROMEXICO": "AM", "IBERIA": "IB", "EVA AIR": "BR",
     "ALL NIPPON AIRWAYS": "NH", "SINGAPORE AIRLINES": "SQ", "EMIRATES": "EK",
@@ -34,7 +34,7 @@ _CARRIER_FLIGHT_NUMBER = re.compile(
     + r")\s+(?:FLIGHT\s*#?\s*)?(?P<number>\d{1,4}[A-Z]?)\b(?!\s*\(\d{3}\))", re.I,
 )
 _PNR = re.compile(
-    r"\b(?:record locator|confirmation code|confirmation number|booking reference|reservation code|pnr)\b|confirmation\s*#",
+    r"\b(?:record locators?|confirmation code|confirmation number|booking reference|reservation code|pnr)\b|confirmation\s*#",
     re.IGNORECASE,
 )
 _TICKET = re.compile(r"\b(?:e-?ticket|ticket number|passenger receipt)\b", re.IGNORECASE)
@@ -66,6 +66,41 @@ _NEWSLETTER_SENDER = re.compile(
 )
 
 
+def operational_block_signals(body: str) -> tuple[str, ...]:
+    """Recognize local labeled itinerary facts, never passenger authority.
+
+    A marketing footer cannot veto an actual itinerary. Conversely, scattered
+    airport/flight words in a newsletter cannot manufacture one: require the
+    fields together in a bounded block. This also retains incomplete operational
+    records (for example in-flight entertainment notices) for review only.
+    """
+    text = re.sub(r"https?://\S+", " ", body[:200_000], flags=re.I)
+    text = " ".join(text.split())
+    # Explicit Flight / Date / From / To fields, including messages without a
+    # booking reference or clocks. These do not establish a passenger or flight.
+    labeled = re.compile(
+        r"\bFlight\s*:\s*[A-Z0-9]{2}\s*\d{1,4}\b.{0,60}?"
+        r"\bDate\s*:\s*(?P<date>.{5,50}?)\s+From\s*:\s*"
+        r".{0,80}?\(\s*(?P<dep>[A-Z]{3})\s*\).{0,30}?\bTo\s*:\s*"
+        r".{0,80}?\(\s*(?P<arr>[A-Z]{3})\s*\)", re.I)
+    for match in labeled.finditer(text):
+        if (_DATE_TIME.search(match['date']) and _valid_iata(match['dep'].upper())
+                and _valid_iata(match['arr'].upper()) and match['dep'].upper() != match['arr'].upper()):
+            return ("labeled_operational_block",)
+    for heading in re.finditer(r"\b(?:flight details|flight itinerary(?: change)?|flight overview|return flight)\b", text, re.I):
+        block = text[heading.start():heading.start() + 1600]
+        # A concrete booking value, two airports, a date and actual departure /
+        # arrival fields or numbered flights. Header words alone are insufficient.
+        booking = re.search(r"\b(?:confirmation(?: code| number)?\s*[:#]?|booking reference|reservation code)\s+(?:is\s+)?([A-Z0-9]{6})(?![A-Z0-9])", block, re.I)
+        airports = _route_airport_codes(block.upper())
+        clock = re.search(r"\b\d{1,2}:\d{2}\s*(?:am|pm)?\b", block, re.I)
+        numbered = _flight_numbers(block.upper(), include_named=True)
+        fields = bool(re.search(r"\bdepart(?:ure|ing)?\b", block, re.I) and re.search(r"\barriv(?:al|ing|e)\b", block, re.I))
+        if booking and len(airports) >= 2 and _DATE_TIME.search(block) and clock and (fields or numbered):
+            return ("labeled_operational_block",)
+    return ()
+
+
 @dataclass(frozen=True)
 class FlightEvidence:
     version: int
@@ -89,13 +124,15 @@ class FlightEvidence:
 def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confidence: str = "unknown") -> FlightEvidence:
     """Score flight-like structure without deciding import behavior yet."""
     # Bilt has a structural HTML adapter; retain table boundaries for that pass.
-    bilt = bilt_confirmation_evidence(subject=subject, sender=sender, body=body)
+    structured_body = body
+    operational_body = body[:200_000]
     if re.search(r"<[a-z][^>]*>", body[:200_000], re.I):
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(body[:200_000], "html.parser")
-        for tag in soup(["script", "style"]):
-            tag.decompose()
+        from .html_visibility import visible_html_soup
+        soup = visible_html_soup(body[:200_000])
+        structured_body = (str(soup) if is_bilt_confirmation_metadata(subject=subject, sender=sender) else "")
+        operational_body = soup.get_text("\n", strip=True)
         body = soup.get_text(" ", strip=True)
+    bilt = bilt_confirmation_evidence(subject=subject, sender=sender, body=structured_body)
     if bilt:
         return FlightEvidence(
             version=EVIDENCE_VERSION, verdict="parse", score=13,
@@ -112,7 +149,14 @@ def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confi
     signals: list[str] = []
     score = 0
 
-    airport_codes = _route_airport_codes(route_upper)
+    # Sender hostnames (for example mh1.evaair.com) are not flight evidence.
+    flight_numbers = _flight_numbers(route_upper, include_named=bool(_PNR.search(compact) or _TICKET.search(compact)))
+    # SAT/SUN (and a few other weekday abbreviations) also name real airports.
+    # A calendar range alone cannot supply a route; explicit flight or booking
+    # context still permits those airport codes in a genuine itinerary.
+    weekday_route_context = bool(flight_numbers or _PNR.search(route_text) or _TICKET.search(route_text)
+        or re.search(r"\b(?:flight|airline|itinerary|departure|arrival|boarding)\b", route_text, re.I))
+    airport_codes = _route_airport_codes(route_upper, allow_weekday_pairs=weekday_route_context)
     if len(airport_codes) >= 2:
         score += 5
         signals.append("route_airport_pair")
@@ -120,8 +164,6 @@ def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confi
         score += 1
         signals.append("airport_context")
 
-    # Sender hostnames (for example mh1.evaair.com) are not flight evidence.
-    flight_numbers = _flight_numbers(route_upper, include_named=bool(_PNR.search(compact) or _TICKET.search(compact)))
     if flight_numbers:
         score += 3
         signals.append("flight_number")
@@ -185,13 +227,24 @@ def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confi
     if cancellation_notice:
         signals.append("cancellation_notice")
         operational = True
+    block_signals = operational_block_signals(body)
+    if block_signals:
+        signals.extend(block_signals)
+        operational = True
+    if re.search(r"\bPriceline\s+Trip\s+Number\b", operational_body, re.I):
+        from .priceline_itinerary import has_priceline_flight_itinerary
+        if has_priceline_flight_itinerary(operational_body):
+            # Explicit card structure warrants parsing/review even when its
+            # printed dates conflict. The bounded extractor decides completeness.
+            signals.append("dated_agency_flight_cards")
+            operational = True
     if operational:
         signals.append("operational_itinerary")
         score = max(score, 8)
     noisy = bool({"promo_noise", "non_flight_travel_noise", "noisy_sender", "newsletter_sender"} & set(signals))
     if noisy and not operational and not (has_route and has_date and (has_booking or has_flight_number)):
         score = min(score, 3)
-    if "newsletter_sender" in signals and not (has_route and has_date and has_booking and has_flight_number):
+    if "newsletter_sender" in signals and not operational and not (has_route and has_date and has_booking and has_flight_number):
         score = min(score, 2)
     if re.search(r"\b(?:mileage|miles|rewards?|account)[- ]+(?:e[- ]?)?statement\b", subject, re.I) and not has_booking:
         # Balance statements may advertise dated new routes and flight numbers.
@@ -215,9 +268,12 @@ def assess_flight_evidence(*, subject: str, sender: str, body: str, sender_confi
     )
 
 
-def _route_airport_codes(upper: str) -> list[str]:
+def _route_airport_codes(upper: str, *, allow_weekday_pairs: bool = True) -> list[str]:
     codes: list[str] = []
     for match in _AIRPORT_PAIR.finditer(upper):
+        if (not allow_weekday_pairs and match.group("dep") in {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"}
+                and match.group("arr") in {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"}):
+            continue
         for code in (match.group("dep"), match.group("arr")):
             if _valid_iata(code) and code not in codes:
                 codes.append(code)
@@ -242,6 +298,13 @@ def _flight_numbers(upper: str, *, include_named: bool = False) -> list[str]:
     numbers: list[str] = []
     for match in _FLIGHT_NUMBER.finditer(upper):
         if match.group("airline"):
+            # In a class schedule, "9:00 AM 5:30 PM" contains AM followed by
+            # the next clock. Keep actual AM flights and explicit flight fields.
+            explicit_field = re.search(r"\bFLIGHT(?:\s+NUMBER)?\s*[:#]?\s*$", upper[max(0, match.start() - 24):match.start()])
+            if (match.group("airline") == "AM" and match.group("airline_number").isdigit()
+                    and 1 <= int(match.group("airline_number")) <= 12
+                    and re.match(r":[0-5]\d\s*(?:AM|PM)\b", upper[match.end():]) and not explicit_field):
+                continue
             number = f"{match.group('airline').upper()}{match.group('airline_number').upper()}"
         else:
             number = f"FLIGHT{match.group('number').upper()}"

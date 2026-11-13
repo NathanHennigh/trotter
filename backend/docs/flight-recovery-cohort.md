@@ -21,6 +21,19 @@ authority; it does not delete previously recovered flights or their evidence.
 The legacy duplicate-hold guard remains active for every account so opt-out
 cannot introduce a second interpretation of a known ambiguous connection.
 
+Prospective integrity guards also apply independently of positive recovery
+authority. Newly inserted worker projections retain versioned creation evidence
+so a conflicting notice received in a later scan has the same outcome as one
+received in the original scan. This never marks or adopts an older existing row;
+manual, shared and explicitly reviewed records remain protected. Unsupported
+new ticket-exchange templates are held outside the reconciliation cohort rather
+than projecting both ticket versions. The underlying observations are retained.
+
+Bounded template recovery records the versions of each hook that actually ran.
+Enabling carrier corroboration, leg reconciliation or contextual grouping later
+revisits affected stored sources without a global parser-version reset. Disabling
+a hook does not erase its evidence or repeatedly fetch already assessed sources.
+
 ## Release procedure
 
 1. Compare the running source to the last release, retain its image and environment,

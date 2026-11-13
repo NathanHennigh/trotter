@@ -49,10 +49,7 @@ def enrich_user_segments(
     segments = query.order_by(Segment.dep_time.asc(), Segment.id.asc()).all()
     if not segments:
         return 0
-    from .booking_ledger import snapshot_user_itinerary
-    snapshot_user_itinerary(db, user_id, reason="before_segment_enrichment",
-                            segment_ids={segment.id for segment in segments},
-                            trip_ids={segment.trip_id for segment in segments})
+    from .booking_ledger import preserve_itinerary_changes
     updated = 0
     weather_attempts = 0
     provider_attempts = 0
@@ -66,11 +63,12 @@ def enrich_user_segments(
         allow_provider = include_provider_lookup and provider_needed and (
             max_provider_lookups is None or provider_attempts < max_provider_lookups
         )
-        changed, attempted_weather = enrich_segment(
-            segment,
-            include_weather=allow_weather,
-            include_provider_lookup=allow_provider,
-        )
+        with preserve_itinerary_changes(db, user_id, reason="before_segment_enrichment", segments=(segment,)):
+            changed, attempted_weather = enrich_segment(
+                segment,
+                include_weather=allow_weather,
+                include_provider_lookup=allow_provider,
+            )
         if attempted_weather:
             weather_attempts += 1
         if allow_provider:
