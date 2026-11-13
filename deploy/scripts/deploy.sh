@@ -41,7 +41,8 @@ if [[ -n "${TROTTER_PARSER_ROUTER_IMAGE:-}" || -n "${TROTTER_PARSER_PILOT_IMAGE:
 fi
 "${compose[@]}" config --quiet
 if [[ -n "${TROTTER_PARSER_PILOT_IMAGE:-}" ]]; then
-  "${compose[@]}" build db migrate web
+  # The migration service shares the stable backend tag with ordinary workers.
+  "${compose[@]}" build db web
 else
   "${compose[@]}" build
 fi

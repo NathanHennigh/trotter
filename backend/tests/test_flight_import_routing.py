@@ -1,8 +1,11 @@
 from app.celery_app import create_celery_app
+from app.services.flight_import_rollout import FEATURE_FLAGS
 
 
 def test_real_celery_routes_separate_enrolled_imports_and_history(monkeypatch):
     monkeypatch.setenv("TROTTER_PARSER_PILOT_ROUTING", "1")
+    for flag in FEATURE_FLAGS:
+        monkeypatch.setenv(flag, "false")
     monkeypatch.setenv("BOOKING_STRICT_ENRICHMENT_ENABLED", "true")
     monkeypatch.setenv("FLIGHT_IMPORT_RECOVERY_USER_IDS", "1,9,12")
     app = create_celery_app()
@@ -18,5 +21,10 @@ def test_real_celery_routes_separate_enrolled_imports_and_history(monkeypatch):
     assert queue("app.tasks.gmail_history_tasks.discover_history") == "celery"
     monkeypatch.setenv("BOOKING_STRICT_ENRICHMENT_ENABLED", "false")
     assert queue("gmail.import", kwargs={"user_id":12}) == "celery"
+    for flag in FEATURE_FLAGS:
+        monkeypatch.setenv(flag, "true")
+        assert queue("gmail.import", kwargs={"user_id":12}) == "flight_parser_pilot"
+        assert queue("gmail.import", kwargs={"user_id":22}) == "celery"
+        monkeypatch.setenv(flag, "false")
     monkeypatch.delenv("TROTTER_PARSER_PILOT_ROUTING")
     assert isinstance(create_celery_app().conf.task_routes, dict)

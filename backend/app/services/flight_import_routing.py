@@ -1,7 +1,7 @@
 """Route only enrolled accounts to the separately deployed parser worker."""
 import os
 
-from .flight_import_rollout import enabled
+from .flight_import_rollout import FEATURE_FLAGS, enabled
 
 
 def route_parser_pilot(name, args, kwargs, options, task=None, **_):
@@ -11,6 +11,6 @@ def route_parser_pilot(name, args, kwargs, options, task=None, **_):
         return None
     args, kwargs = args or (), kwargs or {}
     uid = kwargs.get("user_id", args[1] if len(args) > 1 else None)
-    if enabled("BOOKING_STRICT_ENRICHMENT_ENABLED", uid):
+    if any(enabled(flag, uid) for flag in FEATURE_FLAGS):
         return {"queue": "flight_parser_pilot"}
     return None
