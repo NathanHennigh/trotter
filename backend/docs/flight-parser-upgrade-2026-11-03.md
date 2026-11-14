@@ -1,5 +1,13 @@
 # Parser hardening and all-account validation — 2026-11-03
 
+## November 14 all-user Gmail sync
+
+Ordinary Gmail scans now use the hardened parser for every existing and new account. The production change set `FLIGHT_IMPORT_RECOVERY_USER_IDS` to `*` on all seven backend services. The deployed images still use release `93c1325`. The four parser switches remain independently reversible. Historical mailbox discovery retains its separate cohort of account 9.
+
+The new account's first scan finished on the previous worker before the cutover. It checked 4,050 emails, parsed 13 and added nine flights. A fresh post-import database backup was verified off the VM and restored into an isolated database. On that copy, a new test account imported four expected flights into one trip. Two repeat scans added zero flights. The test preserved all existing accounts. The focused rollout, routing and receipt suite passed 83 tests.
+
+After activation, the live router selected the updated worker for all seven existing accounts and a prospective account ID. Each of the five queues handled a probe and drained. The public readiness endpoint confirmed database and Redis connectivity. The fingerprints of all 15 checked tables matched the pre-switch snapshot, including trips, segments, passenger evidence and Gmail discovery state. Ordinary scans pick up the change automatically. The cutover did not start historical imports.
+
 ## November 13 receipt recovery pilot
 
 Expedia purchase receipts can list a separate confirmation for each airline. The parser now scopes each leg to its explicitly labeled carrier reference. A dated purchase cannot overwrite a newer confirmed schedule. StudentUniverse, LifeMiles and Capital One receipt headings now enter bounded historical recovery with provider and subject checks. Only the affected receipt families need a new recovery marker.
