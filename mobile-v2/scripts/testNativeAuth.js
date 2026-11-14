@@ -646,6 +646,24 @@ test('cold restart observes only the existing owned job and records its server c
   const saved=JSON.parse(env.plain.get(recoveryKey()));assert.equal(saved.activeJobId,undefined);assert.equal(saved.lastSuccessAt,completedAt);assert(!JSON.stringify(saved).includes('token-a'));env.dispose();
 });
 
+test('a fresh device follows the first scan started during Google sign-in', async () => {
+  const job = deferred();
+  const env = environment({ stored: savedSession('token-a'), fetcher: async url => {
+    if (url.endsWith('/auth/me')) return response(200, { user_id: 1, email: 'owner@example.invalid',
+      gmail_connected: true, gmail_import_job_id: 'signup-job' });
+    if (url.endsWith('/ingest/jobs/signup-job')) return job.promise;
+    return identityOrTrips(url);
+  } });
+  await settleRecovery(env);
+  assert.equal(env.render().gmailSyncStatus, 'syncing');
+  assert.equal(env.calls.filter(c => c.url?.endsWith('/ingest/jobs/signup-job')).length, 1);
+  assert(!env.calls.some(c => c.url?.endsWith('/ingest/gmail/import') || c.url?.endsWith('/auth/google/gmail/start')));
+  job.resolve(response(200, { state: 'completed', updated_at: '2026-02-03T14:00:00Z' }));
+  await flush();
+  assert.equal(env.render().gmailSyncStatus, 'synced');
+  env.dispose();
+});
+
 test('observation network failure retains a resumable job; Check mail does not duplicate it', async () => {
   let fail=true;
   const env=environment({stored:savedSession('token-a'),plainStored:{[recoveryKey()]:recoveryValue({activeJobId:'existing-job',activeStartedAt:new Date().toISOString()})},fetcher:async url=>{if(url.includes('/ingest/jobs/')){if(fail)throw new TypeError('offline');return response(200,{state:'done'});}return identityOrTrips(url);}});

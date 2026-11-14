@@ -12,7 +12,7 @@ from typing import Literal, Optional
 from urllib.parse import urlencode, urlsplit, parse_qsl, urlunsplit
 
 import jwt
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, status
 from fastapi.responses import RedirectResponse, JSONResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
@@ -26,6 +26,7 @@ from ..models import User, Account, AuthIdentity, AppleAuthChallenge
 from ..crypto import encrypt_refresh_token
 from ..auth import create_app_jwt, get_jwt_secret, get_user_from_jwt, verify_app_jwt
 from ..services.gmail_connection import GMAIL_READONLY_SCOPE, connection_status, google_account, has_gmail_permission
+from ..services.gmail_import_jobs import active_first_import, dispatch_import, reserve_first_import
 from ..services import apple_auth, auth_identities
 
 router   = APIRouter(prefix="/auth", tags=["auth"])
@@ -33,6 +34,10 @@ security = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
 
 SCOPES = "openid profile email"
+GMAIL_AUTH_PARAMS = {
+    "scope": f"{SCOPES} {GMAIL_READONLY_SCOPE}",
+    "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true",
+}
 OAUTH_HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 
 
@@ -112,7 +117,7 @@ def _decode_oauth_state(state: str) -> dict:
     if not isinstance(app_redirect_uri, str) or not _is_allowed_app_redirect(app_redirect_uri):
         raise ValueError("Disallowed redirect")
     purpose = state_data.get("purpose", "identity")
-    if purpose not in {"identity", "gmail", "reauth"}:
+    if purpose not in {"identity", "signin_gmail", "gmail", "reauth"}:
         raise ValueError("Invalid OAuth purpose")
     if purpose in {"gmail", "reauth"} and (type(state_data.get("user_id")) is not int or state_data["user_id"] < 1):
         raise ValueError("Missing connection owner")
@@ -137,6 +142,7 @@ class UserInfo(BaseModel):
     name: Optional[str] = None
     gmail_connected: bool = False
     gmail_connection_status: str = "not_connected"
+    gmail_import_job_id: str | None = None
     auth_providers: list[str] = Field(default_factory=list)
 
 
@@ -183,10 +189,20 @@ async def _verify_id_token(id_token_str: str) -> dict:
 
 
 def _upsert_user(db: Session, user_info: dict) -> User:
-    user = auth_identities.resolve_google_user(db, user_info)
+    try:
+        user = auth_identities.resolve_google_user(db, user_info)
+        # Autoflush is disabled. Make the verified subject visible to the
+        # Gmail ownership check in the same transaction.
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        # A second device may have just committed this exact Google subject.
+        # Resolve it with the normal ownership checks after the conflict.
+        if auth_identities.identity(db, "google", auth_identities.subject_from(user_info)) is None:
+            raise
+        user = auth_identities.resolve_google_user(db, user_info)
     if user_info.get("name"):
         user.name = user_info["name"]
-    db.commit()
     return user
 
 
@@ -227,7 +243,6 @@ def _connect_gmail(db: Session, user_id: int, user_info: dict, token_resp: dict)
     # Without a new refresh token retain the complete original credential/scope
     # pair. A denied/incomplete flow never overwrites a working connection.
     account.gmail_connection_status = "connected"
-    db.commit()
     return None
 
 
@@ -250,13 +265,13 @@ async def google_start(app_redirect_uri: str):
     if not _is_allowed_app_redirect(app_redirect_uri) or not _redirect_matches_purpose(app_redirect_uri, "identity"):
         raise HTTPException(400, "Disallowed redirect URI scheme")
 
-    state = _create_oauth_state(app_redirect_uri)
+    state = _create_oauth_state(app_redirect_uri, "signin_gmail")
 
     callback_uri = f"{backend_url}/auth/google/callback"
     params = {
         "client_id":     client_id,
         "response_type": "code",
-        "scope":         SCOPES,
+        **GMAIL_AUTH_PARAMS,
         "redirect_uri":  callback_uri,
         "state":         state,
         "nonce":         _decode_oauth_state(state)["jti"],
@@ -267,7 +282,8 @@ async def google_start(app_redirect_uri: str):
 
 
 @router.get("/google/callback")
-async def google_callback(state: str, code: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
+async def google_callback(background_tasks: BackgroundTasks, state: str, code: str | None = None,
+                          error: str | None = None, db: Session = Depends(get_db)):
     """
     Step 2: Google redirects here after user consents.
     Exchange code → tokens → create app JWT → redirect back to app.
@@ -301,8 +317,22 @@ async def google_callback(state: str, code: str | None = None, error: str | None
             if failure:
                 db.rollback()
                 return _oauth_redirect(app_redirect_uri, error=failure)
+            db.commit()
             return _oauth_redirect(app_redirect_uri, gmail="connected")
         user = _upsert_user(db, user_info)
+        first_job = None
+        if state_data["purpose"] == "signin_gmail":
+            failure = _connect_gmail(db, user.id, user_info, token_resp)
+            if failure == "gmail_wrong_account":
+                db.rollback()
+                return _oauth_redirect(app_redirect_uri, error="account_link_required")
+            # Google can grant identity while withholding mailbox access. Sign
+            # in either way. Only a usable offline grant starts an import.
+            if failure is None:
+                first_job = reserve_first_import(db, user.id)
+        db.commit()
+        if first_job is not None:
+            dispatch_import(db, first_job, background_tasks)
         return _oauth_redirect(app_redirect_uri, token=create_app_jwt(user.id, user.email))
     except Exception as exc:
         db.rollback()
@@ -370,21 +400,22 @@ async def gmail_start(body: GmailStartRequest, current_user: User = Depends(get_
     state = _create_oauth_state(body.app_redirect_uri, "gmail", current_user.id)
     params = {
         "client_id": client_id, "response_type": "code",
-        "scope": f"{SCOPES} {GMAIL_READONLY_SCOPE}",
+        **GMAIL_AUTH_PARAMS,
         "redirect_uri": f"{backend_url}/auth/google/callback",
         "state": state, "nonce": _decode_oauth_state(state)["jti"],
-        "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true",
     }
     if not current_user.email.endswith("@privaterelay.appleid.com"):
         params["login_hint"] = current_user.email
     return JSONResponse({"url": "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)}, headers=OAUTH_HEADERS)
 
-@router.get("/me", response_model=UserInfo)
+@router.get("/me", response_model=UserInfo, response_model_exclude_unset=True)
 async def get_user_info(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     gmail_status = connection_status(google_account(db, current_user.id))
+    first_job = active_first_import(db, current_user.id) if gmail_status == "connected" else None
     return UserInfo(user_id=current_user.id, email=current_user.email, name=current_user.name,
                     gmail_connected=gmail_status == "connected", gmail_connection_status=gmail_status,
-                    auth_providers=auth_identities.providers(db, current_user.id))
+                    auth_providers=auth_identities.providers(db, current_user.id),
+                    **({"gmail_import_job_id": first_job.id} if first_job else {}))
 
 
 @router.post("/google/reauth/start")

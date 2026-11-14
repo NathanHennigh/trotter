@@ -179,17 +179,25 @@ test("Rapid tab changes retain unique scene boundaries and do not reset an alrea
 const deferredShare = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const flushShare = async () => { for (let n = 0; n < 12; n++) await Promise.resolve(); };
 
-test('first normal launch offers names then optional Gmail; completion returns to the globe', async () => {
+test('skipping travel names opens the globe even when Gmail permission was declined', async () => {
   let completed = 0;
   const host = appHost({ useTravelIdentity: () => ({ identity: { confirmed: false, onboarding_completed: false }, loading: false, completeOnboarding: async () => { completed++; } }) });
   let tree = host.render({ consumeShare: noOp });
   assert.equal(find(tree, 'TravelNamesScreen').props.onboarding, true);
   assert.equal(find(tree, 'HomeGlobeScreen').props.visible, false);
   await find(tree, 'TravelNamesScreen').props.onSkip(); tree = host.render();
-  assert(find(tree, 'GmailSetupScreen'), 'Skipping names still offers the explicit optional Gmail step');
-  assert.equal(completed, 0);
-  await find(tree, 'GmailSetupScreen').props.onSkip(); tree = host.render();
   assert.equal(completed, 1);
+  assert.equal(find(tree, 'GmailSetupScreen'), undefined);
+  assert.equal(find(tree, 'HomeGlobeScreen').props.visible, true);
+  host.unmount();
+});
+
+test('unfinished setup from an older build completes once without another prompt', async () => {
+  let completed = 0;
+  const host = appHost({ useTravelIdentity: () => ({ identity: { confirmed: true, onboarding_completed: false }, loading: false, completeOnboarding: async () => { completed++; } }) });
+  const tree = host.render({ consumeShare: noOp });
+  assert.equal(completed, 1);
+  assert.equal(find(tree, 'TravelNamesScreen'), undefined);
   assert.equal(find(tree, 'GmailSetupScreen'), undefined);
   assert.equal(find(tree, 'HomeGlobeScreen').props.visible, true);
   host.unmount();
@@ -237,11 +245,11 @@ test('onboarding never interrupts an incoming saved place or flight/planner invi
 test('failed setup completion stays retryable and cannot close a newer profile form', async () => {
   let attempts = 0;
   const pending = deferredShare();
-  const host = appHost({ useTravelIdentity: () => ({ identity: { confirmed: true, onboarding_completed: false }, loading: false, completeOnboarding: () => ++attempts === 1 ? Promise.reject(new Error('Offline')) : pending.promise }) });
+  const host = appHost({ useTravelIdentity: () => ({ identity: { confirmed: false, onboarding_completed: false }, loading: false, completeOnboarding: () => ++attempts === 1 ? Promise.reject(new Error('Offline')) : pending.promise }) });
   let tree = host.render({ consumeShare: noOp });
-  await assert.rejects(find(tree, 'GmailSetupScreen').props.onSkip(), /Offline/);
-  tree = host.render(); assert(find(tree, 'GmailSetupScreen'));
-  const completing = find(tree, 'GmailSetupScreen').props.onDone();
+  await assert.rejects(find(tree, 'TravelNamesScreen').props.onSkip(), /Offline/);
+  tree = host.render(); assert(find(tree, 'TravelNamesScreen'));
+  const completing = find(tree, 'TravelNamesScreen').props.onSaved();
   find(tree, 'HomeGlobeScreen').props.onChange('profile'); tree = host.render();
   find(tree, 'ProfileScreen').props.onOpenTravelNames(); tree = host.render();
   pending.resolve(); await completing; tree = host.render();

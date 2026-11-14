@@ -120,17 +120,6 @@ test('save cannot be duplicated and failure completing onboarding remains visibl
   await React.act(async () => { onPress(); onPress(); }); assert.equal(h.calls.filter(c => c[0] === 'save').length, 1);
   await React.act(async () => wait.resolve()); assert.match(allText(view.root), /Could not finish setup/); assert(!button(view.root, 'Confirm names').props.disabled); await close(view);
 });
-test('Gmail connection unlocks Continue without waiting for scan completion or starting a second scan', async () => {
-  const scan = pending(), h = screenHarness('GmailSetupScreen', { connect: () => scan.promise }), view = await h.render();
-  await click(view.root, 'Connect Gmail'); h.account.gmailConnected = true; h.account.gmailConnecting = true; h.account.gmailSyncStatus = 'syncing'; await h.update(view);
-  assert.match(allText(view.root), /background/); await click(view.root, 'Continue to Trotter');
-  assert.deepEqual(h.calls, [['connect'], ['done']]); await close(view); scan.resolve();
-});
-test('Not now cancels a pending Gmail connection and awaits durable skip errors', async () => {
-  const h = screenHarness('GmailSetupScreen', { skip: async () => { throw new Error('Offline. Try again.'); } }), view = await h.render();
-  h.account.gmailConnecting = true; await h.update(view); await click(view.root, 'Not now');
-  assert.deepEqual(h.calls, [['cancel'], ['skip']]); assert.match(allText(view.root), /Offline/); await close(view);
-});
 test('This is me requires a separate confirmation and submits original ticket name', async () => {
   const h = screenHarness('FlightSharingScreen', { items: [flight('evidence', 'BLAKE/ALEX')] }), view = await h.render();
   await click(view.root, 'Prepare flights for BLAKE/ALEX'); await click(view.root, 'This is me: BLAKE/ALEX');

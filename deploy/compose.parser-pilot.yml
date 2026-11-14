@@ -1,7 +1,7 @@
 # Enable alongside the usual Compose files after both tagged images are built.
 services:
   api:
-    image: ${TROTTER_PARSER_ROUTER_IMAGE:?set the stable image with pilot routing}
+    image: ${TROTTER_API_IMAGE:-${TROTTER_PARSER_ROUTER_IMAGE:?set the stable image with pilot routing}}
     environment:
       TROTTER_PARSER_PILOT_ROUTING: "1"
   worker:

@@ -104,7 +104,7 @@ test('welcome prioritizes Google, explains Gmail briefly and hides unfinished Ap
   const host = screen('screens/AuthScreen.tsx', 'AuthScreen', { account: { authStatus: 'signed-out', status: 'idle', signIn: noop } });
   const tree = host.render();
   assert(text(tree).includes('Continue with Google'));
-  assert(text(tree).includes('Flight sync requires Gmail.'));
+  assert(text(tree).includes('Allow read-only Gmail access to import your flight confirmations.'));
   assert(!find(tree, 'AppleSignInButton'));
   assert(!text(tree).some(value => /Already use Trotter|Dreams and Planner work/.test(value)));
   host.dispose();

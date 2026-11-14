@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
-import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -13,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Message, MessageStatus, SyncJob, User
-from ..tasks.import_tasks import run_gmail_import
+from ..services.gmail_import_jobs import QUEUE_ERROR, active_first_import, dispatch_import, new_import
 from ..services.gmail_connection import require_gmail_connection, mark_gmail_reconnect, connection_required_error
 from .auth import get_current_user
 
@@ -62,42 +60,23 @@ def start_gmail_import(
     db: Session = Depends(get_db),
 ) -> StartImportResponse:
     """Create a SyncJob record and enqueue a background Gmail import task."""
-    require_gmail_connection(db, current_user.id)
-    job_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
-    job = SyncJob(
-        id=job_id,
-        user_id=current_user.id,
-        state="pending",
-        started_at=now,
-        updated_at=now,
-    )
-    db.add(job)
-    db.commit()
-
-    eager_mode = (
-        os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower() in ("1", "true", "yes")
-        or os.getenv("DEV_MODE", "").lower() in ("1", "true", "yes")
-    )
     task_mode = (mode or "").lower() or None
+    # Serialize normal starts with the consent callback. A Scan tap on an
+    # older app can arrive while the initial job is already in the queue.
+    db.query(User.id).filter_by(id=current_user.id).with_for_update().one()
+    require_gmail_connection(db, current_user.id)
+    if task_mode is None and limit is None:
+        existing = active_first_import(db, current_user.id)
+        if existing:
+            return StartImportResponse(job_id=existing.id)
     task_limit = 0 if task_mode == "full" else limit
     if task_limit is not None and task_limit != 0:
         task_limit = max(1, min(int(task_limit), 50000))
-
-    if eager_mode:
-        # In local single-terminal mode, running Celery eagerly inside this
-        # request blocks the app from polling until the sync is already done.
-        background_tasks.add_task(
-            run_gmail_import.run,
-            job_id=job_id,
-            user_id=current_user.id,
-            limit=task_limit,
-            mode=task_mode,
-        )
-    else:
-        run_gmail_import.delay(job_id=job_id, user_id=current_user.id, limit=task_limit, mode=task_mode)
-
-    return StartImportResponse(job_id=job_id)
+    job = new_import(db, current_user.id)
+    db.commit()
+    if not dispatch_import(db, job, background_tasks, limit=task_limit, mode=task_mode):
+        raise HTTPException(503, QUEUE_ERROR)
+    return StartImportResponse(job_id=job.id)
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)

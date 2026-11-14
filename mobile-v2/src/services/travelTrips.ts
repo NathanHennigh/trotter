@@ -143,7 +143,7 @@ export type TravelTripsStatus = 'idle' | 'loading' | 'refreshing' | 'syncing' | 
 export type TravelAuthStatus = 'loading' | 'signed-out' | 'signed-in';
 export type GmailSyncStatus = 'unknown' | 'syncing' | 'synced' | 'error';
 type GmailConnectionStatus = 'not_connected' | 'connected' | 'needs_reconnect';
-type AccountIdentity = { user_id: number; email: string; name?: string | null; gmail_connected?: boolean; gmail_connection_status?: GmailConnectionStatus; auth_providers?: ('google' | 'apple')[] };
+type AccountIdentity = { user_id: number; email: string; name?: string | null; gmail_connected?: boolean; gmail_connection_status?: GmailConnectionStatus; gmail_import_job_id?: string; auth_providers?: ('google' | 'apple')[] };
 type TravelTripsContextValue = {
   trips: TripSummary[];
   profile: TravelerProfile;
@@ -617,8 +617,15 @@ function useTravelTripsState(): TravelTripsContextValue {
     if (!ownerId || !token || !account?.gmail_connected || account.gmail_connection_status === 'needs_reconnect' || recoveryRead.current === revision) return;
     recoveryRead.current = revision;
     let live = true;
-    void readGmailRecovery(getApiBaseUrl(), ownerId).then(saved => {
+    const apiBaseUrl = getApiBaseUrl();
+    void readGmailRecovery(apiBaseUrl, ownerId).then(saved => {
       if (!live || !current(revision) || accountRef.current?.user_id !== ownerId || syncRunning.current?.revision === revision || recovery.current) return;
+      const firstJobId = accountRef.current.gmail_import_job_id;
+      if (firstJobId && !saved?.activeJobId) {
+        void observeGmailJob(firstJobId, token, revision, { version: 1, apiBaseUrl, ownerId,
+          lastSuccessAt: saved?.lastSuccessAt, activeJobId: firstJobId, activeStartedAt: new Date().toISOString() });
+        return;
+      }
       if (!saved) return;
       recovery.current = saved;
       setLastGmailSyncedAt(saved.lastSuccessAt);

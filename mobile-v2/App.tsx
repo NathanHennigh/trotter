@@ -53,7 +53,6 @@ import { DreamTripPicker } from "./src/components/world-window/planner/DreamTrip
 import { PlannerScreen } from "./src/screens/PlannerScreen";
 import { TravelIdentityProvider, useTravelIdentity } from "./src/services/travelIdentity";
 import { TravelNamesScreen } from "./src/screens/TravelNamesScreen";
-import { GmailSetupScreen } from "./src/screens/GmailSetupScreen";
 
 const tabs: BottomNavTab[] = [
   "globe",
@@ -259,7 +258,7 @@ function AppShell({
   const flightInvitation = useFlightInvitation();
   const plannerInvitation = usePlannerInvitation();
   const { identity: travelIdentity, loading: identityLoading, completeOnboarding } = useTravelIdentity();
-  const [identityScreen, setIdentityScreen] = React.useState<"names-onboarding" | "gmail-onboarding" | "names-profile">();
+  const [identityScreen, setIdentityScreen] = React.useState<"names-onboarding" | "names-profile">();
   const identityScreenRef = React.useRef(identityScreen);
   identityScreenRef.current = identityScreen;
   const setupConsidered = React.useRef(false);
@@ -313,7 +312,7 @@ function AppShell({
   const registerPlannerBack = React.useCallback((handler: (() => boolean) | null) => {
     handlers.current.planner = handler;
   }, []);
-  const { trips, gmailConnected } = useTravelTrips();
+  const { trips } = useTravelTrips();
   const { shareInstagramLinkDurable, refresh: refreshDreams } = useDreams();
   const insets = useSafeAreaInsets();
   const handledShare = React.useRef<{ queueId: number; status: "capturing" | "failed" | "retained" } | undefined>(undefined);
@@ -359,17 +358,20 @@ function AppShell({
     if (setupConsidered.current || !travelIdentity) return;
     setupConsidered.current = true;
     if (!setupDeferred.current && !travelIdentity.onboarding_completed) {
-      setIdentityScreen(travelIdentity.confirmed ? "gmail-onboarding" : "names-onboarding");
+      if (travelIdentity.confirmed) {
+        // Older builds could leave setup between travel names and Gmail.
+        // The names are already saved. Retry completion on the next launch
+        // if this one is offline.
+        void completeOnboarding().catch(() => undefined);
+      } else {
+        setIdentityScreen("names-onboarding");
+      }
     }
-  }, [travelIdentity, identityLoading, incomingShare, flightInvitation.token, plannerInvitation.token]);
+  }, [travelIdentity, identityLoading, incomingShare, flightInvitation.token, plannerInvitation.token, completeOnboarding]);
   const finishTravelSetup = async () => {
     const expectedScreen = identityScreenRef.current;
     await completeOnboarding();
     if (identityScreenRef.current === expectedScreen) setIdentityScreen(undefined);
-  };
-  const advanceTravelSetup = async () => {
-    if (gmailConnected) await finishTravelSetup();
-    else setIdentityScreen("gmail-onboarding");
   };
   React.useEffect(() => {
     if (plannerInvitation.token) changeTab("planner");
@@ -579,12 +581,10 @@ function AppShell({
           onInvitationConsumed={() => { if (flightInvitation.token) flightInvitation.consume(flightInvitation.token); }} />
       </View>}
       {identityScreen && <View style={styles.overlay}>
-        {identityScreen === "gmail-onboarding" ? <GmailSetupScreen
-          onDone={finishTravelSetup} onSkip={finishTravelSetup} onBack={() => setIdentityScreen("names-onboarding")} />
-          : <TravelNamesScreen onboarding={identityScreen === "names-onboarding"}
-            onSaved={identityScreen === "names-onboarding" ? advanceTravelSetup : async () => setIdentityScreen(undefined)}
-            onSkip={identityScreen === "names-onboarding" ? advanceTravelSetup : undefined}
-            onBack={identityScreen === "names-profile" ? () => setIdentityScreen(undefined) : undefined} />}
+        <TravelNamesScreen onboarding={identityScreen === "names-onboarding"}
+          onSaved={identityScreen === "names-onboarding" ? finishTravelSetup : async () => setIdentityScreen(undefined)}
+          onSkip={identityScreen === "names-onboarding" ? finishTravelSetup : undefined}
+          onBack={identityScreen === "names-profile" ? () => setIdentityScreen(undefined) : undefined} />
       </View>}
       {selectedTrip && <TripNavigationSurface key={selectedTrip.id} trip={selectedTrip} flightId={selectedFlightId}
         origin={tripPaperOrigin} closing={tripClosing} onClosed={finishCloseTrip} onRequestClose={closeTrip}

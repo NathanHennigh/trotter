@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.crypto import decrypt_refresh_token, generate_encryption_key
 from app.db import get_db
 from app.main import app
-from app.models import Account, Base, User
+from app.models import Account, AuthIdentity, Base, SyncJob, User
 
 
 @pytest.fixture
@@ -83,10 +83,10 @@ class TestGoogleAuthEndpoint:
         assert parsed.netloc == "accounts.google.com"
         assert params["client_id"] == ["test-client-id.apps.googleusercontent.com"]
         assert params["redirect_uri"] == ["http://localhost:8000/auth/google/callback"]
-        assert set(params["scope"][0].split()) == {"openid", "profile", "email"}
-        assert "include_granted_scopes" not in params
-        assert "access_type" not in params
-        assert "prompt" not in params
+        assert set(params["scope"][0].split()) == {"openid", "profile", "email", "https://www.googleapis.com/auth/gmail.readonly"}
+        assert params["include_granted_scopes"] == ["true"]
+        assert params["access_type"] == ["offline"]
+        assert params["prompt"] == ["consent"]
         assert response.headers["cache-control"] == "no-store"
         assert response.headers["referrer-policy"] == "no-referrer"
 
@@ -386,6 +386,96 @@ def _callback(client, state, **params):
     return client.get("/auth/google/callback", params={"state": state, **params}, follow_redirects=False)
 
 
+def _combined_signin(client, provider, scope="openid email profile https://www.googleapis.com/auth/gmail.readonly",
+                     refresh="first-refresh", uri="trotterv2://oauthredirect"):
+    exchange, verify = provider
+    start = client.get("/auth/google/start", params={"app_redirect_uri": uri}, follow_redirects=False)
+    params = parse_qs(urlparse(start.headers["location"]).query)
+    verify.return_value["nonce"] = params["nonce"][0]
+    exchange.return_value = {"id_token": "mock", "scope": scope, "refresh_token": refresh}
+    return _callback(client, params["state"][0], code="google-code")
+
+
+@pytest.mark.parametrize("web", [False, True])
+def test_single_google_flow_connects_and_starts_one_import(client, test_db, auth_env, oauth_provider, monkeypatch, web):
+    monkeypatch.setenv("WEB_APP_URL", "https://app.example.org")
+    monkeypatch.setenv("DEV_MODE", "false")
+    monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "false")
+    uri = "https://app.example.org/oauthredirect" if web else "trotterv2://oauthredirect"
+    with patch("app.services.gmail_import_jobs.run_gmail_import.delay") as queued:
+        result = _combined_signin(client, oauth_provider, uri=uri)
+        parsed = urlparse(result.headers["location"])
+        fields = parse_qs(parsed.fragment if web else parsed.query)
+        assert set(fields) == {"token"}
+        headers = {"Authorization": "Bearer " + fields["token"][0]}
+        me = client.get("/auth/me", headers=headers).json()
+        job_id = me["gmail_import_job_id"]
+        assert me["gmail_connected"] and me["auth_providers"] == ["google"]
+        assert decrypt_refresh_token(test_db.query(Account).one().refresh_token_encrypted) == "first-refresh"
+        queued.assert_called_once_with(job_id=job_id, user_id=me["user_id"], limit=None, mode=None)
+        assert client.post("/ingest/gmail/import", headers=headers).json()["job_id"] == job_id
+        # Google sometimes omits a replacement refresh token on a later authorization.
+        assert _combined_signin(client, oauth_provider, refresh=None, uri=uri).status_code == 307
+        job = test_db.query(SyncJob).one()
+        job.state = "completed"
+        test_db.commit()
+        assert _combined_signin(client, oauth_provider, uri=uri).status_code == 307
+        assert queued.call_count == 1
+        assert "gmail_import_job_id" not in client.get("/auth/me", headers=headers).json()
+        assert test_db.query(SyncJob).count() == test_db.query(AuthIdentity).count() == 1
+
+
+@pytest.mark.parametrize("scope,refresh", [("openid email profile", "unused"),
+    ("openid email profile https://www.googleapis.com/auth/gmail.readonly", None)])
+def test_granular_or_incomplete_consent_allows_identity_only(client, test_db, auth_env, oauth_provider, scope, refresh):
+    with patch("app.services.gmail_import_jobs.run_gmail_import") as task:
+        response = _combined_signin(client, oauth_provider, scope, refresh)
+        token = parse_qs(urlparse(response.headers["location"]).query)["token"][0]
+        me = client.get("/auth/me", headers={"Authorization": "Bearer " + token}).json()
+        assert not me["gmail_connected"] and "gmail_import_job_id" not in me
+        assert test_db.query(Account).count() == test_db.query(SyncJob).count() == 0
+        assert not task.mock_calls
+
+
+def test_new_grant_repairs_revoked_account_without_rescanning_existing_archive(client, test_db, auth_env, oauth_provider):
+    user = _gmail_user(test_db, connected=True, stored_status="needs_reconnect")
+    test_db.add(SyncJob(user_id=user.id, state="completed")); test_db.commit()
+    with patch("app.services.gmail_import_jobs.run_gmail_import") as task:
+        assert _combined_signin(client, oauth_provider).status_code == 307
+        me = client.get("/auth/me", headers=_headers(user)).json()
+        assert me["gmail_connected"] and "gmail_import_job_id" not in me
+        test_db.expire_all()
+        assert decrypt_refresh_token(test_db.query(Account).one().refresh_token_encrypted) == "first-refresh"
+        assert test_db.query(SyncJob).count() == 1
+        assert not task.mock_calls
+
+
+def test_combined_consent_cannot_attach_gmail_to_an_apple_account_by_email(client, test_db, auth_env, oauth_provider):
+    owner = _gmail_user(test_db)
+    test_db.add(AuthIdentity(user_id=owner.id, provider="apple", subject="apple-owner", email=owner.email))
+    test_db.commit()
+    with patch("app.services.gmail_import_jobs.run_gmail_import") as task:
+        response = _combined_signin(client, oauth_provider)
+        assert parse_qs(urlparse(response.headers["location"]).query) == {"error": ["account_link_required"]}
+        assert test_db.query(AuthIdentity).one().provider == "apple"
+        assert test_db.query(Account).count() == test_db.query(SyncJob).count() == 0
+        assert not task.mock_calls
+
+
+def test_failed_dispatch_keeps_signin_and_gmail_and_allows_one_manual_retry(client, test_db, auth_env, oauth_provider, monkeypatch):
+    monkeypatch.setenv("DEV_MODE", "false")
+    monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "false")
+    with patch("app.services.gmail_import_jobs.run_gmail_import.delay", side_effect=[ConnectionError("fixture"), None]) as queued:
+        response = _combined_signin(client, oauth_provider)
+        token = parse_qs(urlparse(response.headers["location"]).query)["token"][0]
+        headers = {"Authorization": "Bearer " + token}
+        assert client.get("/auth/me", headers=headers).json()["gmail_connected"]
+        failed = test_db.query(SyncJob).one()
+        assert failed.state == "failed" and failed.error_message
+        retry = client.post("/ingest/gmail/import", headers=headers)
+        assert retry.status_code == 200 and retry.json()["job_id"] != failed.id and queued.call_count == 2
+
+
 @pytest.mark.parametrize("connected,stored_status", [(False, None), (True, None), (True, "needs_reconnect")])
 def test_identity_without_refresh_or_gmail_leaves_connections_untouched(client, test_db, auth_env, oauth_provider, connected, stored_status):
     user = _gmail_user(test_db, connected, stored_status)
@@ -568,7 +658,7 @@ def test_unconnected_users_can_use_private_app_but_cannot_scan(client, test_db, 
     for path in ("/dreams", "/planner/trips", "/trips"):
         assert client.get(path, headers=headers).status_code == 200
     from app.models import SyncJob
-    with patch("app.routers.ingest.run_gmail_import") as task:
+    with patch("app.services.gmail_import_jobs.run_gmail_import") as task:
         response = client.post("/ingest/gmail/import", headers=headers)
         assert response.status_code == 409
         assert response.json()["detail"]["action"] == "connect_gmail"

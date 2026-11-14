@@ -9,8 +9,9 @@ native changes in the plugin/templates so local and cloud builds match.
 
 - Sign in with Apple and an explicit link-Apple flow for an existing Trotter account.
   Both entry points stay hidden until Trotter's Apple setup is verified and
-  `EXPO_PUBLIC_APPLE_SIGN_IN_ENABLED=true` is explicitly set. Google is first;
-  the welcome screen says only “Flight sync requires Gmail.” about email access.
+  `EXPO_PUBLIC_APPLE_SIGN_IN_ENABLED=true` is explicitly set. Google sign-in
+  requests read-only Gmail access in the same consent flow. Granting it starts
+  the first flight import. Apple users can connect Gmail later in Profile.
 - Native Instagram Share Extension, its App Group inbox, shared Keychain session,
   background upload integration, and the React Native bridge.
 - iPhone maps configuration, universal links for shared-trip invitations, and an

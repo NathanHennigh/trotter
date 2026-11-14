@@ -121,7 +121,7 @@ export function AuthScreen({ flightInvitation = false, plannerInvitationToken, o
             <GoogleMark />
             <Text style={styles.googleLabel}>Continue with Google</Text>
           </PressFeedback>
-          <Text style={styles.flightSyncNote}>Flight sync requires Gmail.</Text>
+          <Text style={styles.flightSyncNote}>Allow read-only Gmail access to import your flight confirmations.</Text>
           </View>
         )}
         {showApple ? <AppleSignInButton appearance="outline" onPress={() => void signInWithApple()} /> : null}

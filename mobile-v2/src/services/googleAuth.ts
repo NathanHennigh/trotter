@@ -38,6 +38,7 @@ export function readOAuthCallbackToken(url: string, expectedRedirect: string) {
   const tokens = [...parsed.searchParams.getAll('token'), ...fragment.getAll('token')];
   const error = parsed.searchParams.get('error') || fragment.get('error');
   if (error === 'access_denied') throw new GoogleSignInCanceled();
+  if (error === 'account_link_required') throw new Error('Use your original sign-in method for this Trotter account. You can connect Gmail in Profile.');
   if (error === 'reauth_wrong_account') throw new Error('Choose the account you currently use for Trotter. Nothing has been changed.');
   if (error) throw new Error('Google sign-in could not be completed. Please try again.');
   if (tokens.length !== 1 || !tokens[0] || /\s/.test(tokens[0])) {

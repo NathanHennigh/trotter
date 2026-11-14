@@ -37,6 +37,7 @@ if [[ -n "${TROTTER_PARSER_ROUTER_IMAGE:-}" || -n "${TROTTER_PARSER_PILOT_IMAGE:
   # API or worker here would overwrite the pinned routing tag with ordinary code.
   : "${TROTTER_PARSER_ROUTER_IMAGE:?Missing routing image}" "${TROTTER_PARSER_PILOT_IMAGE:?Missing pilot image}"
   docker image inspect "$TROTTER_PARSER_ROUTER_IMAGE" "$TROTTER_PARSER_PILOT_IMAGE" >/dev/null
+  if [[ -n "${TROTTER_API_IMAGE:-}" ]]; then docker image inspect "$TROTTER_API_IMAGE" >/dev/null; fi
   compose+=(-f "$DEPLOY_DIR/compose.parser-pilot.yml")
 fi
 "${compose[@]}" config --quiet
