@@ -121,10 +121,12 @@ class AccountErasureCleanup(Base):
 
 class SyncJob(Base):
     __tablename__ = "sync_jobs"
+    __table_args__ = (Index("ix_sync_jobs_user_kind_started", "user_id", "kind", "started_at"),)
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     state = Column(String(16), nullable=False, default="pending")  # pending, running, completed, failed
+    kind = Column(String(16), nullable=True)  # mailbox or daily; legacy and specialized jobs are unclassified
     scanned_count = Column(Integer, nullable=False, default=0)
     parsed_count = Column(Integer, nullable=False, default=0)
     segment_count = Column(Integer, nullable=False, default=0)

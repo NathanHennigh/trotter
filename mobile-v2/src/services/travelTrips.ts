@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { invalidateNativeDreamShareSession, syncNativeDreamShareSession } from './nativeDreamShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -143,7 +143,7 @@ export type TravelTripsStatus = 'idle' | 'loading' | 'refreshing' | 'syncing' | 
 export type TravelAuthStatus = 'loading' | 'signed-out' | 'signed-in';
 export type GmailSyncStatus = 'unknown' | 'syncing' | 'synced' | 'error';
 type GmailConnectionStatus = 'not_connected' | 'connected' | 'needs_reconnect';
-type AccountIdentity = { user_id: number; email: string; name?: string | null; gmail_connected?: boolean; gmail_connection_status?: GmailConnectionStatus; gmail_import_job_id?: string; auth_providers?: ('google' | 'apple')[] };
+type AccountIdentity = { user_id: number; email: string; name?: string | null; gmail_connected?: boolean; gmail_connection_status?: GmailConnectionStatus; gmail_import_job_id?: string; gmail_last_scanned_at?: string; auth_providers?: ('google' | 'apple')[] };
 type TravelTripsContextValue = {
   trips: TripSummary[];
   profile: TravelerProfile;
@@ -171,6 +171,7 @@ type TravelTripsContextValue = {
   signOut: () => Promise<void>;
   finishAccountDeletion: () => Promise<void>;
   refresh: () => Promise<void>;
+  refreshIfStale: () => Promise<void>;
   loadTripDetail: (backendId: number) => Promise<TripSummary | undefined>;
   syncFromGmail: () => Promise<void>;
   connectGmail: () => Promise<void>;
@@ -217,6 +218,8 @@ function useTravelTripsState(): TravelTripsContextValue {
   const accountRef = React.useRef<AccountIdentity | undefined>(undefined);
   const mounted = React.useRef(true);
   const requestSequence = React.useRef(0);
+  const activeListRead = React.useRef(0);
+  const lastListRead = React.useRef(0);
   // Order reads by when they began, including independent detail requests.
   const readSequence = React.useRef(0);
   const identityReadSequence = React.useRef(0);
@@ -236,6 +239,8 @@ function useTravelTripsState(): TravelTripsContextValue {
     tripsRef.current = [];
     tripReads.current.clear();
     fullReadApplied.current = 0;
+    lastListRead.current = 0;
+    activeListRead.current = 0;
     setLastSyncedAt(undefined);
     setGmailSyncStatus('unknown');
     setGmailSyncError(undefined);
@@ -247,7 +252,7 @@ function useTravelTripsState(): TravelTripsContextValue {
     recoveryRead.current = undefined;
   }, []);
 
-  const loadTrips = React.useCallback(async (mode: 'loading' | 'refreshing' | 'silent' = 'refreshing') => {
+  const loadTrips = React.useCallback(async (mode: 'loading' | 'refreshing' | 'silent' | 'background' = 'refreshing') => {
     const token = getStoredToken();
     const revision = getAuthRevision();
     const sequence = ++requestSequence.current;
@@ -260,7 +265,9 @@ function useTravelTripsState(): TravelTripsContextValue {
       setStatus('idle');
       return;
     }
-    if (mode !== 'silent') setStatus(mode);
+    activeListRead.current = sequence;
+    lastListRead.current = Date.now();
+    if (mode === 'loading' || mode === 'refreshing') setStatus(mode);
     try {
       const readAccountResponse = async (path: string) => {
         const response = await authFetch(path, undefined, token);
@@ -328,11 +335,27 @@ function useTravelTripsState(): TravelTripsContextValue {
       if (mode !== 'silent') setStatus(syncRunning.current?.revision === revision ? 'syncing' : 'idle');
     } catch (caught) {
       if (!relevant()) return;
+      if (mode === 'background' && accountRef.current) return;
       setError(friendlyError(caught));
       setStatus('error');
       if (!accountRef.current) setAuthStatus('signed-out');
+    } finally {
+      if (activeListRead.current === sequence) activeListRead.current = 0;
     }
   }, [resetAccount]);
+
+  const refreshIfStale = React.useCallback(async () => {
+    if (!accountRef.current || !getStoredToken() || activeListRead.current || syncRunning.current ||
+        Date.now() - lastListRead.current < 60_000) return;
+    await loadTrips('background');
+  }, [loadTrips]);
+
+  React.useEffect(() => {
+    const subscription = AppState?.addEventListener('change', state => {
+      if (state === 'active') void refreshIfStale();
+    });
+    return () => subscription?.remove();
+  }, [refreshIfStale]);
 
   React.useEffect(() => {
     mounted.current = true;
@@ -643,8 +666,10 @@ function useTravelTripsState(): TravelTripsContextValue {
     else await signIn();
   }, [loadTrips, signIn]);
 
+  const serverScan = account?.gmail_last_scanned_at;
+  const latestScan = serverScan && (!lastGmailSyncedAt || Date.parse(serverScan) > Date.parse(lastGmailSyncedAt)) ? serverScan : lastGmailSyncedAt;
   return { trips, profile: buildProfile(trips, account), source: 'api', status, authStatus,
-    signOutPending, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt,
+    signOutPending, gmailSyncStatus, gmailSyncError, lastGmailSyncedAt: latestScan, refreshIfStale,
     gmailConnected: account?.gmail_connected === true && account.gmail_connection_status !== 'needs_reconnect',
     gmailConnectionStatus: account?.gmail_connection_status ?? (account?.gmail_connected ? 'connected' : 'not_connected'),
     gmailConnecting, gmailConnectionError,

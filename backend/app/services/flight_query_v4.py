@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta, timezone
 import csv
 import os
@@ -134,6 +134,7 @@ def build_discovery_plan(
     now: datetime,
     learned_sender_domains: Optional[list[str]] = None,
     max_backfill_windows: int = MAX_BACKFILL_WINDOWS_PER_SYNC,
+    recent_since: datetime | None = None,
 ) -> list[DiscoveryQuery]:
     """Return ordered v4 discovery tiers for this sync run.
 
@@ -145,6 +146,7 @@ def build_discovery_plan(
     plan: list[DiscoveryQuery] = []
     has_completed_sync = bool(state.last_incremental_scan_at)
     incremental_start = _incremental_start(state, now)
+    since = str(int(_ensure_utc(recent_since).timestamp()) - 1) if recent_since else _gmail_after_date(incremental_start)
 
     # Sender-first discovery remains useful as additive coverage for known
     # transactional domains and user-learned senders. It must not replace the
@@ -152,14 +154,14 @@ def build_discovery_plan(
     plan.extend(
         DiscoveryQuery(tier="fast_known_senders", query=query, prefilter=True)
         for query in build_fast_known_sender_queries(
-            since=_gmail_after_date(incremental_start),
+            since=since,
             learned_sender_domains=learned_sender_domains or [],
         )
     )
 
     plan.extend(
         DiscoveryQuery(tier="fast_strong_keywords", query=query, prefilter=True)
-        for query in build_fast_strong_keyword_queries(since=_gmail_after_date(incremental_start))
+        for query in build_fast_strong_keyword_queries(since=since)
     )
 
     # A booked flight can be labeled Promotions by Gmail. Only this exact
@@ -167,14 +169,19 @@ def build_discovery_plan(
     # the evidence gate still validates the full dated itinerary afterward.
     plan.extend(
         DiscoveryQuery(tier="fast_bilt_confirmations", query=query, prefilter=True)
-        for query in build_fast_bilt_confirmation_queries(since=_gmail_after_date(incremental_start))
+        for query in build_fast_bilt_confirmation_queries(since=since)
     )
 
     if ENABLE_RECALL_DISCOVERY_TIERS:
         plan.extend(
             DiscoveryQuery(tier="incremental_precise", query=query, prefilter=True)
-            for query in build_precise_queries(since=_gmail_after_date(incremental_start))
+            for query in build_precise_queries(since=since)
         )
+
+    if recent_since is not None:
+        # All tiers cover the same fixed interval, even if delivery continues during pagination.
+        until = int(now.timestamp()) + 1
+        return [replace(item, query=f"{item.query} before:{until}") for item in plan]
 
     if ENABLE_RECALL_DISCOVERY_TIERS and not has_completed_sync:
         broad_start = max(incremental_start, now - timedelta(days=RECENT_BROAD_DAYS))

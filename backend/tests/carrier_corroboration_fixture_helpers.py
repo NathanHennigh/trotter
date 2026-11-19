@@ -27,7 +27,7 @@ def gmail_message(value, *, authentication=True, recipient="maya@example.test", 
     """
     received = datetime.fromisoformat(value["received_at"].replace("Z", "+00:00"))
     domain = parseaddr(value["sender"])[1].rsplit("@", 1)[-1]
-    dmarc_domain = "aa.com" if domain.endswith(".aa.com") else domain
+    dmarc_domain = "aa.com" if domain.endswith(".aa.com") else "bilt.com" if domain == "members.bilt.com" else domain
     headers = [
         {"name": "From", "value": value["sender"]},
         {"name": "To", "value": recipient},

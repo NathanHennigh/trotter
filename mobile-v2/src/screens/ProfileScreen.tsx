@@ -36,7 +36,7 @@ export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInb
   const firstYear = profile.firstFlightDate?.match(/^\d{4}/)?.[0];
   const reconnect = gmailConnectionStatus === 'needs_reconnect';
   const canScanGmail = gmailConnected && !reconnect;
-  const syncCopy = gmailConnecting ? 'Waiting for your permission…' : !canScanGmail ? reconnect ? 'Permission needed · Reconnect to scan' : 'Optional · Import flight confirmations' : scanning ? 'Finding flight confirmations…' : gmailSyncStatus === 'error' ? 'Scan needs attention' : lastGmailSyncedAt ? `Last scan · ${formatUpdated(lastGmailSyncedAt)}` : 'Ready to scan for flights';
+  const syncCopy = gmailConnecting ? 'Waiting for your permission…' : !canScanGmail ? reconnect ? 'Permission needed · Reconnect to scan' : 'Optional · Import flight confirmations' : scanning ? 'Finding flight confirmations…' : gmailSyncStatus === 'error' ? 'Scan needs attention' : lastGmailSyncedAt ? `Last scan · ${formatUpdated(lastGmailSyncedAt)}` : 'Connected';
   const gmailBusy = gmailConnecting || (canScanGmail && busy);
   const gmailAction = gmailConnecting ? 'Connecting…' : canScanGmail ? scanning ? 'Scanning…' : 'Scan for flights' : reconnect ? 'Reconnect Gmail' : 'Connect Gmail';
   return <View style={[s.screen, { paddingTop: insets.top }]}>
@@ -58,7 +58,7 @@ export function ProfileScreen({ active, onChange, onOpenAirport, onOpenFlightInb
               <Text style={s.scanText}>{gmailAction}</Text>
             </PressFeedback>
           </View>
-          {canScanGmail && scanning ? <Text style={s.note}>Your scan continues if you leave the app.</Text> : null}
+          {canScanGmail ? <Text style={s.note}>{scanning ? 'Your scan continues if you leave the app.' : 'Trotter checks new mail daily. Keep flight emails until your trip appears. Archived emails are included. Trash is skipped.'}</Text> : null}
           {!canScanGmail ? <Text style={s.note}>{reconnect ? 'Your saved trips stay here while you reconnect. Gmail access remains read-only.' : 'Connect Gmail to automatically import flights. Read-only access; Dreams and Planner work without it.'}</Text> : null}
           {gmailConnecting ? <PressFeedback accessibilityRole="button" accessibilityLabel="Cancel Gmail connection" onPress={cancelGmailConnection} style={s.signOut}><Text style={s.signOutText}>Cancel</Text></PressFeedback> : null}
           {gmailConnectionError ? <Text style={s.error} accessibilityRole="alert">{gmailConnectionError}</Text> : null}

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Message, MessageStatus, SyncJob, User
-from ..services.gmail_import_jobs import QUEUE_ERROR, active_first_import, dispatch_import, new_import
+from ..services.gmail_import_jobs import QUEUE_ERROR, active_mailbox_import, dispatch_import, new_import
 from ..services.gmail_connection import require_gmail_connection, mark_gmail_reconnect, connection_required_error
 from .auth import get_current_user
 
@@ -65,14 +65,15 @@ def start_gmail_import(
     # older app can arrive while the initial job is already in the queue.
     db.query(User.id).filter_by(id=current_user.id).with_for_update().one()
     require_gmail_connection(db, current_user.id)
-    if task_mode is None and limit is None:
-        existing = active_first_import(db, current_user.id)
+    normal_scan = task_mode in (None, "sync") and limit is None
+    if normal_scan:
+        existing = active_mailbox_import(db, current_user.id, automatic_only=True)
         if existing:
             return StartImportResponse(job_id=existing.id)
     task_limit = 0 if task_mode == "full" else limit
     if task_limit is not None and task_limit != 0:
         task_limit = max(1, min(int(task_limit), 50000))
-    job = new_import(db, current_user.id)
+    job = new_import(db, current_user.id, kind="mailbox" if normal_scan else None)
     db.commit()
     if not dispatch_import(db, job, background_tasks, limit=task_limit, mode=task_mode):
         raise HTTPException(503, QUEUE_ERROR)

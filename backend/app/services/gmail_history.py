@@ -4,12 +4,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import os
 
-from sqlalchemy import and_, func, literal, or_
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 
 from ..models import Account, GmailDiscoveryState, GmailHistoryState, User
 from .flight_query_v4 import BACKFILL_WINDOW_DAYS, _earliest_supported_datetime, _ensure_utc, _gmail_after_date, _gmail_date, _start_of_day
-from .gmail_connection import READABLE_GMAIL_SCOPES, connection_status
+from .gmail_connection import connected_account_filter as _connected_account_filter, connection_status
 
 PAGE_SIZE = 50
 LEASE_SECONDS = 420
@@ -30,22 +30,6 @@ def allowed_user_ids() -> set[int] | None:
 def user_enabled(user_id: int) -> bool:
     allowed = allowed_user_ids()
     return enabled() and (allowed is None or user_id in allowed)
-
-
-def _connected_account_filter():
-    # Match connection_status before limiting a scheduler batch. Otherwise older
-    # disconnected accounts can occupy every slot forever. OAuth scopes are
-    # whitespace-separated tokens, so substring matches must not grant access.
-    scopes = func.coalesce(Account.scopes, "")
-    for separator in ("\t", "\r", "\n", "\v", "\f"):
-        scopes = func.replace(scopes, separator, " ")
-    scopes = literal(" ") + scopes + literal(" ")
-    return and_(
-        Account.provider == "google",
-        or_(Account.gmail_connection_status.is_(None), Account.gmail_connection_status != "needs_reconnect"),
-        func.length(Account.refresh_token_encrypted) > 0,
-        or_(*(scopes.contains(f" {scope} ") for scope in sorted(READABLE_GMAIL_SCOPES))),
-    )
 
 
 def discover_history_jobs(db, *, now=None, limit=2) -> list[tuple[int, int]]:

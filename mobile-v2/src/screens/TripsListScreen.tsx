@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  AppState,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -38,11 +39,19 @@ export function TripsListScreen({
   liftedTripId?: string;
 }) {
   const insets = useSafeAreaInsets(),
-    { trips, status, error, refresh, gmailConnected, gmailConnecting, gmailConnectionError, connectGmail } = useTravelTrips();
+    { trips, status, error, refresh, refreshIfStale, gmailConnected, gmailConnecting, gmailConnectionError, connectGmail } = useTravelTrips();
   const { width, fontScale } = useWindowDimensions();
   const stackCount = width <= 360 && fontScale >= 1.35;
   const [query, setQuery] = React.useState("");
   const list = React.useRef<FlatList<TripSummary>>(null);
+  React.useEffect(() => {
+    if (active !== 'trips') return;
+    void refreshIfStale();
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') void refreshIfStale();
+    }, 5 * 60_000);
+    return () => clearInterval(timer);
+  }, [active, refreshIfStale]);
   React.useEffect(() => {
     setQuery("");
     list.current?.scrollToOffset({ offset: 0, animated: false });
@@ -138,7 +147,7 @@ export function TripsListScreen({
                 ? undefined
                 : query
                   ? "Try another search or view all trips."
-                  : gmailConnected ? "Import your flight confirmations from Profile." : "Connect Gmail to automatically import flights. Dreams and Planner work without email access."
+                  : gmailConnected ? "Your Gmail is connected. New flight confirmations are checked daily." : "Connect Gmail to automatically import flights. Dreams and Planner work without email access."
             }
             action={!loading ? <WWButton label={error ? "Retry" : query ? "Show all trips" : gmailConnected ? "Open Profile" : gmailConnecting ? "Connecting…" : "Connect Gmail"} disabled={!error && !query && gmailConnecting} onPress={() => { if (error) void refresh(); else if (query) setQuery(""); else if (gmailConnected) onChange("profile"); else if (!gmailConnecting) void connectGmail(); }} secondary /> : undefined}
           />

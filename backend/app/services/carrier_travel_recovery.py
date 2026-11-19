@@ -118,7 +118,7 @@ def record_payload(db, user_id, payload):
     # Include the exact original boundary even when trust validation fails.
     fingerprint = _hash(inputs) if inputs else _hash({"invalid_original": payload.get("full_msg") or {}})
     received = inputs["received_at"] if inputs else _stamp(payload.get("received_at"))
-    statements = extract_carrier_travel_evidence(**inputs) if inputs and not _uncertain_cancellation(message) else ()
+    statements = extract_carrier_travel_evidence(**inputs, include_booking_pair=True) if inputs and not _uncertain_cancellation(message) else ()
     observations = _bounded(db.query(BookingObservation).filter_by(user_id=user_id, source_message_id=source))
     rows = []
     if observations is not None and received:
@@ -408,8 +408,10 @@ def evaluate(db, user_id, flight):
     names = identity_candidates(user.name or "", user.travel_name_aliases or []) if user else []
     if not names:
         return reject("account_names_unresolved")
+    pair_kinds = {"bilt_single_booking", "checkin_given_name"}
     rows = _bounded(db.query(CarrierTravelEvidence).filter(CarrierTravelEvidence.user_id == user_id,
         CarrierTravelEvidence.carrier == carrier,
+        or_(CarrierTravelEvidence.kind.notin_(pair_kinds), CarrierTravelEvidence.pnr == code),
         CarrierTravelEvidence.local_day >= (day - timedelta(days=JOURNEY_DAYS)).isoformat(),
         CarrierTravelEvidence.local_day <= (day + timedelta(days=JOURNEY_DAYS)).isoformat()))
     if rows is None:
@@ -417,7 +419,14 @@ def evaluate(db, user_id, flight):
     rows = _current_evidence(db, user_id, rows)
     if rows is None:
         return reject("source_metadata_limit")
-    operations = [row for row in rows if row.kind != "post_travel"]
+    exact_evidence = [r for r in rows if r.pnr == code and _row_leg(r) == scope]
+    pairing = (carrier == "AA" and any(r.kind in pair_kinds or r.kind == "operational_personal"
+                                      for r in exact_evidence if r.source_message_id == source)
+               and any(r.kind == "bilt_single_booking" for r in exact_evidence)
+               and any(r.kind in {"checkin_given_name", "operational_personal"} for r in exact_evidence))
+    # A first name or a booking receipt cannot supply any of the evidence
+    # required by the existing carrier-survey policy.
+    operations = [row for row in rows if row.kind != "post_travel" and (pairing or row.kind not in pair_kinds)]
     target_rows = [row for row in operations if row.pnr == code and row.source_message_id == source and _row_leg(row) == scope]
     if not target_rows:
         return reject("target_source_not_current")
@@ -450,8 +459,26 @@ def evaluate(db, user_id, flight):
         return reject("source_time_conflict")
     if {row.pnr for row in operations if _row_leg(row) == scope} != {code}:
         return reject("competing_booking")
-    if any(row.kind == "operational_personal" and row.pnr == code and not _personal_matches(row, names) for row in operations):
+    if any(row.kind == "operational_personal" and row.pnr == code and not _personal_matches(row, names)
+           and not (pairing and any(full_names_match(row.name, name) for name in names)) for row in operations):
         return reject("conflicting_personal_carrier_name")
+    if pairing:
+        bookings = [r for r in exact_evidence if r.kind == "bilt_single_booking"]
+        notices = [r for r in exact_evidence if r.kind in {"checkin_given_name", "operational_personal"}
+                   and r.facts.get("assertion") == "personally_addressed_checkin"]
+        for row in operations:
+            if row.pnr == code and row.kind in {"checkin_given_name", "operational_personal"} and not (
+                    _survey_name_matches(row.name, names) or any(full_names_match(row.name, n) for n in names)):
+                return reject("conflicting_personal_carrier_name")
+        if any(row.ownership == "other" or row.facts.get("force_review") for row in validated if row.pnr == code):
+            return reject("conflicting_booking_passenger")
+        proof = [r for r in bookings + notices if r.source_message_id == source]
+        if proof and notices and bookings:
+            return CarrierDecision(True, "carrier_travel_corroborated", (),
+                tuple(sorted({bookings[0].id, notices[0].id, proof[0].id})))
+        # A third, generic notice receives no authority from this pair.
+        if any(row.kind in pair_kinds for row in target_rows):
+            return reject("no_matching_named_checkin")
     personal = [row for row in operations if row.pnr == code and _personal_matches(row, names)]
     surveys = [row for row in rows if row.kind == "post_travel" and _survey_name_matches(row.name, names)]
     for survey in surveys:

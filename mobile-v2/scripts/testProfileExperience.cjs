@@ -45,7 +45,7 @@ test('Profile replaces repeated archive blocks with identity and meaningful acco
   const host=runtime('screens/ProfileScreen.tsx'), tree=host.render(host.exports.ProfileScreen,{active:'profile',onChange:noop});
   assert(find(tree,'TravelerCard'));assert(find(tree,'WWHeader'));assert(button(tree,'Scan Gmail for flights'));
   for(const duplicate of ['Trip archive','Country stamps','Latest recorded flight','Most visited airport','Refresh archive','Not checked']) assert(!text(tree).includes(duplicate),duplicate);
-  assert(text(tree).includes('Ready to scan for flights'));assert(find(tree,'AccountControls'));host.dispose();
+  assert(text(tree).includes('Trotter checks new mail daily.'));assert(text(tree).includes('Archived emails are included. Trash is skipped.'));assert(find(tree,'AccountControls'));host.dispose();
 });
 test('Globe and haptic preferences control the same store used by Home',()=>{
   const changed=[],haptics=[];const host=runtime('screens/ProfileScreen.tsx',{'../utils/experiencePreferences':{useExperiencePreferences:()=>({texture:'nasa',haptics:false,setTexture:v=>changed.push(v),setHaptics:v=>haptics.push(v)}),selectionHaptic:noop}});

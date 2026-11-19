@@ -46,7 +46,7 @@ function host(file, name, options = {}) {
     '../components/world-window/trips/TripAtlas': { TripAtlas: 'TripAtlas' },
     '../components/world-window/trips/tripPresentation': presentation, './tripPresentation': presentation,
     '../utils/travelScope': scope,
-    '../services/travelTrips': { useTravelTrips: () => ({ trips: [], status: 'idle', refresh: async () => {}, loadTripDetail: async () => undefined, ...options.service }) },
+    '../services/travelTrips': { useTravelTrips: () => ({ trips: [], status: 'idle', refresh: async () => {}, refreshIfStale: async () => {}, loadTripDetail: async () => undefined, ...options.service }) },
     '../theme/trotterTheme': theme, '../../../theme/trotterTheme': theme,
     '../displayTextFit': { fitDisplayFont: (...args) => { options.fitArgs?.push(args); return args[1]; } },
     '../../../utils/mobileLayout': { getMobileVisualWidth: width => options.platform === 'web' ? Math.min(globalThis.innerWidth ?? width, 430) : width },

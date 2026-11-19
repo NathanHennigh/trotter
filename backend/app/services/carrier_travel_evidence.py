@@ -19,6 +19,7 @@ from email.utils import getaddresses
 from typing import Any
 
 from bs4 import BeautifulSoup
+from .bilt_booking import BILT_FLIGHT_SENDER, is_bilt_confirmation_metadata
 
 
 EVIDENCE_VERSION = 1
@@ -136,6 +137,8 @@ def _evidence(kind: str, carrier: str, sender: str, **values: Any) -> CarrierEvi
 
 def may_have_carrier_travel_evidence(subject: str, sender: str) -> bool:
     """Cheap candidate screen only, not authentication or ownership approval."""
+    if is_bilt_confirmation_metadata(subject=subject, sender=sender):
+        return True
     template = _TEMPLATES.get(_address(sender) or "")
     if not template or re.match(r"^\s*(?:re|fw|fwd)\s*:", subject or "", re.I):
         return False
@@ -152,12 +155,24 @@ def may_have_carrier_travel_evidence(subject: str, sender: str) -> bool:
 
 def extract_carrier_travel_evidence(
     *, subject: str, sender: str, recipient: str, text: str, html: str,
-    received_at: datetime | None = None, authentication_results: str = "",
+    received_at: datetime | None = None, authentication_results: str = "", include_booking_pair: bool = False,
 ) -> tuple[CarrierEvidence, ...]:
     """Return corroborating facts only; never create flights or infer ownership."""
     if not may_have_carrier_travel_evidence(subject, sender):
         return ()
     address = _address(sender)
+    if address == BILT_FLIGHT_SENDER:
+        if not include_booking_pair or not _address(recipient) or not _authenticated(authentication_results, address, "bilt.com"):
+            return ()
+        body = _normalized_body(text or "", html or "")
+        if not body:
+            return ()
+        counts = re.findall(r"\bPassengers?\s*[:#]?\s*(\d+)\b", body, re.I)
+        refs = {code.upper() for code in re.findall(r"\bAirline confirmation\s*[:#]?\s*([A-Z0-9]{6})\b", body, re.I)}
+        if set(counts) != {"1"} or len(refs) != 1 or not re.search(r"\b(?:Outbound|Inbound) Itinerary\b", body, re.I):
+            return ()
+        # The worker binds this to each complete original AA leg with the same reference.
+        return (_evidence("bilt_single_booking", "AA", address, pnr=refs.pop(), facts={"passengers": 1}),)
     template = _TEMPLATES.get(address or "")
     if not template or not _address(recipient) or re.match(r"^\s*(?:re|fw|fwd)\s*:", subject, re.I):
         return ()
@@ -227,6 +242,9 @@ def extract_carrier_travel_evidence(
             facts={"assertion": "booking_operational_notice"}),)
     name = next(iter(greetings))
     if len(name.split()) < 2:
+        if include_booking_pair and checkin and len(name) > 1:
+            return (_evidence("checkin_given_name", carrier, address, name=name, pnr=pnr,
+                facts={"assertion": "personally_addressed_checkin", "name_form": "given_name"}),)
         return ()
     return (_evidence("operational_personal", carrier, address, name=name, pnr=pnr,
         facts={"assertion": "personally_addressed_checkin" if checkin else "personally_addressed_disruption",

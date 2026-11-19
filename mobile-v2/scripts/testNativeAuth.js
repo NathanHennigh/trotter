@@ -39,7 +39,10 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
     },
     dismissAuthSession: () => calls.push({ kind: 'dismiss' }),
   };
-  const native = { Platform: { OS: os } };
+  const appListeners = new Set();
+  const native = { Platform: { OS: os }, AppState: { addEventListener: (_, fn) => {
+    appListeners.add(fn); return { remove: () => appListeners.delete(fn) };
+  } } };
   const secureStore = {
     WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'device-only',
     getItemAsync: secureRead || (async key => secure.get(key) ?? null),
@@ -99,6 +102,7 @@ function environment({ stored, plainStored = {}, os = 'android', fetcher, secure
   const travel = load('travelTrips');
   return {
     auth, travel, secure, plain, session, calls, globals, secureStore, popup,
+    foreground() { for (const fn of appListeners) fn('active'); },
     message(data, options = {}) { windowListeners.get('message')?.({ origin: globals.location.origin, source: popup, data, ...options }); },
     token: value => { nextToken = value; },
     browserResult: value => { browserResult = value; },
@@ -270,6 +274,30 @@ test('network errors show retry state without personal snapshot fallback', async
   assert.equal(env.render().status, 'error');
   assert.match(env.render().error, /connection/);
   assert.deepEqual(env.render().trips, []);
+  env.dispose();
+});
+
+test('foreground fetches scheduled results once, keeps cached trips offline and never starts a Gmail scan', async t => {
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const env = environment({ stored: JSON.stringify({token: 'saved', apiBaseUrl: 'https://api.example.invalid'}) });
+  env.render(); await flush(); env.render();
+  const tripReads = () => env.calls.filter(c => c.kind === 'fetch' && c.url.endsWith('/trips')).length;
+  const before = tripReads();
+  env.foreground(); await flush();
+  assert.equal(tripReads(), before);
+  now += 61_000;
+  env.fetcher(async url => response(200, url.endsWith('/auth/me') ? {user_id: 1, email: 'owner@example.invalid',
+    gmail_connected: true, gmail_last_scanned_at: '2026-11-18T20:00:00Z'} : []));
+  env.foreground(); env.foreground(); await flush();
+  assert.equal(tripReads(), before + 1);
+  assert.equal(env.render().lastGmailSyncedAt, '2026-11-18T20:00:00Z');
+  now += 61_000;
+  env.fetcher(async () => { throw new TypeError('offline'); });
+  env.foreground(); await flush();
+  assert.equal(env.render().status, 'idle');
+  assert.equal(env.render().error, undefined);
+  assert.equal(env.calls.some(c => c.kind === 'fetch' && c.url.includes('/ingest/')), false);
   env.dispose();
 });
 

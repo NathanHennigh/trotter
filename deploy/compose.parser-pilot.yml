@@ -1,5 +1,11 @@
 # Enable alongside the usual Compose files after both tagged images are built.
 services:
+  migrate:
+    image: ${TROTTER_MIGRATE_IMAGE:-trotter-backend:local}
+  beat:
+    image: ${TROTTER_BEAT_IMAGE:-trotter-backend:local}
+    environment:
+      TROTTER_GMAIL_SCHEDULER_QUEUE: flight_parser_pilot
   api:
     image: ${TROTTER_API_IMAGE:-${TROTTER_PARSER_ROUTER_IMAGE:?set the stable image with pilot routing}}
     environment:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from fastapi import HTTPException
+from sqlalchemy import and_, func, literal, or_
 from sqlalchemy.orm import Session
 
 from ..models import Account
@@ -18,6 +19,20 @@ READABLE_GMAIL_SCOPES = frozenset({
 
 def has_gmail_permission(scopes: str | None) -> bool:
     return bool(READABLE_GMAIL_SCOPES.intersection((scopes or "").split()))
+
+
+def connected_account_filter():
+    """Match connection_status in SQL before limiting either scheduler's batch."""
+    scopes = func.coalesce(Account.scopes, "")
+    for separator in ("\t", "\r", "\n", "\v", "\f"):
+        scopes = func.replace(scopes, separator, " ")
+    scopes = literal(" ") + scopes + literal(" ")
+    return and_(
+        Account.provider == "google",
+        or_(Account.gmail_connection_status.is_(None), Account.gmail_connection_status != "needs_reconnect"),
+        func.length(Account.refresh_token_encrypted) > 0,
+        or_(*(scopes.contains(f" {scope} ") for scope in sorted(READABLE_GMAIL_SCOPES))),
+    )
 
 
 def google_account(db: Session, user_id: int) -> Account | None:

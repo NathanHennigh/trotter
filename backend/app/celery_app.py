@@ -10,7 +10,7 @@ def create_celery_app() -> Celery:
 		"travelstrava",
 		broker=broker_url,
 		backend=backend_url,
-		include=["app.tasks.example", "app.tasks.import_tasks", "app.tasks.dream_location_tasks", "app.tasks.dream_enrichment_tasks", "app.tasks.planner_tasks", "app.tasks.account_cleanup_tasks", "app.tasks.travel_name_tasks", "app.tasks.gmail_history_tasks"],
+		include=["app.tasks.example", "app.tasks.import_tasks", "app.tasks.dream_location_tasks", "app.tasks.dream_enrichment_tasks", "app.tasks.planner_tasks", "app.tasks.account_cleanup_tasks", "app.tasks.travel_name_tasks", "app.tasks.gmail_history_tasks", "app.tasks.gmail_daily_tasks"],
 	)
 
 	app.conf.update(
@@ -27,6 +27,11 @@ def create_celery_app() -> Celery:
 			"app.tasks.dream_enrichment_tasks.*": {"queue": "dream_enrichment"},
 		},
 		beat_schedule={
+			"gmail-daily-new-mail": {
+				"task": "gmail.discover_daily",
+				"schedule": 900.0,
+				"options": {"queue": os.getenv("TROTTER_GMAIL_SCHEDULER_QUEUE", "celery"), "expires": 900},
+			},
 			"gmail-history-discovery": {
 				"task": "app.tasks.gmail_history_tasks.discover_history",
 				"schedule": 60.0,

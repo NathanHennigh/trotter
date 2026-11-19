@@ -26,7 +26,7 @@ from ..models import User, Account, AuthIdentity, AppleAuthChallenge
 from ..crypto import encrypt_refresh_token
 from ..auth import create_app_jwt, get_jwt_secret, get_user_from_jwt, verify_app_jwt
 from ..services.gmail_connection import GMAIL_READONLY_SCOPE, connection_status, google_account, has_gmail_permission
-from ..services.gmail_import_jobs import active_first_import, dispatch_import, reserve_first_import
+from ..services.gmail_import_jobs import active_mailbox_import, dispatch_import, last_mailbox_scan, reserve_first_import
 from ..services import apple_auth, auth_identities
 
 router   = APIRouter(prefix="/auth", tags=["auth"])
@@ -143,6 +143,7 @@ class UserInfo(BaseModel):
     gmail_connected: bool = False
     gmail_connection_status: str = "not_connected"
     gmail_import_job_id: str | None = None
+    gmail_last_scanned_at: datetime | None = None
     auth_providers: list[str] = Field(default_factory=list)
 
 
@@ -411,11 +412,13 @@ async def gmail_start(body: GmailStartRequest, current_user: User = Depends(get_
 @router.get("/me", response_model=UserInfo, response_model_exclude_unset=True)
 async def get_user_info(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     gmail_status = connection_status(google_account(db, current_user.id))
-    first_job = active_first_import(db, current_user.id) if gmail_status == "connected" else None
+    active_job = active_mailbox_import(db, current_user.id) if gmail_status == "connected" else None
+    last_scan = last_mailbox_scan(db, current_user.id) if gmail_status == "connected" else None
     return UserInfo(user_id=current_user.id, email=current_user.email, name=current_user.name,
                     gmail_connected=gmail_status == "connected", gmail_connection_status=gmail_status,
                     auth_providers=auth_identities.providers(db, current_user.id),
-                    **({"gmail_import_job_id": first_job.id} if first_job else {}))
+                    **({"gmail_import_job_id": active_job.id} if active_job else {}),
+                    **({"gmail_last_scanned_at": last_scan} if last_scan else {}))
 
 
 @router.post("/google/reauth/start")

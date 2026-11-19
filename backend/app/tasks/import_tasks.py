@@ -557,12 +557,25 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
         if not job:
             logger.error("SyncJob %s not found", job_id)
             return {"error": "job_not_found"}
+        daily = job.kind == "daily"
+        if daily and job.state in ("completed", "failed"):
+            return {"job_id": job_id, "state": job.state}
 
         try:
             import_guards.enter_context(user_import_lock(db.get_bind(), user_id))
         except Exception as exc:
             from app.services.import_lock import ImportAlreadyRunning
             from app.models import GmailHistoryState
+            if daily and isinstance(exc, ImportAlreadyRunning):
+                db.refresh(job)
+                if job.state != "pending":
+                    return {"job_id": job_id, "state": job.state}
+                # Another import won the mailbox. The scheduler retries from the
+                # last successful window. Never change the other worker's job.
+                job.state, job.error_message = "failed", "Mailbox busy. The daily check will retry."
+                job.updated_at = datetime.now(timezone.utc)
+                db.commit()
+                return {"job_id": job_id, "state": job.state}
             if history_only and isinstance(exc, ImportAlreadyRunning):
                 # The recent-mail lane has priority. Contention is ordinary
                 # scheduling, not a failed Gmail attempt; retain every checkpoint
@@ -598,6 +611,10 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             run_gmail_import.apply_async(kwargs={"job_id": job_id, "user_id": user_id, "limit": limit, "mode": mode}, countdown=3, retry=False)
             return {"job_id": job_id, "state": "pending", "waiting_for_history": True}
 
+        if daily:
+            db.refresh(job)
+            if job.state in ("completed", "failed"):
+                return {"job_id": job_id, "state": job.state}
         from app.services.booking_projection_context import projection_run
         import_guards.enter_context(projection_run(db, user_id))
         job.state = "running"
@@ -635,15 +652,20 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
         discovery_state = get_or_create_discovery_state(db, user_id)
         discovery_started_at = datetime.now(timezone.utc)
         learned_sender_domains = get_learned_sender_domains(db, user_id)
+        recent_window = {}
+        if daily:
+            from app.services.gmail_daily import daily_since
+            recent_window["recent_since"] = daily_since(db, job, discovery_state)
         discovery_plan = [] if reparse_only else build_discovery_plan(
             discovery_state,
             now=discovery_started_at,
             learned_sender_domains=learned_sender_domains,
+            **recent_window,
         )
         reporter_tiers = _ordered_tier_names(discovery_plan)
         if reparse_only:
             reporter_tiers = ["stale_reparse"]
-        elif "stale_reparse" not in reporter_tiers:
+        elif not daily and "stale_reparse" not in reporter_tiers:
             reporter_tiers.append("stale_reparse")
 
         reporter = GmailImportReporter(
@@ -663,7 +685,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
         db.commit()
 
         processed_msg_ids: set[str] = set()
-        force_reparse_ids = set(message_ids or ()) if exact_only else _env_message_ids("TROTTER_REPARSE_MESSAGE_IDS")
+        force_reparse_ids = set() if daily else (set(message_ids or ()) if exact_only else _env_message_ids("TROTTER_REPARSE_MESSAGE_IDS"))
         phase_labels = _tier_phase_labels(discovery_plan)
         current_tier: str | None = None
 
@@ -1144,7 +1166,11 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
                 reporter.count(candidate.tier, "candidate")
 
                 existing_msg = existing_by_id.get(msg_id)
-                skip_reason = _message_skip_reason(existing_msg, PARSER_VERSION, force_parse=msg_id in force_reparse_ids)
+                if daily and existing_msg:
+                    retry_pdf = "pdf_fetch_failed" in (existing_msg.parse_evidence or {}).get("document_errors", [])
+                    skip_reason = None if retry_pdf or existing_msg.status == MessageStatus.PENDING else "already_checked"
+                else:
+                    skip_reason = _message_skip_reason(existing_msg, PARSER_VERSION, force_parse=msg_id in force_reparse_ids)
                 if skip_reason:
                     reporter.count(candidate.tier, "db_skip")
                     reporter.count(candidate.tier, f"db_skip_{skip_reason}")
@@ -1297,7 +1323,7 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
 
         targeted_reparse_ids = _targeted_reparse_message_ids()
         stale_messages = []
-        if not limit_reached and not history_only and not exact_only:
+        if not daily and not limit_reached and not history_only and not exact_only:
             from app.services.flight_template_recovery import select_messages
             stale_messages = select_messages(db, user_id, limit=sync_limit or 25)
         if not limit_reached and reparse_only and not history_only and not exact_only:
@@ -1349,13 +1375,13 @@ def run_gmail_import(job_id: str, user_id: int, limit: int | None = None, mode: 
             process_payload(payload, stale_msg)
 
         sys.stdout.write("\n")
-        if not limit_reached and not failed_message_ids and not history_only and _count_remaining_stale_reparse_messages(
+        if not daily and not limit_reached and not failed_message_ids and not history_only and _count_remaining_stale_reparse_messages(
             db,
             user_id=user_id,
             parser_version=PARSER_VERSION,
         ) == 0:
             discovery_state.parser_version = PARSER_VERSION
-        if not limit_reached and not reparse_only and not failed_message_ids:
+        if not daily and not limit_reached and not reparse_only and not failed_message_ids:
             mark_discovery_plan_success(
                 discovery_state,
                 discovery_plan,
