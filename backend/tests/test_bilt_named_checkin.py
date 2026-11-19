@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from app.models import CarrierTravelEvidence, Segment, Trip
+from app.models import CarrierTravelEvidence, Segment, TravelInboxItem, Trip
+from app.services.travel_inbox import serialize_item
 from test_carrier_travel_recovery import account, process, source
 
 
@@ -27,6 +28,8 @@ def test_only_independent_matching_sources_assign_one_exact_leg(account, reverse
     ordered = [checkin, booking] if reverse else [booking, checkin]
     process(db, user, ordered[0])
     assert db.query(Segment).count() == 0
+    item = db.query(TravelInboxItem).one()
+    assert serialize_item(db, user.id, item)["status"] == "needs_review"
     process(db, user, ordered[1])
     segment = db.query(Segment).one()
     assert (segment.dep_airport, segment.arr_airport, segment.meta_json["ownership"]) == ("NAS", "JFK", "self")
@@ -35,6 +38,7 @@ def test_only_independent_matching_sources_assign_one_exact_leg(account, reverse
         process(db, user, value)
     assert [(s.id, s.trip_id) for s in db.query(Segment)] == [ids]
     assert db.query(Trip).count() == 1
+    assert serialize_item(db, user.id, item)["status"] == "belongs_to_you"
     assert {e.kind for e in db.query(CarrierTravelEvidence)} == {"bilt_single_booking", "checkin_given_name"}
 
 

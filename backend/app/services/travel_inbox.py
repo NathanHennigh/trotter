@@ -13,8 +13,8 @@ from hashlib import sha256
 import json
 import re
 
-from ..models import (BookingCancellation, BookingObservation, FlightShare, TravelInboxAssignment,
-                      TravelInboxEvidence, TravelInboxItem, User)
+from ..models import (BookingCancellation, BookingObservation, FlightShare, Segment, TravelInboxAssignment,
+                      TravelInboxEvidence, TravelInboxItem, Trip, User)
 from .booking_ledger import booking_code, event_time
 from .travel_inbox_identity import exact_airline_name_format_match, retained_passengers
 
@@ -295,6 +295,23 @@ def _cancellation_state(db, user_id, observation, *, passenger_name=None):
     return "needs_review" if uncertain else None
 
 
+def _carrier_proved_owner(db, user_id, source):
+    if not source or source.ownership != "unknown" or not source.pnr:
+        return False
+    segments = db.query(Segment).join(Trip).filter(
+        Trip.user_id == user_id, Segment.pnr == source.pnr,
+        Segment.dep_airport == source.dep_airport, Segment.arr_airport == source.arr_airport,
+    )
+    for segment in segments:
+        meta = segment.meta_json or {}
+        if (meta.get("ownership") == "self" and source.id in (meta.get("observation_ids") or [])
+                and source.source_message_id in (meta.get("source_message_ids") or [])
+                and any(isinstance(proof, dict) and proof.get("reason") == "carrier_travel_corroborated"
+                        and proof.get("carrier_evidence_ids") for proof in meta.get("passenger_evidence") or [])):
+            return True
+    return False
+
+
 def serialize_item(db, user_id, item, *, include_evidence=False, siblings=None):
     """Owner-only, passenger-specific read projection; never a transfer payload.
 
@@ -336,6 +353,9 @@ sharing will require separate authorization and an explicit payload allowlist.
     elif item.passenger_name and reason != "companion" and decision.get("ownership") == "self":
         status = "needs_review"
     elif not item.passenger_name and decision.get("ownership") == "self" and decision.get("status") == "active":
+        status = "belongs_to_you"
+    elif (not item.passenger_name and not decision and not facts.get("force_review")
+          and _carrier_proved_owner(db, user_id, latest) and db.get(TravelInboxAssignment, item.id) is None):
         status = "belongs_to_you"
     cancellation = _cancellation_state(db, user_id, latest, passenger_name=item.passenger_name) if latest else None
     if cancellation:
